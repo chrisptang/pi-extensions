@@ -21,7 +21,7 @@ test("declared generated entry preserves registration and partial lifecycle clea
 		const { default: extension } = await import("../dist/index.js");
 		const mock = createMockPi();
 		await extension(mock.pi);
-		mock.rawPi.setActiveTools(["goal_complete", "goal_blocked", "goal_wait"]);
+		mock.rawPi.setActiveTools(["goal_complete", "goal_blocked", "goal_wait", "goal_confirm"]);
 		assert.ok(mock.commands.has("goal"));
 		assert.ok(mock.events.has("session_start"));
 		assert.ok(mock.events.has("session_shutdown"));
@@ -39,6 +39,21 @@ test("declared generated entry preserves registration and partial lifecycle clea
 		});
 		await emit(mock.events, "session_start", { reason: "startup" }, context.ctx);
 		await mock.commands.get("goal")?.handler("generated goal", context.ctx);
+		assert.equal(
+			mock.entries.some((entry) => entry.customType === "goal-state"),
+			false,
+		);
+		const draft = mock.sentMessages.at(-1)?.message as { content: string };
+		const requestId = /Request ID: ([^\s]+)/.exec(draft.content)?.[1];
+		const confirm = mock.tools.find((tool) => tool.name === "goal_confirm");
+		assert.ok(confirm);
+		await (confirm.execute as (...args: unknown[]) => Promise<unknown>)(
+			"approval",
+			{ request_id: requestId, objective: "generated goal" },
+			undefined,
+			undefined,
+			context.ctx,
+		);
 		const activeAttempt = { session: sessionManager, group: "agent-workflow", busy: false };
 		mock.eventBus.emit("workflow:mutex:v1", activeAttempt);
 		assert.equal(activeAttempt.busy, true);

@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll } from "vitest";
+import { afterAll, vi } from "vitest";
 import { createMockContext, createMockPi } from "../../../../test/support.js";
+import * as clarification from "../../src/clarification.js";
 import goal from "../../src/goal.js";
+
+// Lifecycle suites start after approval; the real gate has its own unmocked suite.
+const registerClarification = clarification.registerGoalClarification;
 
 export const STALE_GOAL_TOOL_REASON =
 	"Blocked stale /goal tool call after the goal stopped or was interrupted.";
@@ -48,7 +52,19 @@ export function registerGoalWithSettingsPath(
 	pi.setActiveTools([
 		...new Set([...pi.getActiveTools(), "goal_complete", "goal_blocked", "goal_wait"]),
 	]);
-	goal(pi, { settingsPath: goalSettingsPath });
+	const registration = vi
+		.spyOn(clarification, "registerGoalClarification")
+		.mockImplementation((...args) => {
+			registerClarification(...args);
+			return async (objective, budget, ctx) => {
+				await args[2].startGoal(objective, budget, ctx);
+			};
+		});
+	try {
+		goal(pi, { settingsPath: goalSettingsPath });
+	} finally {
+		registration.mockRestore();
+	}
 }
 export type GoalTool = {
 	renderResult?: (

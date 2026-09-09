@@ -4,9 +4,27 @@
 
 ## Start, edit, and replace
 
-Starting a goal begins automatic work and resets its usage counters.
-Replacing an unfinished goal requires confirmation; cancelling keeps the previous goal.
-If kickoff delivery fails, a new goal is cleared or the previous Goal and tool policy are restored, including its prior active or waiting state.
+`/goal [--tokens <budget>] <objective>` first asks the AI to clarify the intended outcome, scope/non-goals, constraints, ordered steps, and acceptance criteria with you.
+It does not create a Goal or start automatic continuation during that discussion.
+When the scope is clear, the AI calls `goal_confirm` with the complete agreed objective; Pi's native confirmation dialog shows the objective, token budget, and any previous goal it will replace.
+Only an explicit Yes saves and starts that exact objective. A chat reply alone is not final approval.
+
+No or Escape leaves the draft unsaved and ends that tool turn; tell the AI what to revise before requesting another confirmation.
+A new objective command, pause, resume, edit, clear, session replacement, or shutdown invalidates the old request and cancels any open confirmation.
+Draft activation rights are memory-only and do not survive `/reload`, session reopening, or forks; run `/goal <objective>` again.
+Pi may retain the clarification conversation in ordinary session history, but it is not persisted Goal state or reusable approval.
+If compaction loses the request details, restart the command rather than treating the summary as approval.
+
+The command requires idle Pi and TUI or RPC confirmation; it rejects print/JSON mode and a missing `goal_confirm` allowlist entry before starting clarification.
+An old active or waiting Goal is paused before the replacement discussion, so it cannot automatically continue underneath clarification.
+Cancelling or failed delivery leaves that previous Goal paused, not automatically resumed; use `/goal resume` deliberately.
+Clarification itself may consume provider tokens but is outside the new Goal's budget baseline.
+The instruction not to implement before approval is a model guardrail, not a sandbox for arbitrary tools; the extension enforces approval before its own Goal activation.
+
+Menu starts and managed-run RPC do not use this new gate; edits and resumes also retain their existing behavior.
+Starting an approved goal begins automatic work and resets its usage counters.
+Menu replacement still requires confirmation and cancellation keeps its previous goal unchanged.
+If kickoff delivery reports failure, a new goal is cleared or the previous Goal and tool policy are restored. Pi's fire-and-forget message API cannot report every asynchronous delivery failure to the command.
 
 An edit preserves cumulative usage.
 An active edit starts a fresh safety epoch and invalidates stale turns; stopped goals retain their safety state until resumed.

@@ -245,6 +245,8 @@ export class GoalRuntime {
 	cancelledContinuationMarkers = new Map<string, string>();
 	claimedContinuationMarkers = new Map<string, string>();
 	pendingNonGoalInputs: PendingNonGoalInput[] = [];
+	/** Cancels the memory-only command draft and its owned confirmation UI. */
+	cancelClarification?: () => void;
 	menuGeneration = 0;
 	menuController = new AbortController();
 
@@ -314,12 +316,14 @@ export class GoalRuntime {
 	}
 
 	replaceMenuSession() {
+		this.cancelClarification?.();
 		this.menuGeneration += 1;
 		this.menuController.abort(new DOMException("Goal session replaced", "AbortError"));
 		this.menuController = new AbortController();
 	}
 
 	closeMenuSession() {
+		this.cancelClarification?.();
 		this.menuGeneration += 1;
 		this.menuController.abort(new DOMException("Goal session shut down", "AbortError"));
 	}

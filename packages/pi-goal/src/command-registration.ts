@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { registerGoalClarification } from "./clarification.js";
 import { completeGoalArguments, isRemovedQueueCommand, parseCommand } from "./command.js";
 import type { GoalCommandController } from "./commands.js";
 import { notifyTerminal, safeTerminalText } from "./errors.js";
@@ -19,6 +20,7 @@ export function registerGoalCommand(
 	commands: GoalCommandController,
 	options: GoalCommandRegistrationOptions = {},
 ) {
+	const clarifyGoal = registerGoalClarification(pi, runtime, commands);
 	const loadGoalManager = cachedModuleLoader(
 		options.loadGoalManager ?? (() => import("./menu.js")),
 	);
@@ -27,7 +29,7 @@ export function registerGoalCommand(
 	);
 
 	pi.registerCommand("goal", {
-		description: "Run a goal to completion: /goal [--tokens 100k] <goal_to_complete>",
+		description: "Clarify and confirm a goal: /goal [--tokens 100k] <goal_to_complete>",
 		getArgumentCompletions: (prefix) => completeGoalArguments(prefix),
 		handler: async (args, ctx) => {
 			if (runtime.hasLegacyQueueInterface() && isRemovedQueueCommand(args)) {
@@ -85,7 +87,7 @@ export function registerGoalCommand(
 					await commands.editGoal(result.objective ?? "", result.tokenBudget, ctx);
 					return;
 				case "start":
-					await commands.startGoal(result.objective ?? "", result.tokenBudget, ctx);
+					await clarifyGoal(result.objective ?? "", result.tokenBudget, ctx);
 					return;
 			}
 		},

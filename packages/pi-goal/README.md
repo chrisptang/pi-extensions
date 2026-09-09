@@ -8,7 +8,7 @@ Explicit completion, blocker, and wait tools give each managed run a clear stopp
 
 ## ✨ Features
 
-- Starts and manages one session goal through `/goal` and its status, pause, resume, edit, and clear routes.
+- Clarifies `/goal <objective>` with the user and requires explicit final approval before saving and starting it.
 - Continues exactly once from Pi's settled idle boundary after queued work, retries, and compaction have finished.
 - Waits quietly for a follow-up when transient provider retries are exhausted instead of terminally blocking the Goal.
 - Uses explicit `goal_complete`, `goal_blocked`, and `goal_wait` tools with stale-goal guards and evidence requirements.
@@ -48,8 +48,9 @@ Goal mode can start repeated paid model turns and edit the current workspace, so
 
 ## 🚀 Quick start
 
-Run `/goal <objective>` to start Goal mode, or run `/goal` to open the state-aware manager.
-Use the manager to review, pause, resume, edit, or clear the current goal.
+Run `/goal <objective>` while Pi is idle to clarify the goal with the AI.
+After you resolve any questions, `goal_confirm` displays the complete objective for final approval ✅; only approval saves and starts Goal mode.
+Run `/goal` to open the state-aware manager and review, pause, resume, edit, or clear the current goal.
 
 ## ⚙️ Settings
 
@@ -122,23 +123,26 @@ Guaranteed coexistence with Plan mode requires `@narumitw/pi-plan-mode` `0.52.0`
 | --- | --- |
 | `/goal` | Manage the current goal in TUI; report its summary in RPC. |
 | `/goal status` | Report the current goal and progress. |
-| `/goal [--tokens <budget>] <objective>` | Start automatic work, confirming replacement of an unfinished goal. |
+| `/goal [--tokens <budget>] <objective>` | Clarify the objective, then ask for final approval before saving and starting automatic work. |
 | `/goal edit [--tokens <budget>] <objective>` | Update the objective or budget without resetting cumulative usage. |
 | `/goal pause` | Pause an active goal and abort its current turn, preserving progress. |
 | `/goal resume` | Resume an eligible stopped goal or wake an active waiting goal. |
 | `/goal clear` (alias: `stop`) | Immediately clear the goal and pending continuation, not unrelated in-flight work. |
 
-All routes support TUI and RPC; bare `/goal` and `status` reject print and JSON modes, while direct mutation routes remain available.
+All routes support TUI and RPC. Objective starts require idle Pi, an active `goal_confirm` tool, and working UI confirmation; they reject print and JSON modes before saving or sending a prompt.
+Bare `/goal` and `status` also reject print and JSON modes; edit, pause, resume, and clear retain their existing headless behavior.
 Objectives are limited to 4,000 characters; reference a file for longer instructions.
 `--tokens` must precede the objective and accepts positive amounts such as `100k` or `1.5m`.
 `status`, `pause`, `resume`, and `clear`/`stop` reject trailing arguments; other text starts an objective.
 
 Starting, editing an active goal, or resuming can trigger paid model work; [token budgets](#-token-budgets-and-elapsed-time) are not dollar-cost caps.
 Direct Clear is immediate, while menu Clear requires confirmation.
-See [Managing goals](./docs/managing-goals.md) for safety-epoch resets, failed-delivery recovery, budget-limited edits, and migration from removed queue commands.
+Only the objective-bearing command has the clarification gate; menu starts, edits, resumes, and managed-run RPC keep their existing behavior.
+See [Managing goals](./docs/managing-goals.md) for draft cancellation, safety-epoch resets, failed-delivery recovery, budget-limited edits, and migration from removed queue commands.
 
 ## 🛠️ Tools
 
+- `goal_confirm` presents the complete clarified objective and preserved token budget in Pi's native confirmation dialog, then saves and activates it only if the user approves the matching pending request. It is independent of other question-tool extensions.
 - `goal_complete` records completion only for the exact active goal id, requires an evidence-based summary, and renders an accepted summary as Markdown in the TUI.
 - `goal_blocked` records a true repeated impasse with the exact goal id, reason, evidence, and repeated-turn count.
 - `goal_wait` pauses automatic continuation after the agent arranges an external wake source, with an optional bounded resume deadline.

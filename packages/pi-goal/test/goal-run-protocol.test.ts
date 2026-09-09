@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, test } from "vitest";
 import { createMockContext, createMockPi } from "../../../test/support.js";
-import goal from "../src/goal.js";
+import { registerGoalWithSettingsPath } from "./support/goal-fixture.js";
 
 const START_CHANNEL = "pi-goal:start";
 const CANCEL_CHANNEL = "pi-goal:cancel";
@@ -70,7 +70,7 @@ function registerGoal(mock: ReturnType<typeof createMockPi>, settingsPath = ENAB
 	mock.rawPi.setActiveTools([
 		...new Set([...mock.rawPi.getActiveTools(), "goal_complete", "goal_blocked", "goal_wait"]),
 	]);
-	goal(mock.pi, { settingsPath });
+	registerGoalWithSettingsPath(mock.pi, settingsPath);
 }
 
 function bindSession(mock: ReturnType<typeof createMockPi>, context = createMockContext()) {

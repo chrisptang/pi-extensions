@@ -114,6 +114,7 @@ function createFixture(
 			"goal_complete",
 			"goal_blocked",
 			"goal_wait",
+			"goal_confirm",
 			"plan_mode_question",
 			"plan_mode_complete",
 		],
@@ -124,6 +125,7 @@ function createFixture(
 			extensionTool("goal_complete"),
 			extensionTool("goal_blocked"),
 			extensionTool("goal_wait"),
+			extensionTool("goal_confirm"),
 			extensionTool("plan_mode_question"),
 			extensionTool("plan_mode_complete"),
 		],
@@ -190,7 +192,37 @@ async function startPlan(fixture: ReturnType<typeof createFixture>, prompt?: str
 }
 
 async function startGoal(fixture: ReturnType<typeof createFixture>, objective = "integrated goal") {
-	await fixture.mock.commands.get("goal")?.handler(objective, fixture.context.ctx);
+	await confirmGoalCommand(fixture.mock, fixture.context.ctx, objective);
+}
+
+async function confirmGoalCommand(
+	mock: ReturnType<typeof createMockPi>,
+	ctx: ReturnType<typeof createMockContext>["ctx"],
+	objective: string,
+) {
+	const before = mock.sentMessages.length;
+	await mock.commands.get("goal")?.handler(objective, ctx);
+	if (mock.sentMessages.length === before) return;
+	const message = mock.sentMessages.at(-1)?.message as { content: string };
+	const requestId = /Request ID: (\S+)/.exec(message.content)?.[1];
+	const tool = mock.tools.find((tool) => tool.name === "goal_confirm");
+	assert.ok(tool && requestId);
+	await (tool.execute as (...args: unknown[]) => Promise<unknown>)(
+		"confirm",
+		{ request_id: requestId, objective },
+		undefined,
+		undefined,
+		ctx,
+	);
+	await emitLifecycle(
+		mock.events,
+		"before_agent_start",
+		{
+			prompt: mock.sentUserMessages.at(-1)?.text ?? "",
+			systemPrompt: "base",
+		},
+		ctx,
+	);
 }
 
 function assertOneHolder(fixture: ReturnType<typeof createFixture>) {
@@ -400,6 +432,7 @@ for (const loadOrder of ["plan-first", "goal-first"] as const) {
 				"goal_complete",
 				"goal_blocked",
 				"goal_wait",
+				"goal_confirm",
 				"plan_mode_question",
 				"plan_mode_complete",
 			]);
@@ -414,6 +447,7 @@ for (const loadOrder of ["plan-first", "goal-first"] as const) {
 				"goal_complete",
 				"goal_blocked",
 				"goal_wait",
+				"goal_confirm",
 				"plan_mode_question",
 				"plan_mode_complete",
 			]);
@@ -452,12 +486,12 @@ test("standalone Plan and Goal preserve representative lifecycle behavior", asyn
 	assert.equal(planContext.statuses.get("plan-mode"), undefined);
 
 	const goalMock = createMockPi({
-		activeTools: ["read", "goal_complete", "goal_blocked", "goal_wait"],
+		activeTools: ["read", "goal_complete", "goal_blocked", "goal_wait", "goal_confirm"],
 	});
 	goal(goalMock.pi, { settingsPath: goalSettingsPath });
 	const goalContext = createMockContext({ mode: "tui", hasUI: true });
 	await emitLifecycle(goalMock.events, "session_start", { reason: "startup" }, goalContext.ctx);
-	await goalMock.commands.get("goal")?.handler("standalone Goal", goalContext.ctx);
+	await confirmGoalCommand(goalMock, goalContext.ctx, "standalone Goal");
 	assert.equal(goalStatus(goalMock.entries), "active");
 	await goalMock.commands.get("goal")?.handler("pause", goalContext.ctx);
 	assert.equal(goalStatus(goalMock.entries), "paused");
@@ -492,7 +526,15 @@ test("built generated entries share one Pi bus and stale invalidation removes bo
 		assert.ok(loaded.extensions.some((extension) => extension.tools.has("plan_mode_complete")));
 		assert.ok(loaded.extensions.some((extension) => extension.tools.has("goal_complete")));
 
-		let activeTools = ["read", "write", "goal_complete", "goal_blocked", "goal_wait"];
+		let activeTools = [
+			"read",
+			"write",
+			"goal_complete",
+			"goal_blocked",
+			"goal_wait",
+			"goal_confirm",
+		];
+		let clarificationPrompt = "";
 		const sessionManager = {
 			getSessionId: () => "generated-coexistence",
 			getSessionName: () => undefined,
@@ -509,7 +551,9 @@ test("built generated entries share one Pi bus and stale invalidation removes bo
 		);
 		runner.bindCore(
 			{
-				sendMessage: () => undefined,
+				sendMessage: (message: { content: string }) => {
+					clarificationPrompt = message.content;
+				},
 				sendUserMessage: () => undefined,
 				appendEntry: () => undefined,
 				setSessionName: () => undefined,
@@ -522,6 +566,7 @@ test("built generated entries share one Pi bus and stale invalidation removes bo
 					extensionTool("goal_complete"),
 					extensionTool("goal_blocked"),
 					extensionTool("goal_wait"),
+					extensionTool("goal_confirm"),
 				],
 				setActiveTools: (names: string[]) => {
 					activeTools = [...names];
@@ -547,9 +592,25 @@ test("built generated entries share one Pi bus and stale invalidation removes bo
 				getSystemPromptOptions: () => ({ cwd: root }),
 			} as never,
 		);
+		const ui = createMockContext({ mode: "tui", hasUI: true }).ctx as { ui: unknown };
+		runner.setUIContext(ui.ui as never, "tui");
 		const goalCommand = runner.getCommand("goal");
 		assert.ok(goalCommand);
 		await goalCommand.handler("generated shared-bus goal", runner.createCommandContext());
+		const confirm = loaded.extensions
+			.flatMap((extension) => [...extension.tools.values()])
+			.find((tool) => tool.definition.name === "goal_confirm");
+		assert.ok(confirm);
+		await confirm.definition.execute(
+			"confirm",
+			{
+				request_id: /Request ID: (\S+)/.exec(clarificationPrompt)?.[1],
+				objective: "generated shared-bus goal",
+			},
+			undefined,
+			undefined,
+			runner.createContext(),
+		);
 		const active = workflowAttempt(sessionManager);
 		eventBus.emit(WORKFLOW_MUTEX_CHANNEL, active);
 		assert.equal(active.busy, true);

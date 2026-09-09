@@ -41,8 +41,10 @@ export class GoalCommandController {
 		onActivated?: (goal: ActiveGoal) => void,
 		isActivationCurrent?: (goal: ActiveGoal) => boolean,
 		isRequestCurrent?: () => boolean,
+		confirmedReplacement?: ActiveGoal,
 	) {
 		if (isRequestCurrent && !isRequestCurrent()) return;
+		this.runtime.cancelClarification?.();
 		const validationError = validateObjective(objective);
 		if (validationError) {
 			notifyTerminal(ctx.ui, validationError, "warning");
@@ -56,7 +58,7 @@ export class GoalCommandController {
 			: this.runtime.legacyQueueState
 				? structuredClone(this.runtime.legacyQueueState)
 				: undefined;
-		if (existingGoal) {
+		if (existingGoal && existingGoal !== confirmedReplacement) {
 			const shouldReplace = await ctx.ui.confirm(
 				"Replace goal?",
 				`Current goal: ${safeGoalMenuText(existingGoal.text, 4_000)}\n\nNew goal: ${safeGoalMenuText(objective, 4_000)}`,
@@ -196,6 +198,7 @@ export class GoalCommandController {
 	}
 
 	pauseGoal(ctx: StatusContext) {
+		this.runtime.cancelClarification?.();
 		if (!this.runtime.activeGoal) {
 			notifyTerminal(ctx.ui, "No active goal.", "info");
 			return;
@@ -216,6 +219,7 @@ export class GoalCommandController {
 	}
 
 	async resumeGoal(ctx: StatusContext) {
+		this.runtime.cancelClarification?.();
 		if (!this.runtime.activeGoal) {
 			notifyTerminal(ctx.ui, "No active goal.", "info");
 			return;
@@ -345,6 +349,7 @@ export class GoalCommandController {
 	}
 
 	clearGoal(ctx: StatusContext) {
+		this.runtime.cancelClarification?.();
 		if (!this.runtime.activeGoal) {
 			const hadLegacyQueue = this.runtime.legacyQueueState !== undefined;
 			this.runtime.legacyQueueState = undefined;
@@ -368,6 +373,7 @@ export class GoalCommandController {
 	}
 
 	async editGoal(objective: string, tokenBudget: number | undefined, ctx: StatusContext) {
+		this.runtime.cancelClarification?.();
 		const validationError = validateObjective(objective);
 		if (validationError) {
 			notifyTerminal(ctx.ui, validationError, "warning");
