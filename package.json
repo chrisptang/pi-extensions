@@ -22,6 +22,7 @@
 			"./packages/pi-github-pr/src/index.ts",
 			"./packages/pi-goal/src/index.ts",
 			"./packages/pi-herdr/src/index.ts",
+			"./packages/pi-history/src/index.ts",
 			"./packages/pi-langfuse/src/index.ts",
 			"./packages/pi-lsp/src/index.ts",
 			"./packages/pi-model-alias/src/index.ts",
