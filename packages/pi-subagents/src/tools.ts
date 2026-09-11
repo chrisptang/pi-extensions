@@ -1,6 +1,9 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
+import type { AgentDefinition } from "./agent-definitions.js";
+import { type ModelCandidateLookup, resolveAgentModel } from "./agent-model.js";
+import { AgentRegistry } from "./agent-registry.js";
 import {
 	type BrokerInboundMessage,
 	MAX_IDENTIFIER_LENGTH,
@@ -12,6 +15,8 @@ import {
 import { modelVisibleJson, requireBoundedModelText } from "./model-output.js";
 import { resolveTimeoutMs } from "./process.js";
 import { type RuntimeDependencies, SubagentRuntime } from "./runtime.js";
+import type { SkillDefinition } from "./skill-definitions.js";
+import { SkillRegistry } from "./skill-registry.js";
 import {
 	CHILD_CORE_TOOL_NAMES,
 	DEFAULT_SUBAGENT_TOOLS,
@@ -20,42 +25,73 @@ import {
 } from "./types.js";
 
 const MAX_TASK_BYTES = 50 * 1024;
+const MAX_SKILL_ARGS_BYTES = 50 * 1024;
 const MAX_TOOLS = 64;
 const MESSAGE_TYPE = "pi-subagents-message";
 const CHILD_CORE_TOOL_SET = new Set<string>(CHILD_CORE_TOOL_NAMES);
 const THINKING_LEVEL_SET = new Set<string>(SUBAGENT_THINKING_LEVELS);
 
-const SpawnParameters = Type.Object(
-	{
-		task: Type.String({
-			description: "Self-contained task, constraints, and expected result. Maximum 50 KiB.",
-			maxLength: MAX_TASK_BYTES,
-		}),
-		tools: Type.Optional(
-			Type.Array(
-				StringEnum(CHILD_CORE_TOOL_NAMES, {
-					description: "Available Pi core child work tool name.",
-				}),
-				{
-					description:
-						"Child work tools. Defaults to read, grep, find, and ls. Communication tools are always added.",
-					maxItems: MAX_TOOLS,
-				},
-			),
-		),
-		thinkingLevel: Type.Optional(
-			StringEnum(SUBAGENT_THINKING_LEVELS, {
-				description: "Child thinking level. Defaults to the main agent's effective level.",
+/**
+ * Spawn's schema is built per registration so the `agent` parameter can carry the
+ * roster of available agent names. That roster is the only agent information the
+ * main session sees by default; bodies stay on disk until a job selects one.
+ */
+function buildSpawnParameters(agents: AgentRegistry) {
+	return Type.Object(
+		{
+			task: Type.String({
+				description: "Self-contained task, constraints, and expected result. Maximum 50 KiB.",
+				maxLength: MAX_TASK_BYTES,
 			}),
-		),
-		timeout: Type.Optional(
-			Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }),
-		),
-	},
-	{ additionalProperties: false },
-);
+			agent: Type.Optional(
+				Type.String({
+					description: agentParameterDescription(agents),
+					maxLength: MAX_IDENTIFIER_LENGTH,
+				}),
+			),
+			background: Type.Optional(
+				Type.Boolean({
+					description:
+						"Run without blocking and interrupt the main agent with the completion when the job ends. Defaults to false, where the caller collects the result with subagent_wait.",
+				}),
+			),
+			tools: Type.Optional(
+				Type.Array(
+					StringEnum(CHILD_CORE_TOOL_NAMES, {
+						description: "Available Pi core child work tool name.",
+					}),
+					{
+						description:
+							"Child work tools. Defaults to read, grep, find, and ls. Communication tools are always added.",
+						maxItems: MAX_TOOLS,
+					},
+				),
+			),
+			thinkingLevel: Type.Optional(
+				StringEnum(SUBAGENT_THINKING_LEVELS, {
+					description: "Child thinking level. Defaults to the main agent's effective level.",
+				}),
+			),
+			timeout: Type.Optional(
+				Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }),
+			),
+		},
+		{ additionalProperties: false },
+	);
+}
 
-type SpawnArguments = Static<typeof SpawnParameters>;
+/** Describe the loaded agents inline, so selecting one needs no extra tool call. */
+function agentParameterDescription(agents: AgentRegistry): string {
+	const roster = agents
+		.listPrimary()
+		.map((definition) => `${definition.name} (${definition.description})`)
+		.join("; ");
+	const base =
+		"Agent definition name. Its instructions become the child's system prompt and supply default tools, model, and thinking level.";
+	return roster ? `${base} Available: ${roster}.` : base;
+}
+
+type SpawnArguments = Static<ReturnType<typeof buildSpawnParameters>>;
 
 const InspectParameters = Type.Object({}, { additionalProperties: false });
 
@@ -114,10 +150,14 @@ type MainSendSelection =
 
 export interface SubagentToolsDependencies extends RuntimeDependencies {
 	createBroker?: (onMessage: (message: BrokerInboundMessage) => void) => MessageBroker;
+	agents?: AgentRegistry;
+	skills?: SkillRegistry;
 }
 
 export interface RegisteredSubagentTools {
 	runtime: SubagentRuntime;
+	agents: AgentRegistry;
+	skills: SkillRegistry;
 	startSession(): Promise<void>;
 	shutdown(): Promise<void>;
 }
@@ -129,6 +169,8 @@ export function registerSubagentTools(
 	const onMessage = (message: BrokerInboundMessage) => deliverMessage(pi, message);
 	const broker = dependencies.createBroker?.(onMessage) ?? new MessageBroker({ onMessage });
 	const runtime = new SubagentRuntime(pi, broker, dependencies);
+	const agents = dependencies.agents ?? new AgentRegistry();
+	const skills = dependencies.skills ?? new SkillRegistry();
 	let lifecycle = Promise.resolve();
 
 	pi.registerTool({
@@ -137,27 +179,81 @@ export function registerSubagentTools(
 		description:
 			"Use subagent_spawn to start one Pi subagent job and return its jobId immediately. The task defines the child's specialization, and the selected tools define its capabilities. The job may ask the main agent questions and publishes one asynchronous completion when terminal.",
 		promptSnippet: "Use subagent_spawn to start one Pi subagent job",
-		parameters: SpawnParameters,
+		parameters: buildSpawnParameters(agents),
 		prepareArguments: prepareSpawnArguments,
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			throwIfAborted(signal, "Subagent spawn was cancelled");
 			assertNotNested();
 			const task = validateTask(params.task, "subagent_spawn");
-			const tools = resolveTools(params.tools);
-			const model = resolveChildModel(ctx);
+			const agent = params.agent === undefined ? undefined : requireAgent(agents, params.agent);
+			// Explicit arguments always win over the agent definition's defaults.
+			const tools =
+				params.tools !== undefined
+					? resolveTools(params.tools)
+					: (agent?.tools ?? [...DEFAULT_SUBAGENT_TOOLS]);
+			const inherited = resolveChildModel(ctx);
+			const selected = agent
+				? resolveAgentModel(agent.model, modelLookup(ctx))
+				: { model: undefined, limitation: undefined };
 			const thinkingLevel = resolveThinkingLevel(
-				params.thinkingLevel ?? ctx.thinkingLevel ?? pi.getThinkingLevel(),
+				params.thinkingLevel ?? agent?.thinkingLevel ?? ctx.thinkingLevel ?? pi.getThinkingLevel(),
 			);
 			resolveTimeoutMs(params.timeout);
 			return toolResult(
 				runtime.start({
 					task,
 					tools,
-					model,
+					model: selected.model ?? inherited,
+					...(agent ? { agent: agent.name, systemPrompt: agent.body } : {}),
+					...(selected.limitation ? { limitations: [selected.limitation] } : {}),
 					thinkingLevel,
 					cwd: ctx.cwd,
 					timeout: params.timeout,
 					projectTrusted: ctx.isProjectTrusted(),
+					notifyOnCompletion: params.background === true,
+				}),
+			);
+		},
+	});
+
+	pi.registerTool({
+		name: "skill_run",
+		label: "Subagent · Skill",
+		description:
+			"Use skill_run to execute one skill inside a subagent instead of loading it into this session. The skill's instructions become the child's system prompt, so its step-by-step work and intermediate file reads stay out of the main context and only the final result returns. Pass the user's request for the skill through args. Returns a jobId immediately; collect the result with subagent_wait.",
+		promptSnippet: "Use skill_run to execute one skill inside a subagent",
+		parameters: buildSkillRunParameters(skills),
+		prepareArguments: prepareSkillRunArguments,
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			throwIfAborted(signal, "Skill run was cancelled");
+			assertNotNested();
+			const skill = requireSkill(skills, params.name);
+			const args = params.args === undefined ? undefined : validateSkillArgs(params.args);
+			// Explicit arguments always win over the skill's declared defaults.
+			const tools = params.tools !== undefined ? resolveTools(params.tools) : skillTools(skill);
+			const inherited = resolveChildModel(ctx);
+			const selected = resolveAgentModel(skill.model, modelLookup(ctx));
+			const thinkingLevel = resolveThinkingLevel(
+				params.thinkingLevel ?? skill.thinkingLevel ?? ctx.thinkingLevel ?? pi.getThinkingLevel(),
+			);
+			resolveTimeoutMs(params.timeout);
+			const limitations = [
+				...(selected.limitation ? [selected.limitation] : []),
+				...skillToolLimitations(skill, params.tools !== undefined),
+			];
+			return toolResult(
+				runtime.start({
+					task: buildSkillTask(skill, args),
+					tools,
+					model: selected.model ?? inherited,
+					agent: `skill:${skill.name}`,
+					systemPrompt: buildSkillSystemPrompt(skill),
+					...(limitations.length > 0 ? { limitations } : {}),
+					thinkingLevel,
+					cwd: ctx.cwd,
+					timeout: params.timeout,
+					projectTrusted: ctx.isProjectTrusted(),
+					notifyOnCompletion: params.background === true,
 				}),
 			);
 		},
@@ -234,6 +330,8 @@ export function registerSubagentTools(
 
 	return {
 		runtime,
+		agents,
+		skills,
 		startSession: () =>
 			queueLifecycle(async () => {
 				await runtime.shutdown();
@@ -316,17 +414,196 @@ function resolveChildModel(ctx: ExtensionContext): string {
 	if (!model)
 		throw new Error("Subagent model is unavailable because no main-agent model is selected.");
 	const provider = sanitizeTerminalText(model.provider).slice(0, 128);
-	if (ctx.modelRegistry.getRegisteredProviderIds().includes(model.provider)) {
+	if (isExtensionProvider(ctx, model.provider)) {
 		throw new Error(
 			`Subagent model provider ${provider} is unavailable because children disable parent extensions.`,
 		);
 	}
-	if (ctx.modelRegistry.getProviderAuthStatus(model.provider).source === "runtime") {
+	if (usesRuntimeCredentials(ctx, model.provider)) {
 		throw new Error(
 			`Subagent model provider ${provider} uses a process-local runtime API key. Configure stored or environment credentials that child processes can read.`,
 		);
 	}
 	return `${model.provider}/${model.id}`;
+}
+
+/**
+ * Whether a provider is usable from a child process. Children run with
+ * `--no-extensions` and their own credential lookup, so the same two rules that
+ * guard the inherited model also decide whether an agent's model can be honoured.
+ */
+function isChildUsableProvider(ctx: ExtensionContext, provider: string): boolean {
+	return !isExtensionProvider(ctx, provider) && !usesRuntimeCredentials(ctx, provider);
+}
+
+function isExtensionProvider(ctx: ExtensionContext, provider: string): boolean {
+	return ctx.modelRegistry.getRegisteredProviderIds().includes(provider);
+}
+
+function usesRuntimeCredentials(ctx: ExtensionContext, provider: string): boolean {
+	return ctx.modelRegistry.getProviderAuthStatus(provider).source === "runtime";
+}
+
+function modelLookup(ctx: ExtensionContext): ModelCandidateLookup {
+	return {
+		isUsable(provider, modelId) {
+			if (!isChildUsableProvider(ctx, provider)) return false;
+			const model = ctx.modelRegistry.find(provider, modelId);
+			// A registered model without credentials would fail on the child's first request.
+			return model !== undefined && ctx.modelRegistry.hasConfiguredAuth(model);
+		},
+	};
+}
+
+function requireAgent(agents: AgentRegistry, requested: string): AgentDefinition {
+	const agent = agents.find(requested);
+	if (agent) return agent;
+	const known = agents.knownNames();
+	const available = known.length > 0 ? known.join(", ") : "none";
+	throw new Error(
+		`Unknown subagent agent: ${sanitizeTerminalText(requested).slice(0, 128) || "(empty)"}. Available: ${available}.`,
+	);
+}
+
+/**
+ * `skill_run`'s schema is built per registration so the `name` parameter can
+ * carry the roster of primary-tier skills, the same way spawn carries agents.
+ */
+function buildSkillRunParameters(skills: SkillRegistry) {
+	return Type.Object(
+		{
+			name: Type.String({
+				description: skillParameterDescription(skills),
+				maxLength: MAX_IDENTIFIER_LENGTH,
+			}),
+			args: Type.Optional(
+				Type.String({
+					description:
+						"The user's request for this skill, in their own words, plus any context the skill needs. The child cannot see this conversation, so state the objective in full. Maximum 50 KiB.",
+					maxLength: MAX_SKILL_ARGS_BYTES,
+				}),
+			),
+			background: Type.Optional(
+				Type.Boolean({
+					description:
+						"Run without blocking and interrupt the main agent with the completion when the job ends. Defaults to false, where the caller collects the result with subagent_wait.",
+				}),
+			),
+			tools: Type.Optional(
+				Type.Array(
+					StringEnum(CHILD_CORE_TOOL_NAMES, {
+						description: "Available Pi core child work tool name.",
+					}),
+					{
+						description:
+							"Override the child's work tools. Defaults to the skill's own allowed-tools, or to read, grep, find, and ls when it declares none.",
+						maxItems: MAX_TOOLS,
+					},
+				),
+			),
+			thinkingLevel: Type.Optional(
+				StringEnum(SUBAGENT_THINKING_LEVELS, {
+					description: "Child thinking level. Defaults to the skill's, then the main agent's.",
+				}),
+			),
+			timeout: Type.Optional(
+				Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }),
+			),
+		},
+		{ additionalProperties: false },
+	);
+}
+
+/** Describe the loaded skills inline, so selecting one needs no extra tool call. */
+function skillParameterDescription(skills: SkillRegistry): string {
+	const roster = skills
+		.listPrimary()
+		.map((definition) => `${definition.name} (${definition.description})`)
+		.join("; ");
+	const base =
+		"Skill name. Its SKILL.md becomes the child's system prompt and supplies default tools, model, and thinking level. A skill installed outside the advertised set can still be named directly.";
+	return roster ? `${base} Available: ${roster}.` : base;
+}
+
+type SkillRunArguments = Static<ReturnType<typeof buildSkillRunParameters>>;
+
+function requireSkill(skills: SkillRegistry, requested: string): SkillDefinition {
+	const name = requiredString(requested, "name");
+	const skill = skills.find(name);
+	if (skill) return skill;
+	const known = skills.knownNames();
+	const available = known.length > 0 ? known.join(", ") : "none";
+	throw new Error(
+		`Unknown skill: ${sanitizeTerminalText(name).slice(0, 128) || "(empty)"}. Available: ${available}.`,
+	);
+}
+
+function validateSkillArgs(value: string): string {
+	const args = requiredString(value, "args");
+	if (args.includes("\0")) throw new Error("skill_run args must not contain NUL bytes.");
+	if (Buffer.byteLength(args, "utf8") > MAX_SKILL_ARGS_BYTES) {
+		throw new Error(`skill_run args must be at most ${MAX_SKILL_ARGS_BYTES} UTF-8 bytes.`);
+	}
+	return args;
+}
+
+/**
+ * A skill that declares an empty or entirely unsupported `allowed-tools` would
+ * otherwise start a child with no way to read its own reference files, so the
+ * read-only default stands in unless the skill named at least one usable tool.
+ */
+function skillTools(skill: SkillDefinition): string[] {
+	return skill.tools.length > 0 ? [...skill.tools] : [...DEFAULT_SUBAGENT_TOOLS];
+}
+
+/**
+ * Report tool requests that could not be honoured. These are recorded as job
+ * limitations rather than raised as errors, because a skill written for another
+ * harness routinely names tools Pi children do not have, and the rest of the
+ * skill usually still runs.
+ */
+function skillToolLimitations(skill: SkillDefinition, overridden: boolean): string[] {
+	if (overridden || skill.unsupportedTools.length === 0) return [];
+	return [
+		`Skill ${skill.name} requests tools unavailable to Pi subagents: ${skill.unsupportedTools.join(", ")}. They were dropped.`,
+	];
+}
+
+/**
+ * The child receives the skill body as its system prompt, matching how an agent
+ * definition specializes a child. The location lines matter because a child runs
+ * with `--no-skills`: nothing else tells it where its own scripts and references
+ * live, and relative paths in the body would otherwise resolve against the cwd.
+ */
+function buildSkillSystemPrompt(skill: SkillDefinition): string {
+	return [
+		`You are executing the "${skill.name}" skill as a subagent.`,
+		`The skill directory is ${skill.baseDir}.`,
+		"Resolve every relative path in the instructions below against that directory and use the absolute path in tool calls.",
+		"",
+		skill.body,
+	].join("\n");
+}
+
+/**
+ * The task text carries only the caller's request. Keeping it separate from the
+ * system prompt preserves the skill-instructions / user-request boundary the
+ * skill was written against.
+ */
+function buildSkillTask(skill: SkillDefinition, args: string | undefined): string {
+	if (!args) {
+		return `Carry out the ${skill.name} skill as specified in your system prompt, and report the result.`;
+	}
+	return [
+		"Carry out your skill instructions for the following request, and report the result.",
+		"",
+		"Request:",
+		args,
+	].join("\n");
+}
+
+function prepareSkillRunArguments(args: unknown): SkillRunArguments {
+	return prepareTimeoutArguments(args) as SkillRunArguments;
 }
 
 function resolveThinkingLevel(value: unknown): SubagentThinkingLevel {

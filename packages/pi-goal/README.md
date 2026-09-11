@@ -128,6 +128,7 @@ Guaranteed coexistence with Plan mode requires `@narumitw/pi-plan-mode` `0.52.0`
 | `/goal pause` | Pause an active goal and abort its current turn, preserving progress. |
 | `/goal resume` | Resume an eligible stopped goal or wake an active waiting goal. |
 | `/goal clear` (alias: `stop`) | Immediately clear the goal and pending continuation, not unrelated in-flight work. |
+| `/goal --list` (aliases: `-l`, `list`) | List archived goals recorded under `.pi/pi-goals`. |
 
 All routes support TUI and RPC. Objective starts require idle Pi, an active `goal_confirm` tool, and working UI confirmation; they reject print and JSON modes before saving or sending a prompt.
 Bare `/goal` and `status` also reject print and JSON modes; edit, pause, resume, and clear retain their existing headless behavior.
@@ -170,6 +171,16 @@ Affected users receive a warning that recommends starting one merged objective w
 
 Older versions wrote unfinished goals to `~/.pi/agent/pi-goal-state.json` keyed by working directory.
 This version no longer reads that global file, and `/goal clear` removes any legacy entry for the current working directory.
+
+## 📁 Goal archive
+
+Every confirmed goal is also recorded as Markdown under `.pi/pi-goals/{date}-{slug}.md` in the working directory, so a later session can pick the objective up by hand.
+The snapshot is written once the user approves `goal_confirm`; a rejected or cancelled draft writes nothing.
+Frontmatter (`status`, `iteration`, `tokens_used`, `updated_at`, …) is refreshed on every later state change, while the body is left untouched so hand-written notes survive.
+Filenames are derived from the objective and suffixed (`-2`, `-3`, …) only when a different goal would collide; every frontmatter value is a quoted scalar, so an objective cannot forge a key.
+
+The archive is a record, not an activation source: `/goal --list` shows what was captured, and picking one up still goes through `/goal <objective>` so clarification and `goal_confirm` approval continue to gate activation.
+If the file cannot be written, the goal still activates and the failure is reported as a warning.
 
 ## 📊 Statusline states
 

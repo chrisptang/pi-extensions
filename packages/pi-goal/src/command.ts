@@ -12,7 +12,7 @@ const REMOVED_QUEUE_COMMANDS = new Set([
 ]);
 
 export interface CommandResult {
-	kind: "start" | "pause" | "resume" | "clear" | "show" | "edit";
+	kind: "start" | "pause" | "resume" | "clear" | "show" | "edit" | "list";
 	objective?: string;
 	tokenBudget?: number;
 }
@@ -34,6 +34,7 @@ const GOAL_ARGUMENT_COMPLETIONS: readonly GoalArgumentCompletion[] = [
 	{ value: "clear", label: "clear", description: "Clear the current goal" },
 	{ value: "edit", label: "edit", description: "Edit the current goal objective" },
 	{ value: "status", label: "status", description: "Show the current goal" },
+	{ value: "--list", label: "--list", description: "List archived goals in .pi/pi-goals" },
 	TOKEN_BUDGET_COMPLETION,
 ];
 
@@ -70,6 +71,8 @@ export function parseCommand(args: string): CommandResult | string {
 	if (first === "clear" || first === "stop")
 		return rest.length === 0 ? { kind: "clear" } : "Usage: /goal clear";
 	if (first === "status") return rest.length === 0 ? { kind: "show" } : "Usage: /goal status";
+	if (first === "--list" || first === "-l" || first === "list")
+		return rest.length === 0 ? { kind: "list" } : "Usage: /goal --list";
 	if (first === "edit") return parseObjective("edit", rest);
 
 	return parseObjective("start", tokens);

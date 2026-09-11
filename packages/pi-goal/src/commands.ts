@@ -1,6 +1,8 @@
+import { relative } from "node:path";
 import { currentTokenTotal, formatTokenCount } from "./accounting.js";
 import { validateObjective } from "./command.js";
 import { notifyTerminal, safeGoalMenuText } from "./errors.js";
+import { GOAL_ARCHIVE_DIRECTORY, type GoalArchiveEntry, listGoalArchive } from "./goal-archive.js";
 import type { ActiveGoal } from "./persistence.js";
 import {
 	buildGoalPrompt,
@@ -512,6 +514,38 @@ export class GoalCommandController {
 		this.reportGoalStatus(
 			ctx,
 			goalSummary(this.runtime.activeGoal, this.runtime.settings.continuationLimits.automaticTurns),
+		);
+	}
+
+	/** Lists the markdown records under `.pi/pi-goals`. Reading one back stays a manual step. */
+	listGoals(ctx: StatusContext) {
+		let entries: GoalArchiveEntry[];
+		try {
+			entries = listGoalArchive(ctx.cwd);
+		} catch (error) {
+			this.reportGoalStatus(ctx, `Could not read ${GOAL_ARCHIVE_DIRECTORY}: ${formatError(error)}`);
+			return;
+		}
+		if (entries.length === 0) {
+			this.reportGoalStatus(
+				ctx,
+				`No archived goals in ${GOAL_ARCHIVE_DIRECTORY}. Confirmed goals are recorded there automatically.`,
+			);
+			return;
+		}
+		const lines = entries.map((entry) => {
+			const objective = safeGoalMenuText(entry.objective ?? "(objective missing)", 120);
+			const status = entry.status ?? "unknown";
+			const updated = entry.updatedAt?.slice(0, 10) ?? "unknown";
+			return `${relative(ctx.cwd, entry.file)}\n  ${status} · updated ${updated} · ${objective}`;
+		});
+		this.reportGoalStatus(
+			ctx,
+			[
+				`${entries.length} archived ${entries.length === 1 ? "goal" : "goals"} in ${GOAL_ARCHIVE_DIRECTORY}:`,
+				...lines,
+				"Open a file and pass its objective to /goal <objective> to pick it up again.",
+			].join("\n"),
 		);
 	}
 

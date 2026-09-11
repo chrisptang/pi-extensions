@@ -37,7 +37,7 @@ import {
 test("completeGoalArguments suggests /goal subcommands and token options", () => {
 	assert.deepEqual(
 		completeGoalArguments("")?.map((item) => item.label),
-		["pause", "resume", "clear", "edit", "status", "--tokens"],
+		["pause", "resume", "clear", "edit", "status", "--list", "--tokens"],
 	);
 	assert.deepEqual(
 		completeGoalArguments("")?.map((item) => item.description),
@@ -47,6 +47,7 @@ test("completeGoalArguments suggests /goal subcommands and token options", () =>
 			"Clear the current goal",
 			"Edit the current goal objective",
 			"Show the current goal",
+			"List archived goals in .pi/pi-goals",
 			"Set a token budget before the goal",
 		],
 	);

@@ -64,6 +64,8 @@ export interface ChildRequest {
 	task: string;
 	tools: string[];
 	model: string;
+	/** Agent definition body appended to the child's system prompt. */
+	systemPrompt?: string;
 	thinkingLevel: SubagentThinkingLevel;
 	cwd: string;
 	timeout?: number;
@@ -75,6 +77,8 @@ export interface ChildRequest {
 
 export interface JobSummary {
 	jobId: string;
+	/** Agent definition the job runs, when one was selected. */
+	agent?: string;
 	state: SubagentJobState;
 	createdAt: number;
 	startedAt?: number;

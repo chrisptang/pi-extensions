@@ -29,7 +29,8 @@ export function registerGoalCommand(
 	);
 
 	pi.registerCommand("goal", {
-		description: "Clarify and confirm a goal: /goal [--tokens 100k] <goal_to_complete>",
+		description:
+			"Clarify and confirm a goal: /goal [--tokens 100k] <goal_to_complete>; /goal --list shows archived goals",
 		getArgumentCompletions: (prefix) => completeGoalArguments(prefix),
 		handler: async (args, ctx) => {
 			if (runtime.hasLegacyQueueInterface() && isRemovedQueueCommand(args)) {
@@ -73,6 +74,9 @@ export function registerGoalCommand(
 			switch (result.kind) {
 				case "show":
 					commands.showGoal(ctx);
+					return;
+				case "list":
+					commands.listGoals(ctx);
 					return;
 				case "pause":
 					commands.pauseGoal(ctx);

@@ -99,6 +99,9 @@ export function buildPiArgs(request: ChildRequest): string[] {
 	];
 	const tools = [...new Set([...request.tools, ...CHILD_COMMUNICATION_TOOL_NAMES])];
 	args.push("--tools", tools.join(","));
+	// The agent definition specializes the child through its system prompt rather
+	// than the task, so the task text stays free for the caller's own instructions.
+	if (request.systemPrompt) args.push("--append-system-prompt", request.systemPrompt);
 	return args;
 }
 

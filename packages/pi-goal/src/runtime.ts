@@ -7,6 +7,7 @@ import {
 	updateGoalUsage,
 } from "./accounting.js";
 import { formatError, notifyTerminal, safeGoalMenuText, truncateNotification } from "./errors.js";
+import { updateGoalArchiveFrontmatter, writeGoalArchiveSnapshot } from "./goal-archive.js";
 import {
 	createGoalContextContract,
 	createInactiveGoalContextContract,
@@ -247,6 +248,8 @@ export class GoalRuntime {
 	pendingNonGoalInputs: PendingNonGoalInput[] = [];
 	/** Cancels the memory-only command draft and its owned confirmation UI. */
 	cancelClarification?: () => void;
+	/** Working directory of the confirmed goal's markdown archive, if one was written. */
+	private archiveCwd?: string;
 	menuGeneration = 0;
 	menuController = new AbortController();
 
@@ -1214,11 +1217,38 @@ export class GoalRuntime {
 		return undefined;
 	}
 
+	/**
+	 * Records the confirmed objective as `.pi/pi-goals/{date}-{slug}.md` so the next session
+	 * can pick it up by hand. The archive is a record only: it never activates a goal, and a
+	 * write failure must not fail activation.
+	 */
+	archiveConfirmedGoal(cwd: string, goal: ActiveGoal) {
+		this.archiveCwd = cwd;
+		try {
+			return writeGoalArchiveSnapshot(cwd, goal);
+		} catch (error) {
+			this.archiveCwd = undefined;
+			return { error: formatError(error) };
+		}
+	}
+
+	/** Rewrites frontmatter for an already-archived goal; body notes are preserved. */
+	private refreshGoalArchive(goal: ActiveGoal) {
+		const cwd = this.archiveCwd;
+		if (cwd === undefined) return;
+		try {
+			updateGoalArchiveFrontmatter(cwd, goal);
+		} catch {
+			// A record that cannot be refreshed must never interrupt the goal itself.
+		}
+	}
+
 	persistGoal(goal: ActiveGoal) {
 		if (!isTerminalGoalStatus(goal.status) || this.terminalDetails?.goalId !== goal.id) {
 			this.clearTerminalDetails();
 		}
 		this.pi.appendEntry(GOAL_STATE_ENTRY_TYPE, serializeGoalState(goal));
+		this.refreshGoalArchive(goal);
 		this.publishGoalState(
 			buildGoalStateSnapshot(goal, this.terminalDetails?.summary, this.terminalDetails?.reason),
 		);

@@ -65,3 +65,18 @@ test("edit autocomplete exposes token budget for updated objective", () => {
 		},
 	]);
 });
+
+test("--list, -l and list all parse to the archive listing", () => {
+	for (const input of ["--list", "-l", "list", "  --list  "]) {
+		assert.deepEqual(parseCommand(input), { kind: "list" });
+	}
+	assert.equal(parseCommand("--list extra"), "Usage: /goal --list");
+});
+
+test("--list is offered as an argument completion", () => {
+	const completions = completeGoalArguments("--l");
+	assert.deepEqual(
+		completions?.map((item) => item.label),
+		["--list"],
+	);
+});

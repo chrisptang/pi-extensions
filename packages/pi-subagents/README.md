@@ -8,6 +8,10 @@ Pi Subagents runs Pi jobs in separate child processes and supports authenticated
 
 - Runs each job in an isolated Pi child process and returns its job ID immediately.
 - Uses the task to define the child's specialization and the tool list to limit its capabilities.
+- Ships two built-in agent definitions, `explorer` and `builder`, seeded into `~/.pi/agent/agents/` on first load.
+- Runs a skill inside a subagent through `skill_run`, keeping its instructions and intermediate work out of the main session.
+- Advertises only that directory's definitions, and resolves any other name on demand from `~/.claude/agents/` and `~/.agents/agents/`.
+- Runs a job blocking or in the background, where a background completion interrupts the main agent with the result.
 - Defaults work tools to `read`, `grep`, `find`, and `ls`.
 - Inherits the main agent's effective model and uses its thinking level by default.
 - Gives the main agent and every child a context-specific `subagent_send` contract for bidirectional requests and responses.
@@ -73,11 +77,12 @@ The widget omits the fixed communication tools, disappears when no jobs remain a
 
 ## 🛠️ Tools
 
-The main Pi session exposes five fixed tools:
+The main Pi session exposes six fixed tools and the `/agents` and `/skills` commands:
 
 | Tool | Parameters | Purpose |
 | --- | --- | --- |
-| `subagent_spawn` | `task`, optional `tools`, `thinkingLevel`, `timeout` | Start one subagent job and return its `jobId`. |
+| `subagent_spawn` | `task`, optional `agent`, `background`, `tools`, `thinkingLevel`, `timeout` | Start one subagent job and return its `jobId`. |
+| `skill_run` | `name`, optional `args`, `background`, `tools`, `thinkingLevel`, `timeout` | Run one skill inside a subagent and return its `jobId`. |
 | `subagent_inspect` | none | List privacy-filtered retained-job metadata. |
 | `subagent_cancel` | `jobId` | Idempotently cancel one queued or running job. |
 | `subagent_wait` | `jobId`, optional `timeout` | Wait for a job or return early for an incoming child message. |
@@ -131,12 +136,125 @@ Adding `bash` or `powershell` grants unrestricted command execution and can also
 
 The optional `thinkingLevel` accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
 Omitting `thinkingLevel` captures the main agent's effective level when `subagent_spawn` executes.
-The child inherits the main agent's effective provider and model when `subagent_spawn` executes.
+The child inherits the main agent's effective provider and model when `subagent_spawn` executes, unless an agent definition names a model.
 
 Spawn rejects providers registered by a parent extension because child processes disable unrelated extensions.
 Spawn also rejects process-local runtime API keys, including a parent-only `--api-key` value.
 Use stored or environment credentials that child processes can read.
-The extension does not expose a per-job model override.
+
+### Blocking and background jobs
+
+Both modes start the same way and return a `jobId` immediately.
+
+- The default blocking mode expects the caller to collect the result with `subagent_wait`.
+- `background: true` interrupts the main agent with the completion and starts a turn, so the result is acted on without polling.
+
+Use background for work whose result is not needed to continue the current step, and blocking when the next step depends on the answer.
+
+## 🧬 Agent definitions
+
+An agent definition is a Markdown file with YAML frontmatter that names a reusable child specialization:
+
+```markdown
+---
+name: explorer
+description: Read-only codebase exploration. Returns a structured summary with file paths and line numbers.
+model: haiku
+tools: read, grep, find, ls
+---
+
+You are a read-only codebase explorer.
+```
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `name` | No | Lookup name; defaults to the filename. Lower-cased, `[a-z0-9][a-z0-9_-]*`. |
+| `description` | Yes | One line, up to 200 characters, shown in `/agents` and in the `agent` parameter. |
+| `model` | No | Alias or `provider/modelId`, resolved by the parent at spawn time. |
+| `tools` | No | Default work tools for this agent. |
+| `thinkingLevel` | No | Default thinking level for this agent. |
+
+The body, up to 50 KiB, becomes the child's system prompt, so `task` stays free for the caller's own instructions.
+
+### Where definitions are loaded from
+
+Only `~/.pi/agent/agents/` is loaded into the main session, and only its names and descriptions, not the bodies.
+That keeps the context cost at roughly two lines per agent, which matters for models that struggle to drive a large subagent roster.
+
+When a spawn names an agent that is not there, the extension scans, in order:
+
+1. `~/.pi/agent/agents/`
+2. `~/.claude/agents/`
+3. `~/.agents/agents/`
+
+The first directory defining a name wins, and matching is case-insensitive.
+So a skill can name an agent the session never advertised, without every definition on the machine costing main-session context.
+`PI_CODING_AGENT_DIR` overrides the Pi directory's location.
+
+### Built-in agents
+
+On first load the extension writes `explorer.md` and `builder.md` into `~/.pi/agent/agents/`.
+
+| Agent | Model | Tools | Purpose |
+| --- | --- | --- | --- |
+| `explorer` | `haiku` | `read`, `grep`, `find`, `ls` | Read-only exploration that reports findings with `path:line` citations. |
+| `builder` | `sonnet` | `read`, `grep`, `find`, `ls`, `edit`, `write`, `bash` | Implements one specified change and verifies it before reporting. |
+
+An existing file is never overwritten, so editing `explorer.md` makes it yours and a later upgrade keeps your edits.
+Delete a file to opt out of a built-in; it is reseeded only if the file is gone on the next load.
+
+The `model` field is resolved against `~/.pi/agent/model-alias.json` when present, and otherwise treated as `provider/modelId`.
+An alias that does not resolve to a usable model falls back to the main agent's model and is reported as a job limitation rather than failing the spawn.
+`model: inherit` is not such a case: it states explicitly what omitting the field does, so it keeps the main agent's model and reports nothing.
+
+### `/agents`
+
+`/agents` lists the definitions in `~/.pi/agent/agents/` with their descriptions and any parse diagnostics.
+It never lists the fallback directories, so it reflects exactly what the session advertises.
+
+## 🧩 Running skills in a subagent
+
+A skill invoked the usual way is expanded into the main session, so its instructions, its intermediate file reads, and every step of its work accumulate there.
+`skill_run` runs the skill in a child instead, and only the final result comes back.
+
+```text
+skill_run(name: "xm-cr-universal", args: "Review the current branch against main.")
+```
+
+The skill's `SKILL.md` body becomes the child's system prompt, and `args` carries the caller's request.
+Keeping them apart preserves the instruction/request boundary the skill was written against.
+Because the body travels through `--append-system-prompt` rather than the 50 KiB `task`, a skill far larger than that bound runs unchanged.
+
+Children run with `--no-skills`, so a child cannot load the skill itself.
+Its system prompt therefore names the skill's directory and requires relative paths to resolve against it, which keeps `references/` and `scripts/` reachable for multi-file skills.
+A child needs a read tool to follow those references; the default tool set provides one.
+
+### Skills written for Claude Code
+
+Such skills are read as-is.
+`allowed-tools` is translated into Pi's child work tools, accepting list and comma-separated forms and the scoped `Bash(git:*)` spelling, with `Glob` mapping to `find`.
+
+Names with no Pi equivalent — `Task(...)`, `Skill(...)`, `AskUserQuestion`, and MCP tools — cannot grant a child any capability.
+They are dropped and reported as job limitations rather than failing the run, because a skill written for another harness routinely names them while the rest of it still runs.
+A skill left with no usable tool falls back to the read-only default so it can still read its own references.
+
+A skill that delegates its real work through `Task(...)` is the one case to check before relying on it: the child cannot spawn nested subagents, so only the parts the skill performs directly will run.
+
+`model: inherit` keeps the main agent's model, exactly as omitting the field does, and is not reported as a limitation. Any other `model` resolves like an agent definition's.
+
+### Discovery
+
+Skills are scanned in `.pi/skills/` in the project, then `~/.pi/agent/skills/`, `~/.claude/skills/`, and `~/.agents/skills/`.
+The first directory to define a name wins, names are matched case-insensitively, and symlinked skill directories are followed.
+
+Only the project and Pi directories are advertised in the `name` parameter, as names and descriptions rather than bodies, which keeps the roster at roughly two lines of context per skill.
+A skill that exists only in `~/.claude/skills/` or `~/.agents/skills/` still resolves when named directly.
+`disable-model-invocation: true` hides a skill from the roster while leaving it runnable by explicit name.
+
+### `/skills`
+
+`/skills` lists what `skill_run` advertises, with descriptions and any parse diagnostics.
+Like `/agents`, it never lists the fallback directories.
 
 ## 🔄 Messaging, lifecycle, and retention
 
@@ -180,8 +298,9 @@ Use these replacements where the new job model supports the previous intent:
 | Running main-to-child questions | Main and child `subagent_send` |
 
 The version 3 `subagent_send` contracts are not compatible with the legacy retained-agent follow-up tool of the same name.
-The `/subagents` command, extension settings, legacy retained follow-ups, `subagent_mailbox`, `subagent_consult`, custom agent catalogs, advanced orchestration, alternate transports, trust-aware cwd policy, and extension-owned worktrees have no direct replacement.
-Describe the child's specialization in `task` and grant only the required work tools through `tools`.
+The `/subagents` command, extension settings, legacy retained follow-ups, `subagent_mailbox`, `subagent_consult`, advanced orchestration, alternate transports, trust-aware cwd policy, and extension-owned worktrees have no direct replacement.
+Version 3.1 reintroduces custom agent catalogs as [agent definitions](#-agent-definitions), which is the replacement for a reusable child specialization.
+Describe one-off specializations in `task` and grant only the required work tools through `tools`.
 
 ## 🔒 Security and privacy
 
@@ -209,10 +328,11 @@ Parallel writers require disjoint ownership or workspace isolation outside this 
 
 - The extension does not load arbitrary extension tools or parent-registered model providers in child processes.
 - Process-local runtime API keys are not forwarded to children.
-- The extension does not provide custom agents, per-job models, custom system prompts, peer-to-peer child messaging, retained conversations, user-directed follow-up work, mailboxes, Agent Teams, chains, fan-in aggregators, panels, workflow DAGs, dynamic scheduling, verification orchestration, nested subagents, or extension-owned semantic memory.
+- Agent definitions provide a per-job model, tool set, thinking level, and system prompt; there is no per-job model override outside a definition.
+- The extension does not provide peer-to-peer child messaging, retained conversations, user-directed follow-up work, mailboxes, Agent Teams, chains, fan-in aggregators, panels, workflow DAGs, dynamic scheduling, verification orchestration, nested subagents, or extension-owned semantic memory.
 - Bidirectional messages use request-response coordination, not a retained conversational session.
 - The main agent must verify child claims against the actual diff and deterministic checks.
-- Child requests and responses trigger a main-agent turn, but asynchronous job completions do not wake an otherwise idle model turn automatically.
+- Child requests and responses trigger a main-agent turn. A blocking job's completion does not wake an idle turn, because its caller is waiting; a `background: true` job's completion does.
 - Jobs, broker requests, and retained results do not survive extension reload, session replacement, or process exit.
 
 ## 🗂️ Package layout

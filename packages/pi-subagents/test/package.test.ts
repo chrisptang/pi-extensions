@@ -39,7 +39,7 @@ test("repository example skill documents every minimal-runtime operating respons
 		"utf8",
 	);
 	assert.match(skill, /^name: using-pi-subagents$/m);
-	assert.doesNotMatch(skill, /\b(?:background|bounded)\b/i);
+	assert.doesNotMatch(skill, /\bbounded\b/i);
 	for (const evidence of [
 		/prefer direct work/i,
 		/subagent_spawn/i,
@@ -63,6 +63,9 @@ test("repository example skill documents every minimal-runtime operating respons
 		/writer's statements.*claims rather than proof/is,
 		/disjoint.*ownership/is,
 		/workspace isolation/i,
+		/`\/agents` to see the definitions/i,
+		/`background: true` when the main agent has unrelated work/i,
+		/omit `background` when the next action depends on the result/i,
 	]) {
 		assert.match(skill, evidence);
 	}

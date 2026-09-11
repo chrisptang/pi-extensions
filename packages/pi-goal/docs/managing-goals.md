@@ -34,6 +34,22 @@ Failed prompt delivery restores the previous objective, state, safety counters, 
 For budget selection, units, cancellation, and cost limits, see [Token budgets and elapsed time](../README.md#-token-budgets-and-elapsed-time).
 For automatic-work settings, see the [settings reference](./settings.md).
 
+## Archive and pick up later
+
+Approving `goal_confirm` also writes the objective to `.pi/pi-goals/{date}-{slug}.md` in the working directory.
+The file name comes from the confirmation date and a slug of the objective, and gains a `-2`, `-3`, … suffix only when a different goal would take the same name.
+A goal keeps its file for its whole lifetime: later status changes rewrite the frontmatter in place, so `status`, `iteration`, `tokens_used`, and `updated_at` stay current.
+
+Only the frontmatter is rewritten. Anything you add to the body — verification notes, links, decisions — is preserved across every update.
+Frontmatter values are always quoted scalars, so an objective containing newlines or `key:` text cannot forge a field.
+
+`/goal --list` (aliases `-l`, `list`) lists the archived goals, newest first, with their status and objective.
+Like `/goal status`, it needs TUI or RPC mode.
+
+The archive is a record, not a resume path. Reading a file back is deliberate: open it and pass the objective to `/goal <objective>`, which runs clarification and `goal_confirm` approval again.
+That keeps user approval the only way a goal activates, which is what makes the archive safe to edit by hand or commit.
+A goal that cannot be written to disk still activates normally and reports a warning.
+
 ## Pause and resume
 
 `/goal pause` stops automatic continuation and aborts the current turn while preserving the goal.

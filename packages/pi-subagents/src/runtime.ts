@@ -28,6 +28,7 @@ interface StopRequest {
 interface InternalJob extends JobSummary {
 	controller: AbortController;
 	tools: string[];
+	notifyOnCompletion: boolean;
 	terminal: Promise<void>;
 	resolveTerminal: () => void;
 	task?: Promise<void>;
@@ -65,6 +66,17 @@ export interface StartJobInput {
 	cwd: string;
 	timeout?: number;
 	projectTrusted: boolean;
+	/** Agent definition body appended to the child's system prompt. */
+	systemPrompt?: string;
+	/** Agent name recorded for inspection and completion reporting. */
+	agent?: string;
+	/** Notes about degraded setup, such as an unresolved model alias. */
+	limitations?: string[];
+	/**
+	 * Background jobs interrupt the main agent with their completion so a weaker
+	 * model cannot forget to collect the result. Blocking callers use wait instead.
+	 */
+	notifyOnCompletion?: boolean;
 }
 
 export class SubagentRuntime {
@@ -145,18 +157,22 @@ export class SubagentRuntime {
 		const controller = new AbortController();
 		const job: InternalJob = {
 			jobId,
+			...(input.agent ? { agent: input.agent } : {}),
 			state: "queued",
 			createdAt: this.now(),
 			...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
 			controller,
 			tools: [...input.tools],
+			notifyOnCompletion: input.notifyOnCompletion ?? false,
 			terminal,
 			resolveTerminal,
 			controlReady,
 			resolveControl,
 			rejectControl,
 			sendQueue: Promise.resolve(),
-			limitations: [],
+			// Setup limitations, such as an unresolved model alias, are reported even
+			// when the child itself runs cleanly.
+			limitations: [...(input.limitations ?? [])],
 			deliverySent: false,
 			generation: this.generation,
 		};
@@ -177,6 +193,7 @@ export class SubagentRuntime {
 					task: input.task,
 					tools: [...input.tools],
 					model: input.model,
+					...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
 					thinkingLevel: input.thinkingLevel,
 					cwd: input.cwd,
 					timeout: input.timeout,
@@ -395,7 +412,8 @@ export class SubagentRuntime {
 		job.finishedAt = this.now();
 		job.result = child.result;
 		job.error = child.error;
-		job.limitations = [...child.limitations];
+		// Keep setup limitations recorded at start alongside the child's own.
+		job.limitations = [...new Set([...job.limitations, ...child.limitations])];
 		job.rejectControl(new Error("Subagent job is no longer active."));
 		this.broker.revokeJob(job.jobId);
 		job.resolveTerminal();
@@ -416,7 +434,9 @@ export class SubagentRuntime {
 					display: true,
 					details: payload,
 				},
-				{ deliverAs: "steer" },
+				// A background job triggers a turn so the main agent acts on the result
+				// immediately. A blocking caller is already waiting, so it must not.
+				{ deliverAs: "steer", ...(job.notifyOnCompletion ? { triggerTurn: true } : {}) },
 			);
 		} catch {
 			// Completion remains available through wait; inspect continues to report status.
@@ -426,6 +446,7 @@ export class SubagentRuntime {
 	private interruptedWaitResult(job: InternalJob) {
 		return {
 			jobId: job.jobId,
+			...(job.agent ? { agent: job.agent } : {}),
 			state: job.state,
 			timedOut: false,
 			interrupted: true as const,
@@ -436,6 +457,7 @@ export class SubagentRuntime {
 	private waitResult(job: InternalJob, timedOut: boolean) {
 		return {
 			jobId: job.jobId,
+			...(job.agent ? { agent: job.agent } : {}),
 			state: job.state,
 			timedOut,
 			...(!timedOut && job.result ? { result: job.result } : {}),
@@ -447,6 +469,7 @@ export class SubagentRuntime {
 	private summary(job: InternalJob): JobSummary {
 		return {
 			jobId: job.jobId,
+			...(job.agent ? { agent: job.agent } : {}),
 			state: job.state,
 			createdAt: job.createdAt,
 			...(job.startedAt !== undefined ? { startedAt: job.startedAt } : {}),

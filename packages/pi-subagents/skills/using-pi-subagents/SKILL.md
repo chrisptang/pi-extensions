@@ -1,6 +1,6 @@
 ---
 name: using-pi-subagents
-description: Operate pi-subagents jobs safely, including direct-work decisions, least-privilege tool selection, thinking-level selection, delegation, bidirectional messaging, parallel starts, timeout selection, waiting, cancellation, result handling, verification, and writer isolation.
+description: Operate pi-subagents jobs safely, including direct-work decisions, agent-definition selection, blocking versus background execution, least-privilege tool selection, thinking-level selection, delegation, bidirectional messaging, parallel starts, timeout selection, waiting, cancellation, result handling, verification, and writer isolation.
 license: MIT
 ---
 
@@ -42,7 +42,7 @@ Treat `edit` and `write` as explicit workspace mutation capabilities.
 
 The runtime always adds `subagent_send` and child `subagent_wait` for communication.
 
-The child inherits the main agent's effective provider and model at spawn time.
+The child inherits the main agent's effective provider and model at spawn time, unless a named agent definition resolves its own model.
 
 Spawn rejects model providers registered only by a parent extension and process-local runtime API keys.
 
@@ -55,6 +55,36 @@ Set `thinkingLevel` explicitly only when the task justifies a different level.
 The job returns a job ID immediately and publishes one terminal completion.
 
 Prefer delegation when the main agent can perform concrete non-overlapping work before the result is required.
+
+## Name an agent instead of restating a role
+
+Pass `agent` when a listed definition already matches the work, and let the definition supply the role, model, tools, and thinking level.
+
+Run `/agents` to see the definitions this session advertises; the `agent` parameter description lists the same names.
+
+Use `explorer` for read-only investigation that should come back as `path:line` citations.
+
+Use `builder` for one clearly specified change that must be verified before it is reported.
+
+Keep `task` for what this particular job must do, because the definition already states how the agent works.
+
+Pass `tools`, `thinkingLevel`, or a different `agent` only when this job genuinely needs something the definition does not give it; an explicit argument overrides the definition.
+
+Name an agent that `/agents` does not list only when a skill or the user told you it exists, because the extension resolves it from the fallback directories on demand.
+
+Omit `agent` for one-off specializations and describe them in `task` instead.
+
+## Choose blocking or background
+
+Omit `background` when the next action depends on the result, then collect it with `subagent_wait`.
+
+Pass `background: true` when the main agent has unrelated work to finish first, because the completion interrupts the main agent and starts a turn with the result.
+
+Do not call `subagent_wait` on a background job merely to collect a result that will arrive on its own.
+
+Do not use `background: true` for the last outstanding job when nothing else remains to do; wait for it instead.
+
+Treat a background completion as the same untrusted child report as any other result, and verify it the same way.
 
 ## Write self-contained tasks
 
@@ -163,6 +193,8 @@ A wait timeout stops only the caller's wait.
 A wait timeout does not cancel, close, or shorten the job's optional execution deadline or a child request.
 
 Do not poll repeatedly because asynchronous completion and message delivery remain active.
+
+A background job's completion arrives as an interrupt, so waiting for one is unnecessary.
 
 ## Inspect and cancel
 

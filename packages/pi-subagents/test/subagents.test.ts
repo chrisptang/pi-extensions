@@ -5,10 +5,15 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { Check } from "typebox/value";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { createMockContext, createMockPi } from "../../../test/support.js";
+import type { AgentDefinition } from "../src/agent-definitions.js";
+import { AgentRegistry } from "../src/agent-registry.js";
+import { renderAgentList } from "../src/agents-command.js";
 import { createBrokerClient } from "../src/child-communication-bridge.js";
 import { createChildCommunicationExtension } from "../src/child-communication-tools.js";
 import { MAX_MESSAGE_BYTES, MAX_MESSAGE_LINES, MessageBroker } from "../src/message-broker.js";
 import { MAX_MODEL_TEXT_BYTES, MAX_MODEL_TEXT_LINES } from "../src/model-output.js";
+import type { SkillDefinition } from "../src/skill-definitions.js";
+import { SkillRegistry } from "../src/skill-registry.js";
 import subagents, { type SubagentsDependencies } from "../src/subagents.js";
 import type { ChildRequest, ChildResult } from "../src/types.js";
 import { SUBAGENT_WIDGET_KEY } from "../src/widget.js";
@@ -59,13 +64,20 @@ afterEach(async () => {
 	vi.restoreAllMocks();
 });
 
-test("registers five fixed main-agent tools with stable schemas and explicit limits", async () => {
+test("registers six fixed main-agent tools with stable schemas and explicit limits", async () => {
 	const { mock, context } = await setup();
 	assert.ok(mock.messageRenderers.has("pi-subagents-completion"));
 	const tools = mock.tools as unknown as RegisteredTool[];
 	assert.deepEqual(
 		tools.map((candidate) => candidate.name),
-		["subagent_spawn", "subagent_inspect", "subagent_cancel", "subagent_wait", "subagent_send"],
+		[
+			"subagent_spawn",
+			"skill_run",
+			"subagent_inspect",
+			"subagent_cancel",
+			"subagent_wait",
+			"subagent_send",
+		],
 	);
 	assert.equal(tools[0]?.parameters.properties?.task?.maxLength, 50 * 1024);
 	assert.equal(tools[0]?.parameters.properties?.tools?.maxItems, 64);
@@ -82,21 +94,25 @@ test("registers five fixed main-agent tools with stable schemas and explicit lim
 		"xhigh",
 		"max",
 	]);
-	assert.equal(tools[4]?.parameters.properties?.message?.maxLength, MAX_MESSAGE_BYTES);
-	assert.equal(tools[4]?.parameters.properties?.recipient?.maxLength, 128);
-	assert.equal(tools[4]?.parameters.properties?.requestId?.maxLength, 128);
-	assert.deepEqual(Object.keys(tools[1]?.parameters.properties ?? {}), []);
+	const send = tool(mock, "subagent_send");
+	assert.equal(send.parameters.properties?.message?.maxLength, MAX_MESSAGE_BYTES);
+	assert.equal(send.parameters.properties?.recipient?.maxLength, 128);
+	assert.equal(send.parameters.properties?.requestId?.maxLength, 128);
+	assert.deepEqual(Object.keys(tool(mock, "subagent_inspect").parameters.properties ?? {}), []);
 	assert.deepEqual(tools[0]?.prepareArguments?.({ task: "old", timeoutMs: 1_500 }), {
 		task: "old",
 		timeout: 1.5,
 	});
-	assert.deepEqual(tools[3]?.prepareArguments?.({ jobId: "job_old", timeoutMs: 30_000 }), {
-		jobId: "job_old",
-		timeout: 30,
-	});
+	assert.deepEqual(
+		tool(mock, "subagent_wait").prepareArguments?.({ jobId: "job_old", timeoutMs: 30_000 }),
+		{
+			jobId: "job_old",
+			timeout: 30,
+		},
+	);
 	for (const [candidate, malformedAlias] of [
-		[tools[0], { task: "legacy", timeoutMs: "1500" }],
-		[tools[3], { jobId: "job_old", timeoutMs: "30000" }],
+		[tool(mock, "subagent_spawn"), { task: "legacy", timeoutMs: "1500" }],
+		[tool(mock, "subagent_wait"), { jobId: "job_old", timeoutMs: "30000" }],
 	] as const) {
 		const preparedMalformed = candidate?.prepareArguments?.(malformedAlias);
 		assert.deepEqual(preparedMalformed, malformedAlias);
@@ -110,10 +126,14 @@ test("registers five fixed main-agent tools with stable schemas and explicit lim
 				promptSnippet: candidate.promptSnippet,
 				parameters: candidate.parameters,
 			}),
-			/\b(?:background|bounded)\b/i,
+			/\bbounded\b/i,
 		);
 	}
-	assert.deepEqual([...mock.commands.keys()], []);
+	assert.equal(
+		tools[0]?.parameters.properties?.background?.description?.includes("blocking"),
+		true,
+	);
+	assert.deepEqual([...mock.commands.keys()], ["agents", "skills"]);
 	const childMock = createMockPi();
 	createChildCommunicationExtension({
 		async send() {
@@ -1057,6 +1077,297 @@ test("session replacement cancels old jobs and permits a clean new session", asy
 	assert.equal(next.details.state, "queued");
 });
 
+test("spawns with an agent definition, letting explicit arguments override it", async () => {
+	const requests: ChildRequest[] = [];
+	const explorer = agentDefinition({
+		name: "explorer",
+		body: "You are a read-only explorer.",
+		tools: ["read", "grep", "find", "ls"],
+		thinkingLevel: "low",
+	});
+	const { mock, context } = await setup({
+		agents: agentRegistry([explorer]),
+		runChild: async (request) => {
+			requests.push(request);
+			return completed("explored");
+		},
+	});
+	const spawned = await tool(mock, "subagent_spawn").execute(
+		"spawn",
+		{ task: "Map the package", agent: "EXPLORER" },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	const waited = await waitFor(mock, context, String(spawned.details.jobId));
+	assert.equal(requests[0]?.systemPrompt, "You are a read-only explorer.");
+	assert.deepEqual(requests[0]?.tools, ["read", "grep", "find", "ls"]);
+	assert.equal(requests[0]?.thinkingLevel, "low");
+	assert.equal(waited.details.agent, "explorer");
+
+	const overridden = await tool(mock, "subagent_spawn").execute(
+		"spawn",
+		{ task: "Edit the package", agent: "explorer", tools: ["read", "edit"], thinkingLevel: "high" },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	await waitFor(mock, context, String(overridden.details.jobId));
+	assert.deepEqual(requests[1]?.tools, ["read", "edit"]);
+	assert.equal(requests[1]?.thinkingLevel, "high");
+	// The body still specializes the child; only the explicit arguments change.
+	assert.equal(requests[1]?.systemPrompt, "You are a read-only explorer.");
+});
+
+test("advertises only primary agents but spawns fallback ones by name", async () => {
+	const { mock, context } = await setup({
+		agents: agentRegistry(
+			[agentDefinition({ name: "explorer" })],
+			[agentDefinition({ name: "reviewer", origin: "claude" })],
+		),
+		runChild: async () => completed("done"),
+	});
+	const description = tool(mock, "subagent_spawn").parameters.properties?.agent?.description ?? "";
+	assert.match(description, /explorer/);
+	assert.doesNotMatch(description, /reviewer/);
+	const spawned = await tool(mock, "subagent_spawn").execute(
+		"spawn",
+		{ task: "Review", agent: "reviewer" },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	const waited = await waitFor(mock, context, String(spawned.details.jobId));
+	assert.equal(waited.details.agent, "reviewer");
+});
+
+test("rejects an unknown agent without starting a job", async () => {
+	let started = false;
+	const { mock, context } = await setup({
+		agents: agentRegistry([agentDefinition({ name: "explorer" })]),
+		runChild: async () => {
+			started = true;
+			return completed("done");
+		},
+	});
+	await assert.rejects(
+		() =>
+			tool(mock, "subagent_spawn").execute(
+				"spawn",
+				{ task: "Do work", agent: "missing" },
+				undefined,
+				undefined,
+				context.ctx,
+			),
+		/Unknown subagent agent: missing\. Available: explorer\./,
+	);
+	assert.equal(started, false);
+});
+
+test("background spawns trigger a turn on completion and blocking spawns do not", async () => {
+	const { mock, context } = await setup({ runChild: async () => completed("finished") });
+	const background = await tool(mock, "subagent_spawn").execute(
+		"spawn",
+		{ task: "Run in background", background: true },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	const backgroundId = String(background.details.jobId);
+	await waitFor(mock, context, backgroundId);
+	const blocking = await spawnJob(mock, context, "Run blocking");
+	await waitFor(mock, context, String(blocking.details.jobId));
+
+	const completions = mock.sentMessages.filter(
+		(entry) => (entry.message as { customType?: string }).customType === "pi-subagents-completion",
+	);
+	assert.equal(completions.length, 2);
+	const backgroundDelivery = completions.find((entry) =>
+		(entry.message as { content: string }).content.includes(backgroundId),
+	);
+	assert.ok(backgroundDelivery);
+	assert.deepEqual(backgroundDelivery.options, { deliverAs: "steer", triggerTurn: true });
+	const blockingDelivery = completions.find((entry) => entry !== backgroundDelivery);
+	assert.deepEqual(blockingDelivery?.options, { deliverAs: "steer" });
+});
+
+test("/agents lists only the Pi directory and reports its diagnostics", async () => {
+	const agents = agentRegistry(
+		[agentDefinition({ name: "explorer" }), agentDefinition({ name: "builder" })],
+		[agentDefinition({ name: "reviewer", origin: "claude" })],
+		["broken.md: missing description"],
+	);
+	const { mock, context } = await setup({ agents });
+	const command = mock.commands.get("agents");
+	assert.ok(command);
+	await command.handler("", context.ctx);
+	const notified = context.notifications.map((entry) => entry.message).join("\n");
+	assert.match(notified, /builder/);
+	assert.match(notified, /explorer/);
+	assert.doesNotMatch(notified, /reviewer/);
+	assert.match(notified, /missing description/);
+	// Sorted by name, so builder precedes explorer.
+	assert.ok(notified.indexOf("builder") < notified.indexOf("explorer"));
+});
+
+test("/agents reports an empty Pi directory instead of falling back", async () => {
+	const rendered = renderAgentList(agentRegistry([], [agentDefinition({ name: "reviewer" })]));
+	assert.match(rendered, /No agent definitions in/);
+	assert.doesNotMatch(rendered, /reviewer/);
+});
+
+test("skill_run sends the skill body as the system prompt and the request as the task", async () => {
+	const requests: ChildRequest[] = [];
+	const deploy = skillDefinition({
+		name: "deploy",
+		body: "Read config.json, then ship.",
+		baseDir: "/skills/deploy",
+		tools: ["read", "bash"],
+	});
+	const { mock, context } = await setup({
+		skills: skillRegistry(deploy),
+		runChild: async (request) => {
+			requests.push(request);
+			return completed("shipped");
+		},
+	});
+	const started = await tool(mock, "skill_run").execute(
+		"skill",
+		{ name: "DEPLOY", args: "Ship version 2.1 to staging." },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	const waited = await waitFor(mock, context, String(started.details.jobId));
+
+	const systemPrompt = requests[0]?.systemPrompt ?? "";
+	// The body is the child's system prompt, so the skill keeps its instruction voice.
+	assert.match(systemPrompt, /Read config\.json, then ship\./);
+	// A child runs with --no-skills, so the base directory must be stated explicitly.
+	assert.match(systemPrompt, /\/skills\/deploy/);
+	// The caller's request stays in the task, preserving the instruction boundary.
+	assert.match(requests[0]?.task ?? "", /Ship version 2\.1 to staging\./);
+	assert.doesNotMatch(requests[0]?.task ?? "", /Read config\.json/);
+	assert.deepEqual(requests[0]?.tools, ["read", "bash"]);
+	assert.equal(waited.details.agent, "skill:deploy");
+});
+
+test("skill_run runs a skill with no args and lets explicit arguments override it", async () => {
+	const requests: ChildRequest[] = [];
+	const audit = skillDefinition({ name: "audit", tools: ["read"], thinkingLevel: "low" });
+	const { mock, context } = await setup({
+		skills: skillRegistry(audit),
+		runChild: async (request) => {
+			requests.push(request);
+			return completed("audited");
+		},
+	});
+	await tool(mock, "skill_run").execute(
+		"skill",
+		{ name: "audit" },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	assert.match(requests[0]?.task ?? "", /audit/);
+	assert.equal(requests[0]?.thinkingLevel, "low");
+
+	await tool(mock, "skill_run").execute(
+		"skill",
+		{ name: "audit", tools: ["read", "edit"], thinkingLevel: "high" },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	assert.deepEqual(requests[1]?.tools, ["read", "edit"]);
+	assert.equal(requests[1]?.thinkingLevel, "high");
+});
+
+test("skill_run falls back to read-only tools when a skill grants none", async () => {
+	const requests: ChildRequest[] = [];
+	// Every declared tool was Claude-only, leaving nothing Pi can grant.
+	const delegating = skillDefinition({
+		name: "delegating",
+		tools: [],
+		unsupportedTools: ["Task(reviewer)"],
+	});
+	const { mock, context } = await setup({
+		skills: skillRegistry(delegating),
+		runChild: async (request) => {
+			requests.push(request);
+			return completed("done");
+		},
+	});
+	const started = await tool(mock, "skill_run").execute(
+		"skill",
+		{ name: "delegating" },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	// A child with no tools could not even read its own reference files.
+	assert.deepEqual(requests[0]?.tools, ["read", "grep", "find", "ls"]);
+	const waited = await waitFor(mock, context, String(started.details.jobId));
+	assert.match(JSON.stringify(waited.details), /Task\(reviewer\)/);
+});
+
+test("model inherit spawns with the main agent's model and reports no limitation", async () => {
+	const requests: ChildRequest[] = [];
+	const { mock, context } = await setup({
+		agents: agentRegistry([agentDefinition({ name: "inheriting", model: "inherit" })]),
+		skills: skillRegistry(skillDefinition({ name: "inheriting-skill", model: undefined })),
+		runChild: async (request) => {
+			requests.push(request);
+			return completed("done");
+		},
+	});
+
+	const spawned = await tool(mock, "subagent_spawn").execute(
+		"spawn",
+		{ task: "Explore", agent: "inheriting" },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	const spawnWaited = await waitFor(mock, context, String(spawned.details.jobId));
+	// The main session's model, not an alias lookup failure.
+	assert.equal(requests[0]?.model, "test-provider/test-model");
+	assert.doesNotMatch(JSON.stringify(spawnWaited.details), /alias|limitation/i);
+
+	const ran = await tool(mock, "skill_run").execute(
+		"skill",
+		{ name: "inheriting-skill" },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	const runWaited = await waitFor(mock, context, String(ran.details.jobId));
+	assert.equal(requests[1]?.model, "test-provider/test-model");
+	assert.doesNotMatch(JSON.stringify(runWaited.details), /alias|limitation/i);
+});
+
+test("skill_run rejects an unknown skill and names the alternatives", async () => {
+	const { mock, context } = await setup({
+		skills: skillRegistry(skillDefinition({ name: "deploy" })),
+	});
+	await assert.rejects(
+		tool(mock, "skill_run").execute("skill", { name: "absent" }, undefined, undefined, context.ctx),
+		/Unknown skill: absent\. Available: deploy\./,
+	);
+});
+
+test("skill_run advertises the primary roster and hides model-disabled skills", async () => {
+	const { mock } = await setup({
+		skills: skillRegistry(
+			skillDefinition({ name: "deploy", description: "Ships the build." }),
+			skillDefinition({ name: "hidden", disableModelInvocation: true }),
+		),
+	});
+	const description = tool(mock, "skill_run").parameters.properties?.name?.description ?? "";
+	assert.match(description, /deploy \(Ships the build\.\)/);
+	assert.doesNotMatch(description, /hidden/);
+});
+
 async function setup(
 	dependencies: SubagentsDependencies = {},
 	mockOptions: Parameters<typeof createMockPi>[0] = {},
@@ -1071,10 +1382,80 @@ async function setup(
 		},
 		...contextOverrides,
 	});
-	subagents(mock.pi, dependencies);
+	// Never seed or scan the real ~/.pi/agent/agents/ from a test; opt in explicitly.
+	subagents(mock.pi, {
+		seedAgents: () => undefined,
+		agents: emptyAgentRegistry(),
+		skills: emptySkillRegistry(),
+		...dependencies,
+	});
 	await emit(mock, "session_start", { reason: "startup" }, context.ctx);
 	activeSessions.push({ mock, context });
 	return { mock, context };
+}
+
+/** A registry backed by nothing on disk, so tests never depend on the real home directory. */
+function emptyAgentRegistry(): AgentRegistry {
+	const empty = () => ({ agents: new Map(), diagnostics: [] });
+	return new AgentRegistry(empty, empty);
+}
+
+/** A registry backed by nothing on disk, so tests never scan the real home directory. */
+function emptySkillRegistry(): SkillRegistry {
+	const empty = () => ({ skills: new Map(), diagnostics: [] });
+	return new SkillRegistry(empty, empty);
+}
+
+/** A registry serving exactly the supplied definitions from its primary tier. */
+function skillRegistry(...definitions: SkillDefinition[]): SkillRegistry {
+	const load = () => ({
+		skills: new Map(definitions.map((definition) => [definition.name, definition])),
+		diagnostics: [],
+	});
+	return new SkillRegistry(load, load);
+}
+
+function skillDefinition(overrides: Partial<SkillDefinition> & { name: string }): SkillDefinition {
+	return {
+		description: `${overrides.name} description`,
+		body: `Run the ${overrides.name} steps.`,
+		baseDir: `/skills/${overrides.name}`,
+		tools: ["read"],
+		toolsDeclared: true,
+		unsupportedTools: [],
+		disableModelInvocation: false,
+		source: `/skills/${overrides.name}/SKILL.md`,
+		origin: "pi" as const,
+		...overrides,
+	};
+}
+
+function agentDefinition(overrides: Partial<AgentDefinition> & { name: string }): AgentDefinition {
+	return {
+		description: `${overrides.name} description`,
+		body: `You are ${overrides.name}.`,
+		tools: ["read", "grep"],
+		source: `/agents/${overrides.name}.md`,
+		origin: "pi",
+		...overrides,
+	};
+}
+
+/**
+ * A registry whose primary tier holds `primary` and whose fallback tier holds
+ * both, mirroring the real two-tier scan without touching the filesystem.
+ */
+function agentRegistry(
+	primary: AgentDefinition[],
+	fallback: AgentDefinition[] = [],
+	diagnostics: string[] = [],
+): AgentRegistry {
+	const index = (definitions: AgentDefinition[]) =>
+		new Map(definitions.map((definition) => [definition.name, definition]));
+	return new AgentRegistry(
+		() => ({ agents: index(primary), diagnostics }),
+		() => ({ agents: index([...primary, ...fallback]), diagnostics }),
+	);
 }
 
 async function emit(mock: Mock, event: string, payload: unknown, context: unknown): Promise<void> {

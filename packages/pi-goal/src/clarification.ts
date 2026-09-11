@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { relative } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { validateObjective } from "./command.js";
@@ -117,14 +118,29 @@ export function registerGoalClarification(
 						"Goal was approved but activation failed; review the notification and retry /goal.",
 					);
 				}
+				const archived = runtime.archiveConfirmedGoal(ctx.cwd, goal);
+				if (typeof archived !== "string") {
+					notifyTerminal(
+						ctx.ui,
+						`Goal is active, but its markdown record could not be written: ${archived.error}`,
+						"warning",
+					);
+				}
+				const record =
+					typeof archived === "string"
+						? ` Recorded at ${relative(ctx.cwd, archived)} for a later session to pick up.`
+						: "";
 				return {
 					content: [
 						{
 							type: "text",
-							text: "Goal confirmed ✅ and saved. The Goal kickoff is queued; do not start a second run.",
+							text: `Goal confirmed ✅ and saved.${record} The Goal kickoff is queued; do not start a second run.`,
 						},
 					],
-					details: { goal_id: goal.id },
+					details: {
+						goal_id: goal.id,
+						...(typeof archived === "string" ? { archive: archived } : {}),
+					},
 					terminate: true,
 				};
 			} finally {
