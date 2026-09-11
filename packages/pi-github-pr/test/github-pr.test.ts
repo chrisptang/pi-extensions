@@ -1088,12 +1088,16 @@ test("branch changes abort an in-flight periodic refresh", async () => {
 	const periodicPrView = deferred<ExecResult>();
 	const sessionSignal = new AbortController().signal;
 	let periodicSignal: AbortSignal | undefined;
+	let periodicSignalAbortedWhenCaptured: boolean | undefined;
 	const mock = createMockPi();
 	installExec(mock, async (command, args, options) => {
 		if (command === "git") return textResult(".git/HEAD\n");
 		if (args[0] === "pr") {
 			if (options?.signal && options.signal !== sessionSignal) {
-				periodicSignal = options.signal;
+				// Latch the first periodic signal: a later refresh cycle replaces it, and the branch
+				// change under test may already have aborted the replacement by the time it is read.
+				periodicSignal ??= options.signal;
+				periodicSignalAbortedWhenCaptured ??= options.signal.aborted;
 				return periodicPrView.promise;
 			}
 			return okResult(samplePr);
@@ -1111,7 +1115,7 @@ test("branch changes abort an in-flight periodic refresh", async () => {
 		await sessionStart({}, context.ctx);
 		await waitFor(() => periodicSignal !== undefined, "periodic refresh starts");
 		assert.ok(periodicSignal, "periodic refresh receives a session-owned abort signal");
-		assert.equal(periodicSignal.aborted, false);
+		assert.equal(periodicSignalAbortedWhenCaptured, false);
 
 		writeFileSync(headPath, "ref: refs/heads/main\n");
 		await waitFor(() => periodicSignal?.aborted === true, "branch change aborts periodic refresh");

@@ -212,12 +212,15 @@ async function handle(command) {
 });
 
 test("runChild rejects asynchronous RPC stdin write errors without an unhandled error", async () => {
+	// Accept the prompt, then stop draining stdin and exit shortly after. The child is still alive
+	// when the steer is sent, so it passes sendCommand's guards and reaches stdin.write; the payload
+	// is larger than the pipe buffer, so it stays queued and fails asynchronously with EPIPE.
 	installFakePi(`
 async function handle(command) {
   if (command.type !== "prompt") return;
-  process.stdin.on("error", () => undefined);
-  fs.closeSync(0);
   respond(command);
+  process.stdin.pause();
+  setTimeout(() => process.exit(0), 600);
 }
 setInterval(() => {}, 1000);
 `);
@@ -228,7 +231,7 @@ setInterval(() => {}, 1000);
 	});
 	const work = runChild(childRequest({ signal: controller.signal, onControl: resolveControl }));
 	const control = await controlReady;
-	await assert.rejects(() => control.send("question after stdin closed"), /EPIPE|stdin|write/iu);
+	await assert.rejects(() => control.send("x".repeat(64 * 1024 * 1024)), /EPIPE/iu);
 	controller.abort();
 	assert.equal((await work).state, "cancelled");
 });
