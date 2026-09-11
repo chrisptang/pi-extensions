@@ -7,10 +7,12 @@
 #   scripts/install.sh --all            # every package under packages/
 #   scripts/install.sh --list           # show installable packages
 #   scripts/install.sh --uninstall ...  # remove instead of install
+#   scripts/install.sh --reinstall ...  # remove, then install fresh
 #
 # Flags:
 #   --skip-build   reuse existing dist/ instead of rebuilding
 #   --local        install into .pi/settings.json of the current project
+#   --reinstall    uninstall the target packages first, then install
 
 set -euo pipefail
 
@@ -23,6 +25,7 @@ packages=()
 skip_build=0
 install_local=0
 uninstall=0
+reinstall=0
 select_all=0
 list_only=0
 
@@ -31,6 +34,7 @@ while (($# > 0)); do
 	--skip-build) skip_build=1 ;;
 	--local | -l) install_local=1 ;;
 	--uninstall | --remove) uninstall=1 ;;
+	--reinstall) reinstall=1 ;;
 	--all) select_all=1 ;;
 	--list) list_only=1 ;;
 	-h | --help)
@@ -76,15 +80,21 @@ for name in "${packages[@]}"; do
 	}
 done
 
-if ((uninstall)); then
+remove_packages() {
+	local name
 	for name in "${packages[@]}"; do
 		echo "==> removing $name"
+		# tolerate not-installed packages so --reinstall works on fresh targets
 		if ((install_local)); then
-			pi remove "$repo_root/packages/$name" --local
+			pi remove "$repo_root/packages/$name" --local || echo "   (not installed)"
 		else
-			pi remove "$repo_root/packages/$name"
+			pi remove "$repo_root/packages/$name" || echo "   (not installed)"
 		fi
 	done
+}
+
+if ((uninstall)); then
+	remove_packages
 	exit 0
 fi
 
@@ -96,6 +106,8 @@ if ((skip_build == 0)); then
 		npm --prefix "$repo_root" --workspace "packages/$name" run build --if-present
 	done
 fi
+
+((reinstall)) && remove_packages
 
 for name in "${packages[@]}"; do
 	# pi.extensions points at ./dist/index.ts, which is gitignored, so it must exist.
