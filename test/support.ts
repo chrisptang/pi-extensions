@@ -1,3 +1,4 @@
+import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Key, type KeyId, matchesKey } from "@earendil-works/pi-tui";
@@ -301,8 +302,10 @@ export function createMockContext(overrides: Record<string, unknown> = {}) {
 				}
 			: (customOverride ?? defaultCustom);
 
+	// Default to a throwaway directory: an extension writing under ctx.cwd (pi-goal archives
+	// goals to .pi/pi-goals) would otherwise litter the repository it is tested from.
 	const ctx = {
-		cwd: overrides.cwd ?? process.cwd(),
+		cwd: overrides.cwd ?? mkdtempSync(path.join(os.tmpdir(), "pi-mock-ctx-")),
 		mode: overrides.mode ?? (overrides.hasUI ? "tui" : undefined),
 		hasUI: overrides.hasUI ?? (overrides.mode === "tui" || overrides.mode === "rpc"),
 		model: overrides.model,
