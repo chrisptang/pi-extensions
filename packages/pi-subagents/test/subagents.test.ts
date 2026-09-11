@@ -1262,6 +1262,33 @@ test("/agents reports an empty Pi directory instead of falling back", async () =
 	assert.doesNotMatch(rendered, /reviewer/);
 });
 
+test("/agents reports a replaced built-in, and keeps doing so across a reset", async () => {
+	const agents = agentRegistry([agentDefinition({ name: "explorer" })]);
+	agents.noteSeed(["Replaced built-in agent explorer.md; previous contents in explorer.md.bak"]);
+
+	assert.match(renderAgentList(agents), /Replaced built-in agent explorer\.md/);
+	// A new session rescans definitions, but seeding already happened at load.
+	agents.reset();
+	assert.match(renderAgentList(agents), /explorer\.md\.bak/);
+});
+
+test("seed diagnostics reach the registry through the extension entry point", async () => {
+	const { mock, context } = await setup({
+		agents: agentRegistry([agentDefinition({ name: "explorer" })]),
+		seedAgents: () => ({
+			created: [],
+			updated: ["/agents/explorer.md"],
+			backups: ["/agents/explorer.md.bak"],
+			diagnostics: ["Replaced built-in agent /agents/explorer.md; previous in .bak"],
+		}),
+	});
+	const command = mock.commands.get("agents");
+	assert.ok(command);
+	await command.handler("", context.ctx);
+	const notified = context.notifications.map((entry) => entry.message).join("\n");
+	assert.match(notified, /Replaced built-in agent/);
+});
+
 test("skill_run sends the skill body as the system prompt and the request as the task", async () => {
 	const requests: ChildRequest[] = [];
 	const deploy = skillDefinition({

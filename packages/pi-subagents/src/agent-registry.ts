@@ -17,6 +17,12 @@ export class AgentRegistry {
 	private primary: Map<string, AgentDefinition> | undefined;
 	private fallback: Map<string, AgentDefinition> | undefined;
 	private diagnostics: string[] = [];
+	/**
+	 * Seeding happens once at load, before any scan, so its diagnostics would
+	 * otherwise be lost. They are kept here and reported alongside the scan's,
+	 * which is how a silently replaced built-in becomes visible in `/agents`.
+	 */
+	private seedDiagnostics: string[] = [];
 
 	constructor(
 		private readonly loadPrimary: () => ReturnType<
@@ -30,6 +36,12 @@ export class AgentRegistry {
 		this.primary = undefined;
 		this.fallback = undefined;
 		this.diagnostics = [];
+		// Seed diagnostics are not rescanned, so they deliberately survive a reset.
+	}
+
+	/** Record what seeding did, so `/agents` can report a replaced built-in. */
+	noteSeed(diagnostics: readonly string[]): void {
+		this.seedDiagnostics = [...diagnostics];
 	}
 
 	/** Definitions from the Pi directory only, sorted by name. */
@@ -39,10 +51,10 @@ export class AgentRegistry {
 		);
 	}
 
-	/** Diagnostics from the primary scan, for the command surface. */
+	/** Seed and primary-scan diagnostics, for the command surface. */
 	primaryDiagnostics(): string[] {
 		this.ensurePrimary();
-		return [...this.diagnostics];
+		return [...this.seedDiagnostics, ...this.diagnostics];
 	}
 
 	/**

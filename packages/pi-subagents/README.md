@@ -206,6 +206,10 @@ The built-ins are owned by the extension, so every load rewrites a file whose co
 A file that already matches is left alone, so repeated loads do not churn it.
 
 That means edits to `explorer.md` and `builder.md` are replaced on the next upgrade.
+The replacement is not silent: the previous contents are copied to `explorer.md.bak` next to the file, and `/agents` reports what was replaced and where the backup went.
+The backup is a single stable path holding the most recently displaced version, so it does not accumulate a file per load, and a `.bak` is never loaded as a definition.
+If the backup cannot be written, the file is left untouched rather than clobbered.
+
 To customize, copy one to a new name — `my-explorer.md` — and spawn that instead; seeding only ever touches its own two filenames.
 
 The `model` field is resolved against `~/.pi/agent/model-alias.json` when present, and otherwise treated as `provider/modelId`.

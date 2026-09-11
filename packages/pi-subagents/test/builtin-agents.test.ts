@@ -21,6 +21,7 @@ test("seeds the built-in definitions and parses them back", () => {
 	const target = path.join(directory, "agents");
 	const result = seedBuiltinAgents(target);
 	assert.deepEqual(result.diagnostics, []);
+	assert.deepEqual(result.backups, []);
 	assert.deepEqual(
 		result.created.map((file) => path.basename(file)),
 		["explorer.md", "builder.md"],
@@ -53,9 +54,60 @@ test("replaces a stale definition so an upgrade always lands", () => {
 		result.updated.map((file) => path.basename(file)),
 		["explorer.md"],
 	);
-	assert.deepEqual(result.diagnostics, []);
 	const shipped = BUILTIN_AGENTS.find((agent) => agent.name === "explorer")?.content;
 	assert.equal(fs.readFileSync(explorer, "utf8"), shipped);
+
+	// The displaced contents are recoverable, and the replacement is announced.
+	assert.deepEqual(
+		result.backups.map((file) => path.basename(file)),
+		["explorer.md.bak"],
+	);
+	assert.equal(fs.readFileSync(`${explorer}.bak`, "utf8"), stale);
+	assert.equal(result.diagnostics.length, 1);
+	assert.match(result.diagnostics[0] ?? "", /Replaced built-in agent .*explorer\.md/);
+	assert.match(result.diagnostics[0] ?? "", /explorer\.md\.bak/);
+});
+
+test("a backup holds the last displaced version, not one file per load", () => {
+	const target = path.join(directory, "agents");
+	seedBuiltinAgents(target);
+	const explorer = path.join(target, "explorer.md");
+	fs.writeFileSync(explorer, "first edit");
+	seedBuiltinAgents(target);
+	fs.writeFileSync(explorer, "second edit");
+	seedBuiltinAgents(target);
+
+	assert.equal(fs.readFileSync(`${explorer}.bak`, "utf8"), "second edit");
+	const backups = fs.readdirSync(target).filter((name) => name.endsWith(".bak"));
+	assert.deepEqual(backups, ["explorer.md.bak"]);
+});
+
+test("a backup is never loaded as a definition", () => {
+	const target = path.join(directory, "agents");
+	seedBuiltinAgents(target);
+	fs.writeFileSync(path.join(target, "explorer.md"), "---\nname: explorer\n---\n\nMine.");
+	seedBuiltinAgents(target);
+
+	process.env.PI_CODING_AGENT_DIR = directory;
+	const { agents, diagnostics } = discoverPrimaryAgents();
+	assert.deepEqual(diagnostics, []);
+	assert.deepEqual([...agents.keys()].sort(), ["builder", "explorer"]);
+});
+
+test("leaves the user file in place when the backup cannot be written", () => {
+	const target = path.join(directory, "agents");
+	seedBuiltinAgents(target);
+	const explorer = path.join(target, "explorer.md");
+	fs.writeFileSync(explorer, "my own version");
+	// A directory where the backup file should go makes the backup write fail.
+	fs.mkdirSync(`${explorer}.bak`);
+
+	const result = seedBuiltinAgents(target);
+	assert.deepEqual(result.updated, []);
+	assert.deepEqual(result.backups, []);
+	assert.equal(result.diagnostics.length, 1);
+	assert.match(result.diagnostics[0] ?? "", /Cannot back up agent/);
+	assert.equal(fs.readFileSync(explorer, "utf8"), "my own version");
 });
 
 test("rewrites nothing when every definition is already current", () => {
@@ -66,6 +118,7 @@ test("rewrites nothing when every definition is already current", () => {
 	const result = seedBuiltinAgents(target);
 	assert.deepEqual(result.created, []);
 	assert.deepEqual(result.updated, []);
+	assert.deepEqual(result.backups, []);
 	assert.deepEqual(result.diagnostics, []);
 	assert.equal(fs.statSync(path.join(target, "explorer.md")).mtimeMs, before);
 });
@@ -77,6 +130,7 @@ test("reports a diagnostic instead of throwing when the directory is unwritable"
 	const result = seedBuiltinAgents(target);
 	assert.deepEqual(result.created, []);
 	assert.deepEqual(result.updated, []);
+	assert.deepEqual(result.backups, []);
 	assert.equal(result.diagnostics.length, 1);
 	assert.match(result.diagnostics[0] ?? "", /Cannot create agent directory/);
 });

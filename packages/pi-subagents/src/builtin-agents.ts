@@ -187,6 +187,8 @@ export interface SeedResult {
 	created: string[];
 	/** Files whose contents were replaced because the shipped definition changed. */
 	updated: string[];
+	/** Backups written before an overwrite, parallel to `updated`. */
+	backups: string[];
 	diagnostics: string[];
 }
 
@@ -197,11 +199,18 @@ export interface SeedResult {
  * current definition: a file whose contents differ from what is shipped is
  * rewritten, including one the user edited. Customization belongs in a
  * differently named definition, which is never touched.
+ *
+ * An overwrite is not silent. The previous contents are copied to
+ * `<name>.md.bak` first and the replacement is reported as a diagnostic, so a
+ * user who had edited the file learns where their version went. The backup path
+ * is stable rather than timestamped: it holds the contents displaced by the most
+ * recent upgrade, and does not accumulate a file per load.
  */
 export function seedBuiltinAgents(directory?: string): SeedResult {
 	const target = directory ?? agentDirectories()[0].directory;
 	const created: string[] = [];
 	const updated: string[] = [];
+	const backups: string[] = [];
 	const diagnostics: string[] = [];
 	try {
 		fs.mkdirSync(target, { recursive: true });
@@ -209,6 +218,7 @@ export function seedBuiltinAgents(directory?: string): SeedResult {
 		return {
 			created,
 			updated,
+			backups,
 			diagnostics: [`Cannot create agent directory ${target}: ${text(error)}`],
 		};
 	}
@@ -217,14 +227,36 @@ export function seedBuiltinAgents(directory?: string): SeedResult {
 		const existing = read(file);
 		// Rewriting an identical file would churn its mtime on every load for nothing.
 		if (existing === agent.content) continue;
+		// Back up before the write, so a failed backup stops us clobbering the user's file.
+		let backup: string | undefined;
+		if (existing !== undefined) {
+			backup = `${file}.bak`;
+			try {
+				fs.writeFileSync(backup, existing, "utf8");
+			} catch (error) {
+				diagnostics.push(
+					`Cannot back up agent ${file} to ${backup}: ${text(error)}; leaving it untouched.`,
+				);
+				continue;
+			}
+		}
 		try {
 			fs.writeFileSync(file, agent.content, "utf8");
-			(existing === undefined ? created : updated).push(file);
 		} catch (error) {
 			diagnostics.push(`Cannot write agent ${file}: ${text(error)}`);
+			continue;
+		}
+		if (backup === undefined) {
+			created.push(file);
+		} else {
+			updated.push(file);
+			backups.push(backup);
+			diagnostics.push(
+				`Replaced built-in agent ${file} with the shipped definition; the previous contents are in ${backup}.`,
+			);
 		}
 	}
-	return { created, updated, diagnostics };
+	return { created, updated, backups, diagnostics };
 }
 
 /** Undefined for a missing file, so a first install is told apart from an upgrade. */
