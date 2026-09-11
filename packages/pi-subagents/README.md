@@ -8,7 +8,7 @@ Pi Subagents runs Pi jobs in separate child processes and supports authenticated
 
 - Runs each job in an isolated Pi child process and returns its job ID immediately.
 - Uses the task to define the child's specialization and the tool list to limit its capabilities.
-- Ships two built-in agent definitions, `explorer` and `builder`, seeded into `~/.pi/agent/agents/` on first load.
+- Ships two built-in agent definitions, `explorer` and `builder`, seeded into `~/.pi/agent/agents/` and kept current on every load.
 - Runs a skill inside a subagent through `skill_run`, keeping its instructions and intermediate work out of the main session.
 - Advertises only that directory's definitions, and resolves any other name on demand from `~/.claude/agents/` and `~/.agents/agents/`.
 - Runs a job blocking or in the background, where a background completion interrupts the main agent with the result.
@@ -158,9 +158,9 @@ An agent definition is a Markdown file with YAML frontmatter that names a reusab
 ```markdown
 ---
 name: explorer
-description: Read-only codebase exploration. Returns a structured summary with file paths and line numbers.
+description: Read-only codebase exploration. Searches, reads, and reports findings as a structured summary with path:line citations.
 model: haiku
-tools: read, grep, find, ls
+tools: read, grep, find, ls, bash
 ---
 
 You are a read-only codebase explorer.
@@ -193,15 +193,20 @@ So a skill can name an agent the session never advertised, without every definit
 
 ### Built-in agents
 
-On first load the extension writes `explorer.md` and `builder.md` into `~/.pi/agent/agents/`.
+The extension writes `explorer.md` and `builder.md` into `~/.pi/agent/agents/`, keeping them current on every load.
 
 | Agent | Model | Tools | Purpose |
 | --- | --- | --- | --- |
-| `explorer` | `haiku` | `read`, `grep`, `find`, `ls` | Read-only exploration that reports findings with `path:line` citations. |
+| `explorer` | `haiku` | `read`, `grep`, `find`, `ls`, `bash` | Read-only exploration that reports findings with `path:line` citations. |
 | `builder` | `sonnet` | `read`, `grep`, `find`, `ls`, `edit`, `write`, `bash` | Implements one specified change and verifies it before reporting. |
 
-An existing file is never overwritten, so editing `explorer.md` makes it yours and a later upgrade keeps your edits.
-Delete a file to opt out of a built-in; it is reseeded only if the file is gone on the next load.
+`explorer` holds `bash` so the full read-only shell toolbox — `rg`, `sed -n`, `tree`, `git log` — is available to it; its body, not the tool list, is what keeps it read-only.
+
+The built-ins are owned by the extension, so every load rewrites a file whose contents differ from the shipped definition and an upgrade always delivers the current prompt.
+A file that already matches is left alone, so repeated loads do not churn it.
+
+That means edits to `explorer.md` and `builder.md` are replaced on the next upgrade.
+To customize, copy one to a new name — `my-explorer.md` — and spawn that instead; seeding only ever touches its own two filenames.
 
 The `model` field is resolved against `~/.pi/agent/model-alias.json` when present, and otherwise treated as `provider/modelId`.
 An alias that does not resolve to a usable model falls back to the main agent's model and is reported as a job limitation rather than failing the spawn.

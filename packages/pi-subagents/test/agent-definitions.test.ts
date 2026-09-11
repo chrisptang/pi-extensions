@@ -92,19 +92,37 @@ test("primary discovery ignores the optional lookup directories", () => {
 	assert.deepEqual([...discoverPrimaryAgents().agents.keys()], []);
 });
 
-test("seeding writes both built-ins and never overwrites user edits", () => {
+test("seeding writes both built-ins and restores a replaced one", () => {
 	const directory = path.join(root, "agents");
 	const first = seedBuiltinAgents(directory);
 	assert.deepEqual(first.created.map((file) => path.basename(file)).sort(), [
 		"builder.md",
 		"explorer.md",
 	]);
+	assert.deepEqual(first.updated, []);
 	assert.deepEqual(first.diagnostics, []);
 
 	writeFileSync(path.join(directory, "explorer.md"), "---\nname: explorer\n---\n\nMine.\n", "utf8");
 	const second = seedBuiltinAgents(directory);
 	assert.deepEqual(second.created, []);
-	assert.equal(discoverPrimaryAgents().agents.get("explorer")?.body, "Mine.");
+	assert.deepEqual(
+		second.updated.map((file) => path.basename(file)),
+		["explorer.md"],
+	);
+	// The built-ins are extension-owned, so the shipped body wins over the edit.
+	assert.notEqual(discoverPrimaryAgents().agents.get("explorer")?.body, "Mine.");
+});
+
+test("a user-named definition is never touched by seeding", () => {
+	const directory = path.join(root, "agents");
+	seedBuiltinAgents(directory);
+	const mine = path.join(directory, "my-explorer.md");
+	const body = "---\nname: my-explorer\n---\n\nMine.\n";
+	writeFileSync(mine, body, "utf8");
+
+	const result = seedBuiltinAgents(directory);
+	assert.deepEqual(result.updated, []);
+	assert.equal(discoverPrimaryAgents().agents.get("my-explorer")?.body, "Mine.");
 });
 
 test("the seeded built-ins parse into usable definitions", () => {
@@ -119,6 +137,8 @@ test("the seeded built-ins parse into usable definitions", () => {
 	}
 	assert.equal(agents.get("explorer")?.model, "haiku");
 	assert.equal(agents.get("builder")?.model, "sonnet");
-	// The explorer must stay read-only, or delegation stops being safe by default.
-	assert.deepEqual(agents.get("explorer")?.tools, ["read", "grep", "find", "ls"]);
+	// The explorer carries bash for the read-only shell toolbox, but never a write tool:
+	// its body, not the tool list, is what keeps it read-only.
+	assert.deepEqual(agents.get("explorer")?.tools, ["read", "grep", "find", "ls", "bash"]);
+	assert.ok(!agents.get("explorer")?.tools.some((tool) => tool === "edit" || tool === "write"));
 });

@@ -32,7 +32,7 @@ test("seeds the built-in definitions and parses them back", () => {
 	assert.deepEqual([...agents.keys()].sort(), ["builder", "explorer"]);
 	const explorer = agents.get("explorer");
 	assert.equal(explorer?.model, "haiku");
-	assert.deepEqual(explorer?.tools, ["read", "grep", "find", "ls"]);
+	assert.deepEqual(explorer?.tools, ["read", "grep", "find", "ls", "bash"]);
 	assert.equal(explorer?.origin, "pi");
 	assert.ok(explorer?.body.startsWith("You are a read-only codebase explorer."));
 	const builder = agents.get("builder");
@@ -40,17 +40,34 @@ test("seeds the built-in definitions and parses them back", () => {
 	assert.ok(builder?.tools.includes("edit"));
 });
 
-test("never overwrites an edited definition on reseed", () => {
+test("replaces a stale definition so an upgrade always lands", () => {
 	const target = path.join(directory, "agents");
 	seedBuiltinAgents(target);
 	const explorer = path.join(target, "explorer.md");
-	const edited = fs.readFileSync(explorer, "utf8").replace("model: haiku", "model: my-own-alias");
-	fs.writeFileSync(explorer, edited);
+	const stale = fs.readFileSync(explorer, "utf8").replace("model: haiku", "model: my-own-alias");
+	fs.writeFileSync(explorer, stale);
 
 	const result = seedBuiltinAgents(target);
 	assert.deepEqual(result.created, []);
+	assert.deepEqual(
+		result.updated.map((file) => path.basename(file)),
+		["explorer.md"],
+	);
 	assert.deepEqual(result.diagnostics, []);
-	assert.equal(fs.readFileSync(explorer, "utf8"), edited);
+	const shipped = BUILTIN_AGENTS.find((agent) => agent.name === "explorer")?.content;
+	assert.equal(fs.readFileSync(explorer, "utf8"), shipped);
+});
+
+test("rewrites nothing when every definition is already current", () => {
+	const target = path.join(directory, "agents");
+	seedBuiltinAgents(target);
+	const before = fs.statSync(path.join(target, "explorer.md")).mtimeMs;
+
+	const result = seedBuiltinAgents(target);
+	assert.deepEqual(result.created, []);
+	assert.deepEqual(result.updated, []);
+	assert.deepEqual(result.diagnostics, []);
+	assert.equal(fs.statSync(path.join(target, "explorer.md")).mtimeMs, before);
 });
 
 test("reports a diagnostic instead of throwing when the directory is unwritable", () => {
@@ -59,6 +76,7 @@ test("reports a diagnostic instead of throwing when the directory is unwritable"
 	fs.writeFileSync(target, "not a directory");
 	const result = seedBuiltinAgents(target);
 	assert.deepEqual(result.created, []);
+	assert.deepEqual(result.updated, []);
 	assert.equal(result.diagnostics.length, 1);
 	assert.match(result.diagnostics[0] ?? "", /Cannot create agent directory/);
 });
