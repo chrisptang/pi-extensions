@@ -5,6 +5,7 @@
 | Parameter | Type | Required | Constraint / default |
 | --- | --- | --- | --- |
 | `task` | `string` | Yes | Self-contained task, up to 50 KiB of UTF-8 text. |
+| `description` | `string` | Yes | Short label shown in the active-jobs widget; truncated to 60 characters for display. |
 | `agent` | `string` | No | Agent definition name, case-insensitive; see [agent definitions](../README.md#-agent-definitions). |
 | `background` | `boolean` | No | `true` runs without blocking and interrupts the main agent when the job ends; defaults to `false`. |
 | `tools` | `string[]` | No | Up to 64 names from `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`; defaults to the agent definition's tools, otherwise `read`, `grep`, `find`, and `ls`. |
@@ -12,6 +13,8 @@
 | `timeout` | `number` | No | Seconds; `> 0` through `2,147,483.647`; no default timeout. |
 
 Starts one task-specialized subagent job with the selected tool capabilities and returns its job ID immediately.
+
+The active-jobs widget labels the job with its `agent` name, or its job ID when no agent was selected, followed by `description`. That is the only place the job announces what it is doing while it runs, so the description should name the work rather than restate the agent. A description longer than 60 characters is truncated for display rather than rejected, so an over-long label never costs the caller a turn.
 
 The runtime always adds `subagent_send` and `subagent_wait` to the selected tools.
 
@@ -46,6 +49,7 @@ The command deliberately never lists the fallback directories, so it reflects ex
 | Parameter | Type | Required | Constraint / default |
 | --- | --- | --- | --- |
 | `name` | `string` | Yes | Skill name, case-insensitive. |
+| `description` | `string` | Yes | Short label shown in the active-jobs widget; truncated to 60 characters for display. |
 | `args` | `string` | No | The caller's request for the skill, up to 50 KiB of UTF-8 text. |
 | `background` | `boolean` | No | `true` runs without blocking and interrupts the main agent when the job ends; defaults to `false`. |
 | `tools` | `string[]` | No | Up to 64 names from `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`; defaults to the skill's translated `allowed-tools`, otherwise `read`, `grep`, `find`, and `ls`. |

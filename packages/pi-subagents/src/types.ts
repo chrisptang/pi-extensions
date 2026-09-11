@@ -79,6 +79,8 @@ export interface JobSummary {
 	jobId: string;
 	/** Agent definition the job runs, when one was selected. */
 	agent?: string;
+	/** Short caller-supplied summary of what the job is doing. */
+	description?: string;
 	state: SubagentJobState;
 	createdAt: number;
 	startedAt?: number;

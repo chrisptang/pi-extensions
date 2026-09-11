@@ -89,18 +89,30 @@ function renderJob(job: ActiveJobDisplay, theme: Theme): string {
 	const running = job.state === "running";
 	const symbol = theme.fg(running ? "accent" : "dim", running ? "▶ " : "○ ");
 	const state = theme.fg(running ? "accent" : "muted", job.state);
-	const jobId = sanitizeLabel(job.jobId);
+	const title = theme.fg("text", jobTitle(job));
+	const summary = jobSummary(job);
 	const tools = job.tools.length > 0 ? job.tools.map(sanitizeLabel).join(", ") : "none";
 	const timeout = job.timeout === undefined ? "no timeout" : formatSeconds(job.timeout);
 	const detail = ` · ${formatSeconds(Math.floor(job.elapsedMs / 1_000))} / ${timeout} · tools: ${tools}`;
-	return `${symbol}${theme.fg("text", jobId)} · ${state}${theme.fg("muted", detail)}`;
+	const summaryPart = summary ? theme.fg("muted", ` · ${summary}`) : "";
+	return `${symbol}${title}${summaryPart} · ${state}${theme.fg("muted", detail)}`;
+}
+
+/** Prefer the agent name; a job without one is only identifiable by its id. */
+function jobTitle(job: ActiveJobDisplay): string {
+	const agent = job.agent === undefined ? "" : sanitizeLabel(job.agent);
+	return agent === "" ? sanitizeLabel(job.jobId) : agent;
+}
+
+function jobSummary(job: ActiveJobDisplay): string {
+	return job.description === undefined ? "" : sanitizeLabel(job.description);
 }
 
 function widgetValue(jobs: readonly ActiveJobDisplay[]): string {
 	return jobs
 		.map(
 			(job) =>
-				`${job.jobId}\0${job.state}\0${Math.floor(job.elapsedMs / 1_000)}\0${job.timeout ?? ""}\0${job.tools.join(",")}`,
+				`${job.jobId}\0${job.agent ?? ""}\0${job.description ?? ""}\0${job.state}\0${Math.floor(job.elapsedMs / 1_000)}\0${job.timeout ?? ""}\0${job.tools.join(",")}`,
 		)
 		.join("\n");
 }

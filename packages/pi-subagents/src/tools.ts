@@ -25,6 +25,10 @@ import {
 } from "./types.js";
 
 const MAX_TASK_BYTES = 50 * 1024;
+/** Width the active-jobs widget can show; longer descriptions are truncated, never rejected. */
+const MAX_DESCRIPTION_LENGTH = 60;
+/** Schema bound only to stop a runaway string; the display limit does the real work. */
+const MAX_DESCRIPTION_INPUT_LENGTH = 1_000;
 const MAX_SKILL_ARGS_BYTES = 50 * 1024;
 const MAX_TOOLS = 64;
 const MESSAGE_TYPE = "pi-subagents-message";
@@ -42,6 +46,11 @@ function buildSpawnParameters(agents: AgentRegistry) {
 			task: Type.String({
 				description: "Self-contained task, constraints, and expected result. Maximum 50 KiB.",
 				maxLength: MAX_TASK_BYTES,
+			}),
+			description: Type.String({
+				description:
+					'Short label for this job, shown in the active-jobs widget while it runs. Say what the job is doing, in a few words: "review auth middleware diff". Anything past 60 characters is truncated for display.',
+				maxLength: MAX_DESCRIPTION_INPUT_LENGTH,
 			}),
 			agent: Type.Optional(
 				Type.String({
@@ -185,6 +194,7 @@ export function registerSubagentTools(
 			throwIfAborted(signal, "Subagent spawn was cancelled");
 			assertNotNested();
 			const task = validateTask(params.task, "subagent_spawn");
+			const description = validateDescription(params.description);
 			const agent = params.agent === undefined ? undefined : requireAgent(agents, params.agent);
 			// Explicit arguments always win over the agent definition's defaults.
 			const tools =
@@ -204,6 +214,7 @@ export function registerSubagentTools(
 					task,
 					tools,
 					model: selected.model ?? inherited,
+					description,
 					...(agent ? { agent: agent.name, systemPrompt: agent.body } : {}),
 					...(selected.limitation ? { limitations: [selected.limitation] } : {}),
 					thinkingLevel,
@@ -228,6 +239,7 @@ export function registerSubagentTools(
 			throwIfAborted(signal, "Skill run was cancelled");
 			assertNotNested();
 			const skill = requireSkill(skills, params.name);
+			const description = validateDescription(params.description);
 			const args = params.args === undefined ? undefined : validateSkillArgs(params.args);
 			// Explicit arguments always win over the skill's declared defaults.
 			const tools = params.tools !== undefined ? resolveTools(params.tools) : skillTools(skill);
@@ -247,6 +259,7 @@ export function registerSubagentTools(
 					tools,
 					model: selected.model ?? inherited,
 					agent: `skill:${skill.name}`,
+					description,
 					systemPrompt: buildSkillSystemPrompt(skill),
 					...(limitations.length > 0 ? { limitations } : {}),
 					thinkingLevel,
@@ -390,6 +403,17 @@ function validateTask(value: string, toolName: string): string {
 	return task;
 }
 
+/**
+ * An over-long description is a display problem, not a caller error, so it is
+ * truncated rather than rejected; a rejection would cost the main agent a turn.
+ */
+function validateDescription(value: string): string {
+	const description = requiredString(value, "description").replace(/\s+/gu, " ").trim();
+	return description.length > MAX_DESCRIPTION_LENGTH
+		? `${description.slice(0, MAX_DESCRIPTION_LENGTH - 1).trimEnd()}…`
+		: description;
+}
+
 function resolveTools(value: unknown): string[] {
 	if (value === undefined) return [...DEFAULT_SUBAGENT_TOOLS];
 	if (!Array.isArray(value) || value.length > MAX_TOOLS) {
@@ -475,6 +499,11 @@ function buildSkillRunParameters(skills: SkillRegistry) {
 			name: Type.String({
 				description: skillParameterDescription(skills),
 				maxLength: MAX_IDENTIFIER_LENGTH,
+			}),
+			description: Type.String({
+				description:
+					'Short label for this job, shown in the active-jobs widget while it runs. Say what the job is doing, in a few words: "review auth middleware diff". Anything past 60 characters is truncated for display.',
+				maxLength: MAX_DESCRIPTION_INPUT_LENGTH,
 			}),
 			args: Type.Optional(
 				Type.String({

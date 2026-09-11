@@ -52,6 +52,10 @@ export interface RuntimeDependencies {
 
 export interface ActiveJobDisplay {
 	jobId: string;
+	/** Agent definition the job runs, when one was selected. */
+	agent?: string;
+	/** Short caller-supplied summary of what the job is doing. */
+	description?: string;
 	state: Extract<SubagentJobState, "queued" | "running">;
 	elapsedMs: number;
 	timeout?: number;
@@ -70,6 +74,8 @@ export interface StartJobInput {
 	systemPrompt?: string;
 	/** Agent name recorded for inspection and completion reporting. */
 	agent?: string;
+	/** Short summary of the task, shown in the active-jobs widget. */
+	description?: string;
 	/** Notes about degraded setup, such as an unresolved model alias. */
 	limitations?: string[];
 	/**
@@ -121,6 +127,8 @@ export class SubagentRuntime {
 			.sort((left, right) => left.createdAt - right.createdAt)
 			.map((job) => ({
 				jobId: job.jobId,
+				...(job.agent ? { agent: job.agent } : {}),
+				...(job.description ? { description: job.description } : {}),
 				state: job.state,
 				elapsedMs: Math.max(0, now - (job.startedAt ?? job.createdAt)),
 				...(job.timeout !== undefined ? { timeout: job.timeout } : {}),
@@ -158,6 +166,7 @@ export class SubagentRuntime {
 		const job: InternalJob = {
 			jobId,
 			...(input.agent ? { agent: input.agent } : {}),
+			...(input.description ? { description: input.description } : {}),
 			state: "queued",
 			createdAt: this.now(),
 			...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
@@ -447,6 +456,7 @@ export class SubagentRuntime {
 		return {
 			jobId: job.jobId,
 			...(job.agent ? { agent: job.agent } : {}),
+			...(job.description ? { description: job.description } : {}),
 			state: job.state,
 			timedOut: false,
 			interrupted: true as const,
@@ -458,6 +468,7 @@ export class SubagentRuntime {
 		return {
 			jobId: job.jobId,
 			...(job.agent ? { agent: job.agent } : {}),
+			...(job.description ? { description: job.description } : {}),
 			state: job.state,
 			timedOut,
 			...(!timedOut && job.result ? { result: job.result } : {}),
@@ -470,6 +481,7 @@ export class SubagentRuntime {
 		return {
 			jobId: job.jobId,
 			...(job.agent ? { agent: job.agent } : {}),
+			...(job.description ? { description: job.description } : {}),
 			state: job.state,
 			createdAt: job.createdAt,
 			...(job.startedAt !== undefined ? { startedAt: job.startedAt } : {}),

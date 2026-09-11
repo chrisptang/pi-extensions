@@ -188,6 +188,27 @@ npm run package:pack -- file-context
 npm run package:pack -- tui-kit
 ```
 
+### Install from a local checkout
+
+`scripts/install.sh` builds packages from this repository and installs them into the local Pi agent:
+
+```bash
+scripts/install.sh                  # install the default set (pi-goal, pi-history, pi-model-alias, pi-subagents)
+scripts/install.sh pi-goal pi-lsp   # install specific packages
+scripts/install.sh --all            # every installable package under packages/
+scripts/install.sh --list           # show installable packages
+scripts/install.sh --uninstall ...  # remove instead of install
+```
+
+Flags:
+
+| Flag | Effect |
+| --- | --- |
+| `--skip-build` | Reuse existing `dist/` output instead of running `npm install` and rebuilding. |
+| `--local`, `-l` | Install into the current project's `.pi/settings.json` instead of the user-level agent. |
+
+A package is installable only when its `package.json` declares a `pi.extensions` entry. Verify the result with `pi list`.
+
 Run `npm run` to see all development, install, pack, and release workflows.
 Pull requests that change published package behavior should add release intent with `npm run changeset`.
 Packages version independently.

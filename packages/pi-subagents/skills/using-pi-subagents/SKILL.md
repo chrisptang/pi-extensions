@@ -26,6 +26,8 @@ Use `subagent_spawn` for one subagent job.
 
 The task defines the child's specialization, objective, constraints, and expected result.
 
+The `description` is a short label the user sees in the active-jobs widget while the job runs, so state what the job is doing in a few words, such as `review auth middleware diff`. Keep it under 60 characters, past which it is truncated for display.
+
 The selected tools define what the child can do.
 
 Select only from `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`.

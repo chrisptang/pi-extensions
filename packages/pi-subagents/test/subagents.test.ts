@@ -231,7 +231,7 @@ test("spawns jobs with default and explicit tools and thinking levels", async ()
 	);
 	const inherited = await tool(mock, "subagent_spawn").execute(
 		"inherited",
-		{ task: "Review one thing", timeout: 1 },
+		{ description: "test job", task: "Review one thing", timeout: 1 },
 		undefined,
 		undefined,
 		context.ctx,
@@ -239,6 +239,7 @@ test("spawns jobs with default and explicit tools and thinking levels", async ()
 	const explicit = await tool(mock, "subagent_spawn").execute(
 		"explicit",
 		{
+			description: "test job",
 			task: "Implement one thing",
 			tools: ["read", "edit", "read", "write"],
 			thinkingLevel: "low",
@@ -277,7 +278,21 @@ test("spawns jobs with default and explicit tools and thinking levels", async ()
 	]);
 });
 
-test("shows active job timing, timeout, and selected tools above the editor", async () => {
+test("truncates an over-long description instead of failing the spawn", async () => {
+	const { mock, context } = await setup({ runChild: async () => completed("done") });
+	const spawned = await tool(mock, "subagent_spawn").execute(
+		"spawn",
+		{ task: "Work", description: `${"a".repeat(40)} ${"b".repeat(40)}` },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	const waited = await waitFor(mock, context, String(spawned.details.jobId));
+	assert.equal(waited.details.description, `${"a".repeat(40)} ${"b".repeat(18)}…`);
+	assert.equal(String(waited.details.description).length, 60);
+});
+
+test("labels active jobs with their agent and description above the editor", async () => {
 	let refreshWidget: (() => void) | undefined;
 	const fakeTimer = { unref() {} } as NodeJS.Timeout;
 	vi.spyOn(globalThis, "setInterval").mockImplementation((callback, delay) => {
@@ -288,13 +303,23 @@ test("shows active job timing, timeout, and selected tools above the editor", as
 	const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
 	let now = 0;
 	const { mock, context } = await setup(
-		{ now: () => now, runChild: waitForCancellation },
+		{
+			now: () => now,
+			runChild: waitForCancellation,
+			agents: agentRegistry([agentDefinition({ name: "explorer" })]),
+		},
 		{},
 		{ mode: "tui" },
 	);
-	const first = await tool(mock, "subagent_spawn").execute(
+	await tool(mock, "subagent_spawn").execute(
 		"first",
-		{ task: "First", tools: ["read", "edit"], timeout: 120 },
+		{
+			description: "review auth middleware",
+			task: "First",
+			agent: "explorer",
+			tools: ["read", "edit"],
+			timeout: 120,
+		},
 		undefined,
 		undefined,
 		context.ctx,
@@ -307,22 +332,17 @@ test("shows active job timing, timeout, and selected tools above the editor", as
 		| ((_tui: unknown, theme: Theme) => Component)
 		| undefined;
 	assert.equal(typeof factory, "function");
-	const lines = factory?.({}, identityTheme()).render(80) ?? [];
-	assert.equal(lines[0], "─".repeat(80));
+	const lines = factory?.({}, identityTheme()).render(120) ?? [];
+	assert.equal(lines[0], "─".repeat(120));
 	assert.equal(lines[1], "Subagents · 2 active");
-	assert.match(
-		lines[2] ?? "",
-		new RegExp(
-			`^▶ ${String(first.details.jobId)} · running · 1m 5s / 2m · tools: read, edit$`,
-			"u",
-		),
+	assert.equal(
+		lines[2],
+		"▶ explorer · review auth middleware · running · 1m 5s / 2m · tools: read, edit",
 	);
-	assert.match(
-		lines[3] ?? "",
-		new RegExp(
-			`^▶ ${String(second.details.jobId)} · running · 0s / no timeout · tools: read, grep, find, ls$`,
-			"u",
-		),
+	// A job spawned without an agent has only its id to identify it.
+	assert.equal(
+		lines[3],
+		`▶ ${String(second.details.jobId)} · test job · running · 0s / no timeout · tools: read, grep, find, ls`,
 	);
 	now = 66_000;
 	assert.ok(refreshWidget);
@@ -360,7 +380,7 @@ test("falls back to the Pi thinking level when context has none", async () => {
 	);
 	const spawned = await tool(mock, "subagent_spawn").execute(
 		"spawn",
-		{ task: "Reason carefully", tools: [] },
+		{ description: "test job", task: "Reason carefully", tools: [] },
 		undefined,
 		undefined,
 		context.ctx,
@@ -380,20 +400,31 @@ test("rejects invalid spawn arguments and nesting before child launch", async ()
 	});
 	const spawn = tool(mock, "subagent_spawn");
 	for (const params of [
-		{ task: "bad tools", tools: "read" },
-		{ task: "bad item", tools: [1] },
-		{ task: "too many", tools: Array.from({ length: 65 }, (_, index) => `tool_${index}`) },
-		{ task: "bad name", tools: ["read,bash"] },
-		{ task: "typo", tools: ["baash"] },
-		{ task: "extension tool", tools: ["subagent_spawn"] },
-		{ task: "bad thinking", thinkingLevel: "turbo" },
-		{ task: "bad timeout", timeout: 0 },
+		{ description: "test job", task: "bad tools", tools: "read" },
+		{ description: "test job", task: "bad item", tools: [1] },
+		{
+			description: "test job",
+			task: "too many",
+			tools: Array.from({ length: 65 }, (_, index) => `tool_${index}`),
+		},
+		{ description: "test job", task: "bad name", tools: ["read,bash"] },
+		{ description: "test job", task: "typo", tools: ["baash"] },
+		{ description: "test job", task: "extension tool", tools: ["subagent_spawn"] },
+		{ description: "test job", task: "bad thinking", thinkingLevel: "turbo" },
+		{ description: "test job", task: "bad timeout", timeout: 0 },
 	]) {
 		await assert.rejects(() => spawn.execute("invalid", params, undefined, undefined, context.ctx));
 	}
 	process.env.PI_SUBAGENT_DEPTH = "1";
 	await assert.rejects(
-		() => spawn.execute("nested", { task: "nested" }, undefined, undefined, context.ctx),
+		() =>
+			spawn.execute(
+				"nested",
+				{ description: "test job", task: "nested" },
+				undefined,
+				undefined,
+				context.ctx,
+			),
 		/nested subagents/i,
 	);
 	delete process.env.PI_SUBAGENT_DEPTH;
@@ -402,7 +433,7 @@ test("rejects invalid spawn arguments and nesting before child launch", async ()
 		() =>
 			spawn.execute(
 				"missing-model",
-				{ task: "missing model" },
+				{ description: "test job", task: "missing model" },
 				undefined,
 				undefined,
 				missingModelContext.ctx,
@@ -413,7 +444,13 @@ test("rejects invalid spawn arguments and nesting before child launch", async ()
 	controller.abort();
 	await assert.rejects(
 		() =>
-			spawn.execute("cancelled", { task: "cancelled" }, controller.signal, undefined, context.ctx),
+			spawn.execute(
+				"cancelled",
+				{ description: "test job", task: "cancelled" },
+				controller.signal,
+				undefined,
+				context.ctx,
+			),
 		(error: Error) => error.name === "AbortError",
 	);
 	assert.equal(launches, 0);
@@ -490,6 +527,7 @@ test("delivers child questions, interrupts parent waits, and returns plain-text 
 	assert.equal(Object.hasOwn(inspected.details, "agents"), false);
 	assert.deepEqual((await parentWait).details, {
 		jobId: spawned.details.jobId,
+		description: "test job",
 		state: "running",
 		timedOut: false,
 		interrupted: true,
@@ -585,6 +623,7 @@ test("sends a queued main request to a running child and delivers one child resp
 	});
 	assert.deepEqual((await parentWait).details, {
 		jobId: spawned.details.jobId,
+		description: "test job",
 		state: "running",
 		timedOut: false,
 		interrupted: true,
@@ -673,6 +712,7 @@ test("replays a child response once when it arrives before the main wait", async
 
 	assert.deepEqual((await waitFor(mock, context, String(spawned.details.jobId))).details, {
 		jobId: spawned.details.jobId,
+		description: "test job",
 		state: "running",
 		timedOut: false,
 		interrupted: true,
@@ -688,7 +728,7 @@ test("replays a child response once when it arrives before the main wait", async
 				context.ctx,
 			)
 		).details,
-		{ jobId: spawned.details.jobId, state: "running", timedOut: true },
+		{ jobId: spawned.details.jobId, description: "test job", state: "running", timedOut: true },
 	);
 	await cancelJob(mock, context, String(spawned.details.jobId));
 });
@@ -965,7 +1005,7 @@ test("wait timeout leaves a job active and cancellation rejects stale output", a
 				context.ctx,
 			)
 		).details,
-		{ jobId, state: "running", timedOut: true },
+		{ jobId, description: "test job", state: "running", timedOut: true },
 	);
 	assert.deepEqual((await cancelJob(mock, context, jobId)).details, {
 		jobId,
@@ -1094,7 +1134,7 @@ test("spawns with an agent definition, letting explicit arguments override it", 
 	});
 	const spawned = await tool(mock, "subagent_spawn").execute(
 		"spawn",
-		{ task: "Map the package", agent: "EXPLORER" },
+		{ description: "test job", task: "Map the package", agent: "EXPLORER" },
 		undefined,
 		undefined,
 		context.ctx,
@@ -1107,7 +1147,13 @@ test("spawns with an agent definition, letting explicit arguments override it", 
 
 	const overridden = await tool(mock, "subagent_spawn").execute(
 		"spawn",
-		{ task: "Edit the package", agent: "explorer", tools: ["read", "edit"], thinkingLevel: "high" },
+		{
+			description: "test job",
+			task: "Edit the package",
+			agent: "explorer",
+			tools: ["read", "edit"],
+			thinkingLevel: "high",
+		},
 		undefined,
 		undefined,
 		context.ctx,
@@ -1132,7 +1178,7 @@ test("advertises only primary agents but spawns fallback ones by name", async ()
 	assert.doesNotMatch(description, /reviewer/);
 	const spawned = await tool(mock, "subagent_spawn").execute(
 		"spawn",
-		{ task: "Review", agent: "reviewer" },
+		{ description: "test job", task: "Review", agent: "reviewer" },
 		undefined,
 		undefined,
 		context.ctx,
@@ -1154,7 +1200,7 @@ test("rejects an unknown agent without starting a job", async () => {
 		() =>
 			tool(mock, "subagent_spawn").execute(
 				"spawn",
-				{ task: "Do work", agent: "missing" },
+				{ description: "test job", task: "Do work", agent: "missing" },
 				undefined,
 				undefined,
 				context.ctx,
@@ -1168,7 +1214,7 @@ test("background spawns trigger a turn on completion and blocking spawns do not"
 	const { mock, context } = await setup({ runChild: async () => completed("finished") });
 	const background = await tool(mock, "subagent_spawn").execute(
 		"spawn",
-		{ task: "Run in background", background: true },
+		{ description: "test job", task: "Run in background", background: true },
 		undefined,
 		undefined,
 		context.ctx,
@@ -1233,7 +1279,7 @@ test("skill_run sends the skill body as the system prompt and the request as the
 	});
 	const started = await tool(mock, "skill_run").execute(
 		"skill",
-		{ name: "DEPLOY", args: "Ship version 2.1 to staging." },
+		{ name: "DEPLOY", description: "test job", args: "Ship version 2.1 to staging." },
 		undefined,
 		undefined,
 		context.ctx,
@@ -1264,7 +1310,7 @@ test("skill_run runs a skill with no args and lets explicit arguments override i
 	});
 	await tool(mock, "skill_run").execute(
 		"skill",
-		{ name: "audit" },
+		{ description: "test job", name: "audit" },
 		undefined,
 		undefined,
 		context.ctx,
@@ -1274,7 +1320,7 @@ test("skill_run runs a skill with no args and lets explicit arguments override i
 
 	await tool(mock, "skill_run").execute(
 		"skill",
-		{ name: "audit", tools: ["read", "edit"], thinkingLevel: "high" },
+		{ description: "test job", name: "audit", tools: ["read", "edit"], thinkingLevel: "high" },
 		undefined,
 		undefined,
 		context.ctx,
@@ -1300,7 +1346,7 @@ test("skill_run falls back to read-only tools when a skill grants none", async (
 	});
 	const started = await tool(mock, "skill_run").execute(
 		"skill",
-		{ name: "delegating" },
+		{ description: "test job", name: "delegating" },
 		undefined,
 		undefined,
 		context.ctx,
@@ -1324,7 +1370,7 @@ test("model inherit spawns with the main agent's model and reports no limitation
 
 	const spawned = await tool(mock, "subagent_spawn").execute(
 		"spawn",
-		{ task: "Explore", agent: "inheriting" },
+		{ description: "test job", task: "Explore", agent: "inheriting" },
 		undefined,
 		undefined,
 		context.ctx,
@@ -1336,7 +1382,7 @@ test("model inherit spawns with the main agent's model and reports no limitation
 
 	const ran = await tool(mock, "skill_run").execute(
 		"skill",
-		{ name: "inheriting-skill" },
+		{ description: "test job", name: "inheriting-skill" },
 		undefined,
 		undefined,
 		context.ctx,
@@ -1351,7 +1397,13 @@ test("skill_run rejects an unknown skill and names the alternatives", async () =
 		skills: skillRegistry(skillDefinition({ name: "deploy" })),
 	});
 	await assert.rejects(
-		tool(mock, "skill_run").execute("skill", { name: "absent" }, undefined, undefined, context.ctx),
+		tool(mock, "skill_run").execute(
+			"skill",
+			{ description: "test job", name: "absent" },
+			undefined,
+			undefined,
+			context.ctx,
+		),
 		/Unknown skill: absent\. Available: deploy\./,
 	);
 });
@@ -1471,7 +1523,13 @@ function tool(mock: Mock, name: string): RegisteredTool {
 }
 
 function spawnJob(mock: Mock, context: Context, task: string) {
-	return tool(mock, "subagent_spawn").execute("spawn", { task }, undefined, undefined, context.ctx);
+	return tool(mock, "subagent_spawn").execute(
+		"spawn",
+		{ task, description: "test job" },
+		undefined,
+		undefined,
+		context.ctx,
+	);
 }
 
 function waitFor(mock: Mock, context: Context, jobId: string) {

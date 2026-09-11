@@ -81,8 +81,8 @@ The main Pi session exposes six fixed tools and the `/agents` and `/skills` comm
 
 | Tool | Parameters | Purpose |
 | --- | --- | --- |
-| `subagent_spawn` | `task`, optional `agent`, `background`, `tools`, `thinkingLevel`, `timeout` | Start one subagent job and return its `jobId`. |
-| `skill_run` | `name`, optional `args`, `background`, `tools`, `thinkingLevel`, `timeout` | Run one skill inside a subagent and return its `jobId`. |
+| `subagent_spawn` | `task`, `description`, optional `agent`, `background`, `tools`, `thinkingLevel`, `timeout` | Start one subagent job and return its `jobId`. |
+| `skill_run` | `name`, `description`, optional `args`, `background`, `tools`, `thinkingLevel`, `timeout` | Run one skill inside a subagent and return its `jobId`. |
 | `subagent_inspect` | none | List privacy-filtered retained-job metadata. |
 | `subagent_cancel` | `jobId` | Idempotently cancel one queued or running job. |
 | `subagent_wait` | `jobId`, optional `timeout` | Wait for a job or return early for an incoming child message. |
