@@ -207,3 +207,5 @@ vite.config.ts.timestamp-*
 **/.pi-*-dist-*/
 docs/plans/archived/
 docs/roadmaps/archived/
+
+.claude/memory/
