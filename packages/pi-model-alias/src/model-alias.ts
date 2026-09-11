@@ -1,13 +1,12 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type {
-	ExtensionAPI,
-	ExtensionCommandContext,
-	ExtensionContext,
+import {
+	type ExtensionAPI,
+	type ExtensionCommandContext,
+	type ExtensionContext,
+	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-import { type AliasDefinition, loadAliases, resolveAlias } from "./aliases.js";
-
-const AGENT_DIR = process.env.PI_CODING_AGENT_DIR ?? `${process.env.HOME}/.pi/agent`;
+import { type AliasDefinition, type LoadedAliases, loadAliases, resolveAlias } from "./aliases.js";
 
 interface RestorePoint {
 	model: Model<Api>;
@@ -16,9 +15,15 @@ interface RestorePoint {
 }
 
 export default function modelAlias(pi: ExtensionAPI): void {
-	let loaded = loadAliases(AGENT_DIR);
+	/** Populated on first use so the factory does no file or agent-dir work at load. */
+	let loaded: LoadedAliases | undefined;
 	/** Set while a skill-scoped model override is active; restored at the idle boundary. */
 	let pendingRestore: RestorePoint | undefined;
+
+	const aliases = (warn?: (message: string) => void): LoadedAliases => {
+		loaded ??= loadAliases(getAgentDir(), warn);
+		return loaded;
+	};
 
 	const describe = (model: Model<Api>) => `${model.provider}/${model.id}`;
 
@@ -46,7 +51,7 @@ export default function modelAlias(pi: ExtensionAPI): void {
 	pi.registerCommand("ma", {
 		description: "Switch the session model using a configured alias",
 		getArgumentCompletions: (prefix: string) => {
-			const items = [...loaded.aliases.entries()]
+			const items = [...aliases().aliases.entries()]
 				.filter(([name]) => name.startsWith(prefix))
 				.map(([name, definition]) => ({
 					value: name,
@@ -61,14 +66,14 @@ export default function modelAlias(pi: ExtensionAPI): void {
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			const name = args.trim();
 			if (!name) {
-				const names = [...loaded.aliases.keys()];
+				const names = [...aliases().aliases.keys()];
 				ctx.ui.notify(
 					names.length > 0 ? `Aliases: ${names.join(", ")}` : "No aliases configured.",
 					"info",
 				);
 				return;
 			}
-			const definition = loaded.aliases.get(name);
+			const definition = aliases().aliases.get(name);
 			if (!definition) {
 				ctx.ui.notify(`Unknown alias "${name}".`, "error");
 				return;
@@ -91,8 +96,9 @@ export default function modelAlias(pi: ExtensionAPI): void {
 	pi.registerCommand("model-alias-reload", {
 		description: "Reload model alias definitions from disk",
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
-			loaded = loadAliases(AGENT_DIR, (message) => ctx.ui.notify(message, "warning"));
-			ctx.ui.notify(`Loaded ${loaded.aliases.size} aliases.`, "info");
+			const reloaded = loadAliases(getAgentDir(), (message) => ctx.ui.notify(message, "warning"));
+			loaded = reloaded;
+			ctx.ui.notify(`Loaded ${reloaded.aliases.size} aliases.`, "info");
 		},
 	});
 
@@ -105,12 +111,12 @@ export default function modelAlias(pi: ExtensionAPI): void {
 		const match = /^\/skill:([a-z0-9-]+)/.exec(event.text.trim());
 		if (!match) return { action: "continue" };
 
-		const definition: AliasDefinition | undefined = loaded.skills.get(match[1]);
+		const definition: AliasDefinition | undefined = aliases().skills.get(match[1]);
 		if (!definition) return { action: "continue" };
 
 		// An alias may be used as the skill target indirection, so resolve it first.
 		const aliased =
-			(definition.models.length === 1 ? loaded.aliases.get(definition.models[0]) : undefined) ??
+			(definition.models.length === 1 ? aliases().aliases.get(definition.models[0]) : undefined) ??
 			definition;
 		const resolved = resolveAlias(aliased, registryLookup(ctx));
 		if (!resolved) {

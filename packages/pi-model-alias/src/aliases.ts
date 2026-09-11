@@ -99,7 +99,11 @@ function normalizeDefinition(value: AliasInput): AliasDefinition | undefined {
 		if (models.length !== value.models.length || models.length === 0) return undefined;
 		return { models, thinkingLevel: level };
 	}
-	if (typeof value.model === "string") return { models: [value.model], thinkingLevel: level };
+	if (typeof value.model === "string") {
+		// Strip a `:level` suffix here too, so the single-value form matches the string form.
+		const parsed = splitThinkingSuffix(value.model.trim());
+		return { models: [parsed.model], thinkingLevel: level ?? parsed.thinkingLevel };
+	}
 	return undefined;
 }
 
