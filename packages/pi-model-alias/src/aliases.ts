@@ -180,6 +180,10 @@ export interface ResolveResult {
 	thinkingLevel?: ThinkingLevel;
 	/** Number of candidates that were registered and had credentials. */
 	candidateCount: number;
+	/** True when the model came from the session's sticky pick rather than a fresh draw. */
+	sticky: boolean;
+	/** Usable candidates currently sidelined by a rate limit, excluded from the pick. */
+	cooledDown: number;
 }
 
 export interface ResolveAliasOptions {
@@ -188,18 +192,32 @@ export interface ResolveAliasOptions {
 	hasAuth?: (model: Model<Api>) => boolean;
 	/** Injectable for deterministic tests; defaults to `Math.random`. */
 	random?: () => number;
+	/** Drops candidates a provider has rate-limited until their cooldown expires. */
+	isCoolingDown?: (model: Model<Api>) => boolean;
+	/**
+	 * The model this alias already settled on in this session. It is reused whenever
+	 * it is still usable, so an alias stays on one model instead of redrawing.
+	 */
+	sticky?: Model<Api>;
 }
 
 /**
- * Resolve an alias to one usable model. With several candidates, unregistered and
- * uncredentialed ones are dropped first and one of the rest is picked at random,
- * so a logged-out or offline provider does not break the alias.
+ * Resolve an alias to one usable model.
+ *
+ * Candidates are filtered in three stages — registered in Pi, holding credentials,
+ * and not currently rate-limited — before a pick is made. A `sticky` model that
+ * survives those filters is reused, which keeps an alias on one model for the whole
+ * session; otherwise one of the survivors is drawn at random.
+ *
+ * Cooldown is deliberately the last filter and never empties the pool on its own:
+ * when every candidate is sidelined, the least-bad option is still to return one
+ * rather than fail the switch, since the limit may have lifted early.
  */
 export function resolveAlias(
 	definition: AliasDefinition,
 	options: ResolveAliasOptions,
 ): ResolveResult | undefined {
-	const { find, hasAuth, random = Math.random } = options;
+	const { find, hasAuth, random = Math.random, isCoolingDown, sticky } = options;
 
 	const registered: Model<Api>[] = [];
 	for (const reference of definition.models) {
@@ -215,10 +233,21 @@ export function resolveAlias(
 	// switching to a model that cannot serve a request.
 	if (usable.length === 0) return undefined;
 
-	const picked = usable[Math.min(usable.length - 1, Math.floor(random() * usable.length))];
+	const available = isCoolingDown ? usable.filter((model) => !isCoolingDown(model)) : usable;
+	// All candidates sidelined: fall back to the full set rather than refusing to
+	// switch, and let the provider decide whether the limit has actually cleared.
+	const pool = available.length > 0 ? available : usable;
+	const cooledDown = usable.length - available.length;
+
+	const held =
+		sticky && pool.find((model) => model.provider === sticky.provider && model.id === sticky.id);
+	const picked = held ?? pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))];
+
 	return {
 		model: picked,
 		thinkingLevel: definition.thinkingLevel,
 		candidateCount: usable.length,
+		sticky: held !== undefined,
+		cooledDown,
 	};
 }

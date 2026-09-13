@@ -7,6 +7,7 @@ import {
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import { type AliasDefinition, type LoadedAliases, loadAliases, resolveAlias } from "./aliases.js";
+import { CooldownRegistry } from "./cooldown.js";
 
 interface RestorePoint {
 	model: Model<Api>;
@@ -14,11 +15,34 @@ interface RestorePoint {
 	thinkingLevel: ThinkingLevel | undefined;
 }
 
+/** HTTP statuses that mean "this model is busy", as opposed to a broken request. */
+function isRateLimited(status: number): boolean {
+	return status === 429 || status === 503;
+}
+
+function formatDuration(ms: number): string {
+	const seconds = Math.ceil(ms / 1000);
+	if (seconds < 60) return `${seconds}s`;
+	return `${Math.ceil(seconds / 60)}m`;
+}
+
 export default function modelAlias(pi: ExtensionAPI): void {
 	/** Populated on first use so the factory does no file or agent-dir work at load. */
 	let loaded: LoadedAliases | undefined;
 	/** Set while a skill-scoped model override is active; restored at the idle boundary. */
 	let pendingRestore: RestorePoint | undefined;
+	/** Rate-limited candidates, sidelined until their `retry-after` window elapses. */
+	const cooldowns = new CooldownRegistry();
+	/**
+	 * The model each alias settled on for this session. Resolution reuses it while it
+	 * stays usable, so an alias does not redraw a different candidate on every switch.
+	 */
+	const sticky = new Map<string, Model<Api>>();
+	/**
+	 * The alias that put the current model in flight. `after_provider_response` reports
+	 * a status but not a model, so this is what a rate limit gets attributed to.
+	 */
+	let inFlight: { alias: string; model: Model<Api> } | undefined;
 
 	const aliases = (warn?: (message: string) => void): LoadedAliases => {
 		loaded ??= loadAliases(getAgentDir(), warn);
@@ -27,9 +51,11 @@ export default function modelAlias(pi: ExtensionAPI): void {
 
 	const describe = (model: Model<Api>) => `${model.provider}/${model.id}`;
 
-	const registryLookup = (ctx: ExtensionContext) => ({
+	const registryLookup = (ctx: ExtensionContext, alias?: string) => ({
 		find: (provider: string, modelId: string) => ctx.modelRegistry.find(provider, modelId),
 		hasAuth: (model: Model<Api>) => ctx.modelRegistry.hasConfiguredAuth(model),
+		isCoolingDown: (model: Model<Api>) => cooldowns.isCoolingDown(model),
+		sticky: alias ? sticky.get(alias) : undefined,
 	});
 
 	const applyModel = async (
@@ -57,9 +83,11 @@ export default function modelAlias(pi: ExtensionAPI): void {
 					value: name,
 					label: name,
 					description:
-						definition.models.length > 1
-							? `${definition.models.length} candidates (random)`
-							: definition.models[0],
+						sticky.get(name) !== undefined
+							? `${describe(sticky.get(name) as Model<Api>)} (held)`
+							: definition.models.length > 1
+								? `${definition.models.length} candidates (random)`
+								: definition.models[0],
 				}));
 			return items.length > 0 ? items : null;
 		},
@@ -78,7 +106,7 @@ export default function modelAlias(pi: ExtensionAPI): void {
 				ctx.ui.notify(`Unknown alias "${name}".`, "error");
 				return;
 			}
-			const resolved = resolveAlias(definition, registryLookup(ctx));
+			const resolved = resolveAlias(definition, registryLookup(ctx, name));
 			if (!resolved) {
 				ctx.ui.notify(
 					`Alias "${name}" has no registered candidate with usable credentials.`,
@@ -87,7 +115,13 @@ export default function modelAlias(pi: ExtensionAPI): void {
 				return;
 			}
 			if (await applyModel(ctx, resolved)) {
-				const suffix = resolved.candidateCount > 1 ? ` (1 of ${resolved.candidateCount})` : "";
+				sticky.set(name, resolved.model);
+				inFlight = { alias: name, model: resolved.model };
+				const suffix = resolved.sticky
+					? " (held)"
+					: resolved.candidateCount > 1
+						? ` (1 of ${resolved.candidateCount})`
+						: "";
 				ctx.ui.notify(`Model: ${describe(resolved.model)}${suffix}`, "info");
 			}
 		},
@@ -98,6 +132,10 @@ export default function modelAlias(pi: ExtensionAPI): void {
 		handler: async (_args: string, ctx: ExtensionCommandContext) => {
 			const reloaded = loadAliases(getAgentDir(), (message) => ctx.ui.notify(message, "warning"));
 			loaded = reloaded;
+			// Definitions may no longer list the held candidates, so drop the session's
+			// picks and let the next switch settle on the new configuration.
+			sticky.clear();
+			inFlight = undefined;
 			ctx.ui.notify(`Loaded ${reloaded.aliases.size} aliases.`, "info");
 		},
 	});
@@ -115,10 +153,14 @@ export default function modelAlias(pi: ExtensionAPI): void {
 		if (!definition) return { action: "continue" };
 
 		// An alias may be used as the skill target indirection, so resolve it first.
-		const aliased =
-			(definition.models.length === 1 ? aliases().aliases.get(definition.models[0]) : undefined) ??
-			definition;
-		const resolved = resolveAlias(aliased, registryLookup(ctx));
+		const aliasName = definition.models.length === 1 ? definition.models[0] : undefined;
+		const aliased = (aliasName ? aliases().aliases.get(aliasName) : undefined) ?? definition;
+		// A skill pointing at an alias shares that alias's held model; one with inline
+		// candidates keys its own entry, so the two do not collide in the sticky map.
+		const stickyKey =
+			aliasName && aliases().aliases.has(aliasName) ? aliasName : `skill:${match[1]}`;
+
+		const resolved = resolveAlias(aliased, registryLookup(ctx, stickyKey));
 		if (!resolved) {
 			ctx.ui.notify(
 				`Skill "${match[1]}" has no usable model candidate; using current model.`,
@@ -128,7 +170,11 @@ export default function modelAlias(pi: ExtensionAPI): void {
 		}
 
 		const current = ctx.model;
-		if (current && describe(current) === describe(resolved.model)) return { action: "continue" };
+		if (current && describe(current) === describe(resolved.model)) {
+			sticky.set(stickyKey, resolved.model);
+			inFlight = { alias: stickyKey, model: resolved.model };
+			return { action: "continue" };
+		}
 
 		if (current && !pendingRestore)
 			pendingRestore = { model: current, thinkingLevel: ctx.thinkingLevel };
@@ -137,8 +183,68 @@ export default function modelAlias(pi: ExtensionAPI): void {
 			pendingRestore = undefined;
 			return { action: "continue" };
 		}
+		sticky.set(stickyKey, resolved.model);
+		inFlight = { alias: stickyKey, model: resolved.model };
 		ctx.ui.notify(`Skill ${match[1]} -> ${describe(resolved.model)}`, "info");
 		return { action: "continue" };
+	});
+
+	// ---------------------------------------------------------------------------
+	// Feature 3: a rate-limited candidate is sidelined and the alias rotates.
+	//
+	// `after_provider_response` observes the status but cannot alter the request in
+	// flight, and Pi retries the same model on its own. So the rotation lands on the
+	// next turn: the failing candidate is put on cooldown and the alias is re-resolved
+	// straight away, which `prepareNextTurn` picks up when the turn boundary arrives.
+	// ---------------------------------------------------------------------------
+	pi.on("after_provider_response", async (event, ctx) => {
+		if (!isRateLimited(event.status)) return;
+
+		const active = inFlight;
+		if (!active) return;
+		// Only attribute the limit when the session is still on the model we switched to;
+		// anything else means the user or another extension has since taken over.
+		const current = ctx.model;
+		if (current && describe(current) !== describe(active.model)) return;
+
+		const definition =
+			aliases().aliases.get(active.alias) ??
+			aliases().skills.get(active.alias.replace(/^skill:/u, ""));
+		const cooldownMs = cooldowns.penalize(active.model, event.headers);
+
+		// A single-candidate alias has nowhere to rotate to; the cooldown still records
+		// the limit so a later switch can report it, but the model has to stay put.
+		if (!definition || definition.models.length < 2) {
+			ctx.ui.notify(
+				`${describe(active.model)} is rate limited; retrying it (no other candidate).`,
+				"warning",
+			);
+			return;
+		}
+
+		// Drop the held pick so resolution is free to draw a different candidate.
+		if (
+			sticky.get(active.alias) &&
+			describe(sticky.get(active.alias) as Model<Api>) === describe(active.model)
+		)
+			sticky.delete(active.alias);
+
+		const resolved = resolveAlias(definition, registryLookup(ctx, active.alias));
+		if (!resolved || describe(resolved.model) === describe(active.model)) {
+			ctx.ui.notify(
+				`${describe(active.model)} is rate limited; every candidate is cooling down.`,
+				"warning",
+			);
+			return;
+		}
+
+		if (!(await applyModel(ctx, resolved))) return;
+		sticky.set(active.alias, resolved.model);
+		inFlight = { alias: active.alias, model: resolved.model };
+		ctx.ui.notify(
+			`${describe(active.model)} rate limited (${formatDuration(cooldownMs)}); switching to ${describe(resolved.model)}.`,
+			"warning",
+		);
 	});
 
 	// `agent_settled` is the idle boundary: retries, compaction, and follow-ups are done.
@@ -148,12 +254,19 @@ export default function modelAlias(pi: ExtensionAPI): void {
 		pendingRestore = undefined;
 		if (await pi.setModel(restore.model)) {
 			if (restore.thinkingLevel) pi.setThinkingLevel(restore.thinkingLevel);
+			// The restored model is the user's own choice, not an alias pick, so a later
+			// rate limit on it must not be blamed on whichever alias ran the skill.
+			inFlight = undefined;
 			ctx.ui.notify(`Model restored: ${describe(restore.model)}`, "info");
 		}
 	});
 
-	// A replaced session invalidates the restore point.
+	// A replaced session invalidates the restore point, the held picks, and the
+	// cooldowns, all of which are scoped to one session by design.
 	pi.on("session_start", async () => {
 		pendingRestore = undefined;
+		sticky.clear();
+		cooldowns.clear();
+		inFlight = undefined;
 	});
 }

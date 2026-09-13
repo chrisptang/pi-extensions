@@ -277,3 +277,265 @@ test("the reload command re-reads the configuration file", async () => {
 
 	assert.match(notifications.at(-1)?.message ?? "", /2 aliases/u);
 });
+
+test("/ma holds the same model across repeated switches", async () => {
+	useAgentDir({ aliases: { pool: ["local/a", "local/b", "local/c"] } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([
+			{ provider: "local", id: "a" },
+			{ provider: "local", id: "b" },
+			{ provider: "local", id: "c" },
+		]),
+	});
+
+	for (let index = 0; index < 30; index += 1) {
+		await harness.commands.get("ma")?.handler("pool", ctx);
+	}
+
+	const chosen = new Set(harness.setModels.map((entry) => (entry as { id: string }).id));
+	assert.equal(chosen.size, 1);
+});
+
+test("/ma reports a held model rather than a candidate count", async () => {
+	useAgentDir({ aliases: { pool: ["local/a", "local/b"] } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx, notifications } = createMockContext({
+		modelRegistry: registryFor([
+			{ provider: "local", id: "a" },
+			{ provider: "local", id: "b" },
+		]),
+	});
+
+	await harness.commands.get("ma")?.handler("pool", ctx);
+	assert.match(notifications.at(-1)?.message ?? "", /1 of 2/u);
+	await harness.commands.get("ma")?.handler("pool", ctx);
+	assert.match(notifications.at(-1)?.message ?? "", /\(held\)/u);
+});
+
+test("a rate limit sidelines the candidate and switches to another", async () => {
+	useAgentDir({ aliases: { pool: ["local/a", "local/b"] } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const registry = registryFor([
+		{ provider: "local", id: "a" },
+		{ provider: "local", id: "b" },
+	]);
+	const { ctx, notifications } = createMockContext({ modelRegistry: registry });
+
+	await harness.commands.get("ma")?.handler("pool", ctx);
+	const first = harness.setModels.at(-1) as { id: string };
+	// The session is on the model the alias just picked, as it would be in a real run.
+	ctx.model = first as never;
+
+	await harness.events.get("after_provider_response")?.[0]?.(
+		{ type: "after_provider_response", status: 429, headers: { "retry-after": "30" } },
+		ctx,
+	);
+
+	const second = harness.setModels.at(-1) as { id: string };
+	assert.notEqual(second.id, first.id);
+	assert.match(notifications.at(-1)?.message ?? "", /rate limited \(30s\)/u);
+});
+
+test("the sidelined candidate is not drawn again while it cools down", async () => {
+	useAgentDir({ aliases: { pool: ["local/a", "local/b"] } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([
+			{ provider: "local", id: "a" },
+			{ provider: "local", id: "b" },
+		]),
+	});
+
+	await harness.commands.get("ma")?.handler("pool", ctx);
+	const first = harness.setModels.at(-1) as { id: string };
+	ctx.model = first as never;
+	await harness.events.get("after_provider_response")?.[0]?.(
+		{ type: "after_provider_response", status: 429, headers: { "retry-after": "300" } },
+		ctx,
+	);
+
+	const after = harness.setModels.at(-1) as { id: string };
+	for (let index = 0; index < 20; index += 1) {
+		await harness.commands.get("ma")?.handler("pool", ctx);
+		assert.equal((harness.setModels.at(-1) as { id: string }).id, after.id);
+	}
+});
+
+test("a successful response leaves the model alone", async () => {
+	useAgentDir({ aliases: { pool: ["local/a", "local/b"] } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([
+			{ provider: "local", id: "a" },
+			{ provider: "local", id: "b" },
+		]),
+	});
+
+	await harness.commands.get("ma")?.handler("pool", ctx);
+	ctx.model = harness.setModels.at(-1) as never;
+	await harness.events.get("after_provider_response")?.[0]?.(
+		{ type: "after_provider_response", status: 200, headers: {} },
+		ctx,
+	);
+
+	assert.equal(harness.setModels.length, 1);
+});
+
+test("a rate limit on a single-candidate alias warns without switching", async () => {
+	useAgentDir({ aliases: { only: "local/a" } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx, notifications } = createMockContext({
+		modelRegistry: registryFor([{ provider: "local", id: "a" }]),
+	});
+
+	await harness.commands.get("ma")?.handler("only", ctx);
+	ctx.model = harness.setModels.at(-1) as never;
+	await harness.events.get("after_provider_response")?.[0]?.(
+		{ type: "after_provider_response", status: 429, headers: {} },
+		ctx,
+	);
+
+	assert.equal(harness.setModels.length, 1);
+	assert.match(notifications.at(-1)?.message ?? "", /no other candidate/u);
+});
+
+/** A limit hit after the user moved off the alias must not be blamed on the alias. */
+test("a rate limit on a model the alias did not select is ignored", async () => {
+	useAgentDir({ aliases: { pool: ["local/a", "local/b"] } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([
+			{ provider: "local", id: "a" },
+			{ provider: "local", id: "b" },
+		]),
+	});
+
+	await harness.commands.get("ma")?.handler("pool", ctx);
+	ctx.model = { provider: "other", id: "z" } as never;
+	await harness.events.get("after_provider_response")?.[0]?.(
+		{ type: "after_provider_response", status: 429, headers: {} },
+		ctx,
+	);
+
+	assert.equal(harness.setModels.length, 1);
+});
+
+test("a rate limit before any alias switch is ignored", async () => {
+	useAgentDir({ aliases: { pool: ["local/a", "local/b"] } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([{ provider: "local", id: "a" }]),
+	});
+
+	await harness.events.get("after_provider_response")?.[0]?.(
+		{ type: "after_provider_response", status: 429, headers: {} },
+		ctx,
+	);
+
+	assert.deepEqual(harness.setModels, []);
+});
+
+test("a skill pointing at an alias shares that alias's held model", async () => {
+	useAgentDir({ aliases: { pool: ["local/a", "local/b"] }, skills: { review: "pool" } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		model: model("local", "z"),
+		modelRegistry: registryFor([
+			{ provider: "local", id: "a" },
+			{ provider: "local", id: "b" },
+			{ provider: "local", id: "z" },
+		]),
+	});
+
+	await harness.commands.get("ma")?.handler("pool", ctx);
+	const held = harness.setModels.at(-1) as { id: string };
+	await harness.events.get("input")?.[0]?.({ text: "/skill:review" }, ctx);
+
+	assert.equal((harness.setModels.at(-1) as { id: string }).id, held.id);
+});
+
+test("a skill with inline candidates holds its own model across runs", async () => {
+	useAgentDir({ skills: { review: ["local/a", "local/b", "local/c"] } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const registry = registryFor([
+		{ provider: "local", id: "a" },
+		{ provider: "local", id: "b" },
+		{ provider: "local", id: "c" },
+		{ provider: "local", id: "z" },
+	]);
+
+	const picks = new Set<string>();
+	for (let index = 0; index < 20; index += 1) {
+		const { ctx } = createMockContext({ model: model("local", "z"), modelRegistry: registry });
+		await harness.events.get("input")?.[0]?.({ text: "/skill:review" }, ctx);
+		picks.add((harness.setModels.at(-1) as { id: string }).id);
+		await harness.events.get("agent_settled")?.[0]?.({}, ctx);
+	}
+
+	assert.deepEqual([...picks], [...picks].slice(0, 1));
+});
+
+test("a new session releases held models and cooldowns", async () => {
+	useAgentDir({ aliases: { pool: ["local/a", "local/b"] } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([
+			{ provider: "local", id: "a" },
+			{ provider: "local", id: "b" },
+		]),
+	});
+
+	await harness.commands.get("ma")?.handler("pool", ctx);
+	ctx.model = harness.setModels.at(-1) as never;
+	await harness.events.get("after_provider_response")?.[0]?.(
+		{ type: "after_provider_response", status: 429, headers: { "retry-after": "600" } },
+		ctx,
+	);
+	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
+
+	// With the cooldown cleared, both candidates are eligible again.
+	const seen = new Set<string>();
+	for (let index = 0; index < 200; index += 1) {
+		await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
+		await harness.commands.get("ma")?.handler("pool", ctx);
+		seen.add((harness.setModels.at(-1) as { id: string }).id);
+	}
+	assert.deepEqual([...seen].sort(), ["a", "b"]);
+});
+
+test("reloading the configuration releases held models", async () => {
+	const directory = useAgentDir({ aliases: { pool: ["local/a", "local/b"] } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([
+			{ provider: "local", id: "a" },
+			{ provider: "local", id: "b" },
+		]),
+	});
+
+	const seen = new Set<string>();
+	for (let index = 0; index < 200; index += 1) {
+		await harness.commands.get("ma")?.handler("pool", ctx);
+		seen.add((harness.setModels.at(-1) as { id: string }).id);
+		writeFileSync(
+			path.join(directory, "model-alias.json"),
+			JSON.stringify({ aliases: { pool: ["local/a", "local/b"] } }),
+			"utf8",
+		);
+		await harness.commands.get("model-alias-reload")?.handler("", ctx);
+	}
+	assert.deepEqual([...seen].sort(), ["a", "b"]);
+});

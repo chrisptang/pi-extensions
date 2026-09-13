@@ -7,7 +7,8 @@ Give your models short names, switch with `/ma sonnet` instead of a full `provid
 ## ✨ Features
 
 - Maps short aliases onto `provider/model-id` references and switches the session model with `/ma <alias>`.
-- Lets one alias hold several candidates and picks one at random, skipping any without configured credentials.
+- Lets one alias hold several candidates, picks one at random, and then keeps using it for the rest of the session.
+- Sidelines a candidate the provider rate-limits and rotates the alias onto another, honoring `retry-after`.
 - Runs a skill on its own model: `/skill:<name>` switches before expansion and restores the previous model once the agent settles.
 - Attaches an optional thinking level to an alias, either as a field or as a `:high` suffix.
 - Reloads definitions from disk with `/model-alias-reload`, no restart required.
@@ -78,7 +79,7 @@ An entry accepts three forms:
 ```
 
 - A **string** is one model reference.
-- An **array** is a candidate pool; one entry is chosen at random per switch.
+- An **array** is a candidate pool; one entry is chosen at random on the first switch and held from then on.
 - An **object** takes `models` (or the single-value `model`) plus an optional `thinkingLevel`.
 
 Model references are `provider/model-id`, split on the **first** slash only, so ids that themselves contain slashes work: `openrouter/anthropic/claude-sonnet` means provider `openrouter`, id `anthropic/claude-sonnet`.
@@ -93,6 +94,28 @@ An explicit `thinkingLevel` field takes precedence over a suffix.
 
 Candidates that are not registered in Pi, or that have no configured credentials, are dropped before the random pick.
 If nothing is left, the current model is kept and the reason is reported.
+
+### Held picks and rate-limit rotation
+
+An alias draws from its pool once per session and then **holds** that model, so repeated `/ma pool` switches stay on the same candidate instead of redrawing.
+Holding keeps the provider's prompt cache warm and makes cost predictable; `/ma` reports `(held)` once an alias has settled.
+
+A held pick is released when the provider rate-limits it.
+On a `429` or `503`, the candidate is put on **cooldown** and the alias rotates onto another candidate, which takes effect from the next turn.
+
+The cooldown length comes from the response headers, following the same precedence as Pi's own provider retry:
+
+| Header | Meaning |
+| --- | --- |
+| `retry-after-ms` | Delay in milliseconds; takes precedence. |
+| `retry-after` | Delay in seconds, or an HTTP-date to wait until. |
+| *(none)* | Falls back to 60 seconds. |
+
+A server-requested delay is capped at 15 minutes, so a long quota reset cannot sideline a candidate for the whole session.
+Repeated limits extend a cooldown rather than shortening it.
+If every candidate is cooling down, the alias still picks one rather than refusing to switch, since the limit may have lifted early.
+
+Held picks and cooldowns are **per session**. Both are released by a new session and by `/model-alias-reload`.
 
 ### Per-skill models
 
@@ -122,7 +145,10 @@ An alias name is accepted only as a lone target — mixing an alias name into a 
 ## 🚧 Limitations
 
 - A per-skill model changes **which model** runs the skill, not **where** it runs. Pi skills are inline prompt expansion, so the skill still shares the main session's conversation and context; this is not isolated execution. Use `pi-subagents` when you need a separate context.
-- Switching models invalidates the provider's prompt cache, so a random pool or a per-skill override trades cache hits for model choice. A pool whose candidates differ in price also makes the cost of a switch non-deterministic.
+- Switching models invalidates the provider's prompt cache, so a per-skill override or a rate-limit rotation trades cache hits for model choice. Holding a pick means a pool pays this only on the first switch.
+- Rotation lands on the **next turn**, not the failing request. `after_provider_response` observes the status but cannot alter the request in flight, so Pi's own retry handles the current one; the alias switch applies from the following turn.
+- A rate limit is attributed to the model the alias last switched to. If the user or another extension changes the model afterwards, the limit is ignored rather than blamed on the alias.
+- A single-candidate alias has nowhere to rotate to; the limit is reported and the model stays put.
 - The previous model is restored at `agent_settled`, the idle boundary. A skill that leaves the agent busy holds the override until the run truly settles.
 - Restoring only re-applies a thinking level that was active beforehand; if none was set, the level a skill applied stays in effect.
 - A new or replaced session discards a pending restore.
@@ -134,7 +160,8 @@ packages/pi-model-alias/
 ├── src/                               # Authoritative implementation and helpers
 │   ├── index.ts                       # Thin Pi entrypoint
 │   ├── model-alias.ts                 # Commands, skill interception, and restore
-│   └── aliases.ts                     # Config loading, parsing, and resolution
+│   ├── aliases.ts                     # Config loading, parsing, and resolution
+│   └── cooldown.ts                    # Rate-limit cooldowns and retry-after parsing
 ├── dist/                              # Generated Jiti runtime
 ├── scripts/build-runtime.mjs          # Runtime builder
 └── test/                              # Resolution and extension-wiring coverage

@@ -182,3 +182,74 @@ test("resolveAlias without a credential check keeps every registered candidate",
 	const resolved = resolveAlias({ models: ["unauthed/a", "local/b"] }, { find });
 	assert.equal(resolved?.candidateCount, 2);
 });
+
+test("resolveAlias skips candidates that are cooling down", () => {
+	const resolved = resolveAlias(
+		{ models: ["local/a", "local/b"] },
+		{ find, hasAuth, isCoolingDown: (model) => model.id === "a" },
+	);
+	assert.equal(resolved?.model.id, "b");
+	// The sidelined candidate is still counted as usable, just not drawn.
+	assert.equal(resolved?.candidateCount, 2);
+	assert.equal(resolved?.cooledDown, 1);
+});
+
+/**
+ * A fully sidelined pool must still yield a model: the limit may have lifted early,
+ * and refusing to switch would be worse than trying a cooling-down candidate.
+ */
+test("resolveAlias falls back to the full pool when every candidate is cooling down", () => {
+	const resolved = resolveAlias(
+		{ models: ["local/a", "local/b"] },
+		{ find, hasAuth, isCoolingDown: () => true },
+	);
+	assert.ok(resolved);
+	assert.equal(resolved.cooledDown, 2);
+});
+
+test("resolveAlias reuses a sticky model instead of redrawing", () => {
+	const definition = { models: ["local/a", "local/b", "local/c"] };
+	for (let index = 0; index < 50; index += 1) {
+		const resolved = resolveAlias(definition, {
+			find,
+			hasAuth,
+			sticky: { provider: "local", id: "b" } as never,
+		});
+		assert.equal(resolved?.model.id, "b");
+		assert.equal(resolved?.sticky, true);
+	}
+});
+
+test("resolveAlias drops a sticky model that is no longer usable", () => {
+	const definition = { models: ["local/a", "unauthed/b"] };
+	const resolved = resolveAlias(definition, {
+		find,
+		hasAuth,
+		sticky: { provider: "unauthed", id: "b" } as never,
+	});
+	assert.equal(resolved?.model.id, "a");
+	assert.equal(resolved?.sticky, false);
+});
+
+test("resolveAlias ignores a sticky model that is cooling down", () => {
+	const resolved = resolveAlias(
+		{ models: ["local/a", "local/b"] },
+		{
+			find,
+			hasAuth,
+			isCoolingDown: (model) => model.id === "a",
+			sticky: { provider: "local", id: "a" } as never,
+		},
+	);
+	assert.equal(resolved?.model.id, "b");
+	assert.equal(resolved?.sticky, false);
+});
+
+test("resolveAlias ignores a sticky model absent from the definition", () => {
+	const resolved = resolveAlias(
+		{ models: ["local/a"] },
+		{ find, hasAuth, sticky: { provider: "local", id: "z" } as never },
+	);
+	assert.equal(resolved?.model.id, "a");
+	assert.equal(resolved?.sticky, false);
+});
