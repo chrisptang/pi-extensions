@@ -60,6 +60,18 @@ export interface ChildControl {
 	send(message: string, signal?: AbortSignal): Promise<void>;
 }
 
+/**
+ * Progress reported by a running child, for human inspection only.
+ *
+ * The child's stdout already carries every session event; these are the ones
+ * that say what it is doing. Thinking is deliberately absent: it is never
+ * forwarded, so no display path can expose it.
+ */
+export type ChildActivity =
+	| { type: "tool_start"; toolCallId: string; tool: string; args: unknown }
+	| { type: "tool_end"; toolCallId: string; tool: string; result: unknown; isError: boolean }
+	| { type: "output"; text: string };
+
 export interface ChildRequest {
 	task: string;
 	tools: string[];
@@ -73,6 +85,8 @@ export interface ChildRequest {
 	communication: BrokerCredentials;
 	signal: AbortSignal;
 	onControl?: (control: ChildControl) => void;
+	/** Observer for child progress. Must not throw; failures are the caller's to contain. */
+	onActivity?: (activity: ChildActivity) => void;
 }
 
 export interface JobSummary {

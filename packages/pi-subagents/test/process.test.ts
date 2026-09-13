@@ -12,7 +12,7 @@ import {
 	runChild,
 	terminateWindowsProcessTree,
 } from "../src/process.js";
-import type { ChildControl, ChildRequest } from "../src/types.js";
+import type { ChildActivity, ChildControl, ChildRequest } from "../src/types.js";
 
 let directory: string;
 let previousPackageDirectory: string | undefined;
@@ -448,6 +448,129 @@ test("Windows process-tree termination bounds a hung taskkill helper", async () 
 	assert.equal(settled, true);
 	assert.deepEqual(treeKillerKill.mock.calls, [["SIGKILL"]]);
 	assert.deepEqual(childKill.mock.calls, [["SIGKILL"]]);
+});
+
+test("runChild forwards the child's tool activity and visible output", async () => {
+	installFakePi(`
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  event({
+    type: "tool_execution_start",
+    toolCallId: "call_1",
+    toolName: "read",
+    args: { path: "src/a.ts" },
+  });
+  event({
+    type: "tool_execution_end",
+    toolCallId: "call_1",
+    toolName: "read",
+    result: { content: [{ type: "text", text: "40 lines" }] },
+    isError: false,
+  });
+  event(message("Read the file."));
+  event({ type: "agent_settled" });
+}
+`);
+	const activity: ChildActivity[] = [];
+	const result = await runChild(childRequest({ onActivity: (event) => activity.push(event) }));
+	assert.equal(result.state, "completed");
+	assert.deepEqual(activity, [
+		{ type: "tool_start", toolCallId: "call_1", tool: "read", args: { path: "src/a.ts" } },
+		{
+			type: "tool_end",
+			toolCallId: "call_1",
+			tool: "read",
+			result: { content: [{ type: "text", text: "40 lines" }] },
+			isError: false,
+		},
+		{ type: "output", text: "Read the file." },
+	]);
+});
+
+test("runChild reports a failed tool call and omits thinking from activity", async () => {
+	installFakePi(`
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  // Thinking and partial tool updates are not part of the activity contract.
+  event({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "thinking", thinking: "secret reasoning" }],
+      stopReason: "toolUse",
+    },
+  });
+  event({
+    type: "tool_execution_update",
+    toolCallId: "call_1",
+    toolName: "bash",
+    args: { command: "false" },
+    partialResult: { content: [{ type: "text", text: "partial" }] },
+  });
+  event({
+    type: "tool_execution_end",
+    toolCallId: "call_1",
+    toolName: "bash",
+    result: { content: [{ type: "text", text: "exit 1" }] },
+    isError: true,
+  });
+  event(message("The command failed."));
+  event({ type: "agent_settled" });
+}
+`);
+	const activity: ChildActivity[] = [];
+	await runChild(childRequest({ onActivity: (event) => activity.push(event) }));
+	assert.deepEqual(
+		activity.map((event) => event.type),
+		["tool_end", "output"],
+	);
+	assert.equal(activity[0]?.type === "tool_end" && activity[0].isError, true);
+	// No activity event carries the child's hidden reasoning.
+	assert.ok(!JSON.stringify(activity).includes("secret reasoning"));
+});
+
+test("runChild ignores an activity observer that throws", async () => {
+	installFakePi(`
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  event({ type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: {} });
+  event(message("still completed"));
+  event({ type: "agent_settled" });
+}
+`);
+	const result = await runChild(
+		childRequest({
+			onActivity: () => {
+				throw new Error("observer failure");
+			},
+		}),
+	);
+	// A broken display observer cannot change the job's outcome.
+	assert.equal(result.state, "completed");
+	assert.equal(result.result, "still completed");
+});
+
+test("runChild drops a malformed tool event rather than reporting a partial one", async () => {
+	installFakePi(`
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  // Neither event names both a call id and a tool, so neither is reportable.
+  event({ type: "tool_execution_start", toolName: "read", args: {} });
+  event({ type: "tool_execution_end", toolCallId: "c1", isError: false });
+  event(message("done"));
+  event({ type: "agent_settled" });
+}
+`);
+	const activity: ChildActivity[] = [];
+	await runChild(childRequest({ onActivity: (event) => activity.push(event) }));
+	assert.deepEqual(
+		activity.map((event) => event.type),
+		["output"],
+	);
 });
 
 function childRequest(overrides: Partial<ChildRequest> = {}): ChildRequest {

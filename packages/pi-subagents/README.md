@@ -18,6 +18,9 @@ Pi Subagents runs Pi jobs in separate child processes and supports authenticated
 - Gives every child `subagent_wait` for an answer to a child-originated request.
 - Lets the main agent question a queued or running job through Pi RPC steering without retaining the child after completion.
 - Publishes one asynchronous terminal completion and shows active-job progress above the editor.
+- Opens `/subagents` so you can watch a job's tool activity and visible output live, and terminate one after confirming.
+- Redacts credential-shaped text and reports file writes by size, so an inspected job never puts a secret on screen.
+- Starts independent jobs concurrently, up to eight active children.
 - Exposes privacy-filtered metadata without task text, output, prompts, selected tools, or broker credentials.
 - Cancels session-owned work and closes the broker during replacement, reload, or shutdown.
 
@@ -72,12 +75,14 @@ Use messaging only when needed:
 
 Completion messages follow Pi's global tool-output expansion state and the `app.tools.expand` binding (`Ctrl+O` by default).
 
-In TUI mode, the above-editor widget shows each queued or running job's ID, state, elapsed time, timeout, and selected work tools.
+In TUI mode, the above-editor widget shows each queued or running job's ID, state, elapsed time, timeout, selected work tools, and its most recent activity line.
 The widget omits the fixed communication tools, disappears when no jobs remain active, and clears when the session ends.
+
+Run `/subagents` for the full inspection panel. See [Inspecting and terminating jobs](#-inspecting-and-terminating-jobs).
 
 ## 🛠️ Tools
 
-The main Pi session exposes six fixed tools and the `/agents` and `/skills` commands:
+The main Pi session exposes six fixed tools and the `/agents`, `/skills`, and `/subagents` commands:
 
 | Tool | Parameters | Purpose |
 | --- | --- | --- |
@@ -265,6 +270,65 @@ A skill that exists only in `~/.claude/skills/` or `~/.agents/skills/` still res
 `/skills` lists what `skill_run` advertises, with descriptions and any parse diagnostics.
 Like `/agents`, it never lists the fallback directories.
 
+## 👁️ Inspecting and terminating jobs
+
+Run `/subagents` in TUI mode to open the inspection panel.
+
+The panel lists every retained job, active and terminal, with its agent, description, state, and elapsed time.
+Selecting a job shows its `jobId`, selected work tools, timeout, and its activity as the child produces it:
+
+```
+── Subagents · 2 active · 3 retained ───────────────────────────────
+❯ ▶ explorer      review auth middleware    running    42s
+  ○ builder       add cooldown tests        queued      0s
+  ✓ skill:xmind   parse the test cases      completed  3m1s
+── explorer · job_m2x1_3 · tools: read,grep · 120s timeout ─────────
+  12:04:31 read  ✓ src/auth/middleware.ts → 80 lines
+  12:04:33 grep  ✓ "verifyToken" src/ → 7 matches
+  12:04:35 say     The middleware verifies exp before refresh.
+───────────────────────────────────────────────────────────────────
+  ↑↓ select   k terminate   esc close
+```
+
+`↑↓` selects a job, `k` starts termination, and `esc` closes the panel.
+
+Terminating asks for confirmation first, then cancels the job through the same path as `subagent_cancel`:
+its child process, timer, and broker credentials are released, and other jobs keep running.
+File changes the child already made are kept and are never rolled back, and its activity record stays readable in the panel.
+A job terminated this way reports `Subagent execution was cancelled by the user.`, which is how the main agent can tell a deliberate stop from its own cancellation.
+
+### What the panel shows, and what it does not
+
+The activity record holds tool calls with a summary of their arguments, their outcome and result summary, the child's visible assistant text, and lifecycle notices.
+
+It never holds the child's thinking: reasoning content is not forwarded out of the child process at all, so no display path can reach it.
+
+Arguments are summarized rather than reproduced.
+A `write` or `edit` reports its path and a byte count instead of the content, so a child writing a `.env` or a key file does not put that content on screen.
+Credential-shaped text is redacted to `***` in everything the panel displays, covering named assignments such as `API_KEY=…` and well-known shapes such as `sk-…`, `ghp_…`, `AKIA…`, JWTs, bearer headers, long hex digests, and private-key blocks.
+Redaction is a display safeguard rather than a security boundary; it cannot recognize every secret, which is why argument summarization does the heavier lifting.
+
+Each job retains its most recent 200 events, and each event's display text is bounded to 512 bytes.
+Older events are dropped and the panel says how many.
+A job's record is released when the job itself is pruned, under the same 24-hour and 32-job terminal retention limits as the rest of its metadata.
+
+The panel is a human surface. Nothing it displays enters the main agent's context, and `subagent_inspect` remains privacy-filtered as before.
+
+## 🧵 Running jobs in parallel
+
+`subagent_spawn` returns its `jobId` without waiting for its child, and each job owns its own Pi child process.
+Calling it several times, whether in one parallel tool batch or one after another, therefore runs those children concurrently rather than in sequence.
+All jobs share a maximum of eight active children; a ninth spawn is rejected until one finishes.
+
+Start jobs in one batch only when they are mutually independent: every task must be completable without any other task in the batch, and none may consume another's result, file output, or conclusion.
+When one task needs another's result, spawn the first, collect its result with `subagent_wait` or its background completion, and only then spawn the second with that result written into its task text.
+Children cannot see each other, exchange results, or observe each other's progress, so splitting a sequential task into a parallel batch does not make it parallel — it makes the later jobs work from missing information.
+
+Give each parallel writer disjoint file or responsibility ownership, or isolate their workspaces outside this extension.
+Concurrent writes to the same file are not serialized or merged.
+
+The tool contract states this rule to the model, and `/subagents` shows the resulting jobs running side by side so the overlap is visible.
+
 ## 🔄 Messaging, lifecycle, and retention
 
 The session starts one TCP broker on `127.0.0.1` with an operating-system-assigned ephemeral port.
@@ -330,6 +394,7 @@ A child message cannot grant permission for writes, shell commands, credential a
 A main-agent request is visible child model context, but it cannot expand the child's selected tools or grant capabilities the child did not receive at spawn time.
 
 Terminal controls and bidirectional controls are stripped before untrusted child text is displayed.
+The `/subagents` panel additionally summarizes tool arguments instead of reproducing them and redacts credential-shaped text, which bounds what an inspected job can put on screen without being a guarantee that no secret is ever displayed.
 Tasks, repository context, requests, responses, and inspected file content may be sent to the selected model provider.
 Parallel writers require disjoint ownership or workspace isolation outside this extension.
 
@@ -338,7 +403,9 @@ Parallel writers require disjoint ownership or workspace isolation outside this 
 - The extension does not load arbitrary extension tools or parent-registered model providers in child processes.
 - Process-local runtime API keys are not forwarded to children.
 - Agent definitions provide a per-job model, tool set, thinking level, and system prompt; there is no per-job model override outside a definition.
-- The extension does not provide peer-to-peer child messaging, retained conversations, user-directed follow-up work, mailboxes, Agent Teams, chains, fan-in aggregators, panels, workflow DAGs, dynamic scheduling, verification orchestration, nested subagents, or extension-owned semantic memory.
+- The extension does not provide peer-to-peer child messaging, retained conversations, user-directed follow-up work, mailboxes, Agent Teams, chains, fan-in aggregators, workflow DAGs, dynamic scheduling, verification orchestration, nested subagents, or extension-owned semantic memory.
+- The `/subagents` panel inspects and terminates jobs for a human. It is not an aggregator: nothing it shows enters the main agent's context, and fan-in synthesis stays with the main agent.
+- The panel requires TUI mode; in RPC, JSON, and print modes `/subagents` reports that and does nothing.
 - Bidirectional messages use request-response coordination, not a retained conversational session.
 - The main agent must verify child claims against the actual diff and deterministic checks.
 - Child requests and responses trigger a main-agent turn. A blocking job's completion does not wake an idle turn, because its caller is waiting; a `background: true` job's completion does.

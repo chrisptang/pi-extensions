@@ -14,6 +14,8 @@
 
 Starts one task-specialized subagent job with the selected tool capabilities and returns its job ID immediately.
 
+The call does not wait for its child, and each job owns its own child process, so several spawns run concurrently. Batch them only for mutually independent tasks: every task must be completable without any other task in the batch, and none may consume another's result. When one task needs another's, spawn the first, collect its result, and only then spawn the second with that result in its task text. Parallel writers need disjoint file ownership; concurrent writes are not serialized or merged. All jobs share a maximum of eight active children.
+
 The active-jobs widget labels the job with its `agent` name, or its job ID when no agent was selected, followed by `description`. That is the only place the job announces what it is doing while it runs, so the description should name the work rather than restate the agent. A description longer than 60 characters is truncated for display rather than rejected, so an over-long label never costs the caller a turn.
 
 The runtime always adds `subagent_send` and `subagent_wait` to the selected tools.
@@ -90,6 +92,12 @@ No parameters.
 | --- | --- | --- | --- |
 | `jobId` | `string` | Yes | Job ID returned by `subagent_spawn`. |
 
+Cancels one queued or running job idempotently and releases its child process, timer, broker credentials, and temporary resources. Other jobs are unaffected.
+
+File changes the child already made are kept and are not rolled back, and the job's activity record stays readable in the `/subagents` panel.
+
+A job a human terminated through `/subagents` reports `Subagent execution was cancelled by the user.` rather than the model-initiated wording, so the main agent can report the deliberate stop instead of restarting the work.
+
 ## `subagent_wait`
 
 ### Main agent
@@ -162,3 +170,17 @@ Requests and responses are limited to 1,992 lines so their protocol envelopes fi
 Terminal jobs, unknown requests, cross-job responses, responses from the request originator, and stale session credentials throw.
 
 A successful call returns `{ requestId, accepted, duplicate }`.
+
+## `/subagents`
+
+Opens the inspection panel in TUI mode. Other modes report that the panel is unavailable and do nothing.
+
+The panel lists every retained job with its agent, description, state, and elapsed time, and shows the selected job's `jobId`, work tools, timeout, and live activity. `↑↓` selects, `k` terminates after a confirmation, and `esc` closes.
+
+The activity record holds tool calls with summarized arguments, their outcome and result summary, the child's visible assistant text, and lifecycle notices. It never holds the child's thinking, which is not forwarded out of the child process at all.
+
+`write` and `edit` report a path and a byte count rather than content, and credential-shaped text is redacted to `***` in everything displayed. Redaction is a display safeguard, not a guarantee.
+
+Each job retains its most recent 200 events, each bounded to 512 bytes of display text; older events are dropped and the panel reports how many. A job's record is released when the job is pruned.
+
+The panel is a human surface. Nothing it displays enters the main agent's context.

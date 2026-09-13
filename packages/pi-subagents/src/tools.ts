@@ -186,8 +186,12 @@ export function registerSubagentTools(
 		name: "subagent_spawn",
 		label: "Subagent · Spawn",
 		description:
-			"Use subagent_spawn to start one Pi subagent job and return its jobId immediately. The task defines the child's specialization, and the selected tools define its capabilities. The job may ask the main agent questions and publishes one asynchronous completion when terminal.",
+			"Use subagent_spawn to start one Pi subagent job and return its jobId immediately. The task defines the child's specialization, and the selected tools define its capabilities. The job may ask the main agent questions and publishes one asynchronous completion when terminal. Call it more than once in one parallel batch only for tasks that are mutually independent: each must be completable without any other's result, and parallel writers must own disjoint files. When one task needs another's output, start it only after that job's result has been collected.",
 		promptSnippet: "Use subagent_spawn to start one Pi subagent job",
+		promptGuidelines: [
+			"Batch multiple subagent_spawn calls only for mutually independent tasks. A task that needs another task's result is not independent and must wait for that job's completion.",
+			"Give each parallel writer disjoint file ownership. Concurrent writes to one file are not serialized or merged.",
+		],
 		parameters: buildSpawnParameters(agents),
 		prepareArguments: prepareSpawnArguments,
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -231,7 +235,7 @@ export function registerSubagentTools(
 		name: "skill_run",
 		label: "Subagent · Skill",
 		description:
-			"Use skill_run to execute one skill inside a subagent instead of loading it into this session. The skill's instructions become the child's system prompt, so its step-by-step work and intermediate file reads stay out of the main context and only the final result returns. Pass the user's request for the skill through args. Returns a jobId immediately; collect the result with subagent_wait.",
+			"Use skill_run to execute one skill inside a subagent instead of loading it into this session. The skill's instructions become the child's system prompt, so its step-by-step work and intermediate file reads stay out of the main context and only the final result returns. Pass the user's request for the skill through args. Returns a jobId immediately; collect the result with subagent_wait. The same independence rule as subagent_spawn applies: batch multiple runs only when the skills' tasks do not depend on one another's results.",
 		promptSnippet: "Use skill_run to execute one skill inside a subagent",
 		parameters: buildSkillRunParameters(skills),
 		prepareArguments: prepareSkillRunArguments,
@@ -290,7 +294,7 @@ export function registerSubagentTools(
 		name: "subagent_cancel",
 		label: "Subagent · Cancel",
 		description:
-			"Use subagent_cancel to idempotently cancel one queued or running job and release its process, timer, broker credentials, and temporary resources. Terminal jobs remain unchanged.",
+			"Use subagent_cancel to idempotently cancel one queued or running job and release its process, timer, broker credentials, and temporary resources. Other jobs are unaffected, and file changes the child already made are kept rather than rolled back. Terminal jobs remain unchanged. A job whose error says it was cancelled by the user was stopped deliberately by the human: report that and do not restart the same work unless asked.",
 		promptSnippet: "Use subagent_cancel to cancel one active subagent job",
 		parameters: CancelParameters,
 		async execute(_toolCallId, params, signal) {

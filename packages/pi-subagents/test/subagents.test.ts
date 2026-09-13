@@ -133,7 +133,7 @@ test("registers six fixed main-agent tools with stable schemas and explicit limi
 		tools[0]?.parameters.properties?.background?.description?.includes("blocking"),
 		true,
 	);
-	assert.deepEqual([...mock.commands.keys()], ["agents", "skills"]);
+	assert.deepEqual([...mock.commands.keys()], ["agents", "skills", "subagents"]);
 	const childMock = createMockPi();
 	createChildCommunicationExtension({
 		async send() {
@@ -334,7 +334,7 @@ test("labels active jobs with their agent and description above the editor", asy
 	assert.equal(typeof factory, "function");
 	const lines = factory?.({}, identityTheme()).render(120) ?? [];
 	assert.equal(lines[0], "─".repeat(120));
-	assert.equal(lines[1], "Subagents · 2 active");
+	assert.equal(lines[1], "Subagents · 2 active · /subagents to inspect or terminate");
 	assert.equal(
 		lines[2],
 		"▶ explorer · review auth middleware · running · 1m 5s / 2m · tools: read, edit",

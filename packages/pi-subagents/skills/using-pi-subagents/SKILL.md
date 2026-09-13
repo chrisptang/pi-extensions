@@ -134,6 +134,14 @@ The execution timeout, when set, belongs to the job and terminates its child whe
 
 Start multiple jobs in one Pi parallel tool batch only when they are independent.
 
+Independent means every task in the batch can be completed without any other task in that batch, and none of them consumes another's result, file output, or conclusion.
+
+Never start dependent tasks as one parallel batch. When task B needs task A's result, spawn A, collect its result with `subagent_wait` or its background completion, and only then spawn B with that result written into its task text.
+
+A task whose text says to build on, verify, extend, or fix what another job in the same batch is producing is dependent, however the batch is phrased.
+
+Splitting one sequential task into parallel jobs does not make it parallel: the children cannot see each other, exchange results, or observe each other's progress.
+
 Give each parallel writer disjoint file or responsibility ownership.
 
 Use external workspace isolation when writers cannot safely share one working tree.
@@ -142,7 +150,15 @@ Never assume concurrent writes serialize or merge automatically.
 
 All jobs share a maximum of eight active child processes.
 
-Keep fan-in synthesis in the main agent because the runtime does not provide aggregators, panels, chains, or workflows.
+Keep fan-in synthesis in the main agent because the runtime does not provide aggregators, chains, or workflows.
+
+## Leave human inspection to the human
+
+The user runs `/subagents` to watch a job's tool activity and visible output, and to terminate one after confirming.
+
+Do not describe that panel as a way to collect results: it is a human surface, and nothing in it reaches this session.
+
+A job that reports it was cancelled by the user was stopped deliberately. Report that outcome and do not restart the same work unless the user asks.
 
 ## Exchange necessary messages
 

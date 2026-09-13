@@ -3,6 +3,8 @@ import { AgentRegistry } from "./agent-registry.js";
 import { registerAgentsCommand } from "./agents-command.js";
 import { type SeedResult, seedBuiltinAgents } from "./builtin-agents.js";
 import { registerCompletionRenderer } from "./completion-renderer.js";
+import { registerSubagentsPanelCommand } from "./panel.js";
+import type { SubagentRuntime } from "./runtime.js";
 import { registerSkillsCommand } from "./skills-command.js";
 import { registerSubagentTools, type SubagentToolsDependencies } from "./tools.js";
 import { createSubagentWidgetController } from "./widget.js";
@@ -10,6 +12,8 @@ import { createSubagentWidgetController } from "./widget.js";
 export interface SubagentsDependencies extends SubagentToolsDependencies {
 	/** Injectable for tests; defaults to writing the built-ins into the Pi agent directory. */
 	seedAgents?: () => SeedResult | undefined;
+	/** Observer for the constructed runtime, so a test can drive it directly. */
+	onRuntime?: (runtime: SubagentRuntime) => void;
 }
 
 export default function subagents(
@@ -24,8 +28,11 @@ export default function subagents(
 
 	registerCompletionRenderer(pi);
 	const tools = registerSubagentTools(pi, { ...dependencies, agents });
+	dependencies.onRuntime?.(tools.runtime);
 	registerAgentsCommand(pi, agents);
 	registerSkillsCommand(pi, tools.skills);
+	const panel = registerSubagentsPanelCommand(tools.runtime);
+	pi.registerCommand(panel.name, panel.options);
 	const widget = createSubagentWidgetController(tools.runtime);
 	let activeSession: ExtensionContext["sessionManager"] | undefined;
 	let sessionGeneration = 0;

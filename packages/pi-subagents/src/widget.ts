@@ -79,13 +79,13 @@ export function renderSubagentWidget(
 	const renderWidth = Math.max(0, width);
 	const lines = [
 		theme.fg("borderMuted", "─".repeat(renderWidth)),
-		theme.fg("muted", `Subagents · ${jobs.length} active`),
-		...jobs.map((job) => renderJob(job, theme)),
+		theme.fg("muted", `Subagents · ${jobs.length} active · /subagents to inspect or terminate`),
+		...jobs.flatMap((job) => renderJob(job, theme)),
 	];
 	return lines.map((line) => truncateToWidth(line, renderWidth, ""));
 }
 
-function renderJob(job: ActiveJobDisplay, theme: Theme): string {
+function renderJob(job: ActiveJobDisplay, theme: Theme): string[] {
 	const running = job.state === "running";
 	const symbol = theme.fg(running ? "accent" : "dim", running ? "▶ " : "○ ");
 	const state = theme.fg(running ? "accent" : "muted", job.state);
@@ -95,7 +95,10 @@ function renderJob(job: ActiveJobDisplay, theme: Theme): string {
 	const timeout = job.timeout === undefined ? "no timeout" : formatSeconds(job.timeout);
 	const detail = ` · ${formatSeconds(Math.floor(job.elapsedMs / 1_000))} / ${timeout} · tools: ${tools}`;
 	const summaryPart = summary ? theme.fg("muted", ` · ${summary}`) : "";
-	return `${symbol}${title}${summaryPart} · ${state}${theme.fg("muted", detail)}`;
+	const header = `${symbol}${title}${summaryPart} · ${state}${theme.fg("muted", detail)}`;
+	// The activity line is already sanitized and redacted by the runtime's log.
+	const activity = job.latestActivity === undefined ? undefined : sanitizeLabel(job.latestActivity);
+	return activity ? [header, `    ${theme.fg("dim", activity)}`] : [header];
 }
 
 /** Prefer the agent name; a job without one is only identifiable by its id. */
@@ -112,7 +115,7 @@ function widgetValue(jobs: readonly ActiveJobDisplay[]): string {
 	return jobs
 		.map(
 			(job) =>
-				`${job.jobId}\0${job.agent ?? ""}\0${job.description ?? ""}\0${job.state}\0${Math.floor(job.elapsedMs / 1_000)}\0${job.timeout ?? ""}\0${job.tools.join(",")}`,
+				`${job.jobId}\0${job.agent ?? ""}\0${job.description ?? ""}\0${job.state}\0${Math.floor(job.elapsedMs / 1_000)}\0${job.timeout ?? ""}\0${job.tools.join(",")}\0${job.latestActivity ?? ""}`,
 		)
 		.join("\n");
 }

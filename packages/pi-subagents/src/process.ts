@@ -10,7 +10,7 @@ import {
 	serializeBrokerCredentials,
 } from "./broker-credentials.js";
 import { CHILD_COMMUNICATION_TOOL_NAMES } from "./child-communication-tools.js";
-import type { ChildControl, ChildRequest, ChildResult } from "./types.js";
+import type { ChildActivity, ChildControl, ChildRequest, ChildResult } from "./types.js";
 
 const CORE_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -34,6 +34,11 @@ interface AssistantEvent {
 	id?: string;
 	success?: boolean;
 	error?: string;
+	toolCallId?: string;
+	toolName?: string;
+	args?: unknown;
+	result?: unknown;
+	isError?: boolean;
 	message?: {
 		role?: string;
 		content?: Array<{ type?: string; text?: string }>;
@@ -162,6 +167,14 @@ async function executeProcess(
 		rpcInputError ??= error;
 		rejectPendingCommands(rpcInputError);
 	};
+	// A progress observer is a display concern; it must never affect the child's run.
+	const reportActivity = (activity: ChildActivity) => {
+		try {
+			request.onActivity?.(activity);
+		} catch {
+			// Observers cannot interrupt event decoding.
+		}
+	};
 
 	const decoder = new JsonLineDecoder(
 		(value) => {
@@ -187,6 +200,32 @@ async function executeProcess(
 				onAgentSettled();
 				return;
 			}
+			// Tool activity is forwarded for inspection only and never affects the
+			// result. `tool_execution_update` is skipped: partial results arrive per
+			// chunk and would flood the log without saying anything new.
+			if (event.type === "tool_execution_start") {
+				if (typeof event.toolCallId === "string" && typeof event.toolName === "string") {
+					reportActivity({
+						type: "tool_start",
+						toolCallId: event.toolCallId,
+						tool: event.toolName,
+						args: event.args,
+					});
+				}
+				return;
+			}
+			if (event.type === "tool_execution_end") {
+				if (typeof event.toolCallId === "string" && typeof event.toolName === "string") {
+					reportActivity({
+						type: "tool_end",
+						toolCallId: event.toolCallId,
+						tool: event.toolName,
+						result: event.result,
+						isError: event.isError === true,
+					});
+				}
+				return;
+			}
 			if (event.type === "message_end" && event.message?.role === "assistant") {
 				const text = (event.message.content ?? [])
 					.filter((part) => part.type === "text" && typeof part.text === "string")
@@ -197,6 +236,8 @@ async function executeProcess(
 					const limited = truncateText(text, MAX_OUTPUT_BYTES);
 					latestOutput = limited.text;
 					truncated ||= limited.truncated;
+					// Only the text parts are forwarded, so thinking never reaches a display.
+					reportActivity({ type: "output", text });
 					if (event.message.stopReason === "stop" || event.message.stopReason === "length") {
 						terminalOutput = limited.text;
 						terminalStopReason = event.message.stopReason;

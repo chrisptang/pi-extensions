@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { type ActivityEvent, ActivityLog } from "./activity.js";
 import { COMPLETION_MESSAGE_TYPE } from "./completion-renderer.js";
 import {
 	type BrokerSendAcknowledgement,
@@ -8,6 +9,7 @@ import {
 import { modelVisibleJson, requireBoundedModelText } from "./model-output.js";
 import { runChild as defaultRunChild } from "./process.js";
 import {
+	type ChildActivity,
 	type ChildControl,
 	type ChildRequest,
 	type ChildResult,
@@ -43,11 +45,37 @@ interface InternalJob extends JobSummary {
 	limitations: string[];
 	deliverySent: boolean;
 	generation: number;
+	/** Human-facing progress record. Never read by the model. */
+	activity: ActivityLog;
 }
 
 export interface RuntimeDependencies {
 	runChild?: (request: ChildRequest) => Promise<ChildResult>;
 	now?: () => number;
+}
+
+/**
+ * One job as the inspection panel sees it, active or terminal.
+ *
+ * This is a human-facing view: unlike `JobSummary`, which the model receives and
+ * which deliberately omits the tool list, it carries everything the panel shows.
+ */
+export interface PanelJob {
+	jobId: string;
+	agent?: string;
+	description?: string;
+	state: SubagentJobState;
+	createdAt: number;
+	startedAt?: number;
+	finishedAt?: number;
+	elapsedMs: number;
+	timeout?: number;
+	tools: string[];
+	error?: string;
+	limitations: string[];
+	/** Events evicted by the per-job capacity bound. */
+	droppedEvents: number;
+	activity: ActivityEvent[];
 }
 
 export interface ActiveJobDisplay {
@@ -60,6 +88,8 @@ export interface ActiveJobDisplay {
 	elapsedMs: number;
 	timeout?: number;
 	tools: string[];
+	/** The child's most recent activity line, so the widget says what it is doing now. */
+	latestActivity?: string;
 }
 
 export interface StartJobInput {
@@ -115,6 +145,11 @@ export class SubagentRuntime {
 		this.notifyJobsChanged();
 	}
 
+	/** Whether a session owns this runtime. A closed panel checks this to stop itself. */
+	isSessionActive(): boolean {
+		return this.sessionActive;
+	}
+
 	subscribeJobs(listener: () => void): () => void {
 		this.jobListeners.add(listener);
 		return () => this.jobListeners.delete(listener);
@@ -133,6 +168,36 @@ export class SubagentRuntime {
 				elapsedMs: Math.max(0, now - (job.startedAt ?? job.createdAt)),
 				...(job.timeout !== undefined ? { timeout: job.timeout } : {}),
 				tools: [...job.tools],
+				...latestActivityOf(job),
+			}));
+	}
+
+	/**
+	 * Every retained job with its activity, newest-created last.
+	 *
+	 * Terminal jobs stay listed so a human can review what a cancelled or failed
+	 * child actually did; they leave only when `prune` drops the job itself.
+	 */
+	panelJobs(): PanelJob[] {
+		this.prune();
+		const now = this.now();
+		return [...this.jobs.values()]
+			.sort((left, right) => left.createdAt - right.createdAt)
+			.map((job) => ({
+				jobId: job.jobId,
+				...(job.agent ? { agent: job.agent } : {}),
+				...(job.description ? { description: job.description } : {}),
+				state: job.state,
+				createdAt: job.createdAt,
+				...(job.startedAt !== undefined ? { startedAt: job.startedAt } : {}),
+				...(job.finishedAt !== undefined ? { finishedAt: job.finishedAt } : {}),
+				elapsedMs: Math.max(0, (job.finishedAt ?? now) - (job.startedAt ?? job.createdAt)),
+				...(job.timeout !== undefined ? { timeout: job.timeout } : {}),
+				tools: [...job.tools],
+				...(job.error ? { error: job.error } : {}),
+				limitations: [...job.limitations],
+				droppedEvents: job.activity.droppedCount,
+				activity: job.activity.snapshot(),
 			}));
 	}
 
@@ -184,6 +249,7 @@ export class SubagentRuntime {
 			limitations: [...(input.limitations ?? [])],
 			deliverySent: false,
 			generation: this.generation,
+			activity: new ActivityLog(),
 		};
 		this.jobs.set(jobId, job);
 		this.notifyJobsChanged();
@@ -215,6 +281,7 @@ export class SubagentRuntime {
 						job.control = control;
 						job.resolveControl(control);
 					},
+					onActivity: (activity) => this.recordActivity(job, activity),
 				});
 			} catch (error) {
 				child = {
@@ -294,16 +361,57 @@ export class SubagentRuntime {
 		};
 	}
 
-	async cancel(jobId: string): Promise<{ jobId: string; state: SubagentJobState }> {
+	/**
+	 * Record child progress against a job.
+	 *
+	 * Late events are dropped rather than appended: once a job is terminal, or
+	 * belongs to a replaced session, its record is what the human reviews and
+	 * must not keep changing underneath them.
+	 */
+	private recordActivity(job: InternalJob, activity: ChildActivity): void {
+		if (isTerminal(job.state) || job.generation !== this.generation) return;
+		const at = this.now();
+		switch (activity.type) {
+			case "tool_start":
+				job.activity.toolStart(activity.toolCallId, activity.tool, activity.args, at);
+				break;
+			case "tool_end":
+				job.activity.toolEnd(
+					activity.toolCallId,
+					activity.tool,
+					activity.result,
+					activity.isError,
+					at,
+				);
+				break;
+			case "output":
+				job.activity.output(activity.text, at);
+				break;
+		}
+		this.notifyJobsChanged();
+	}
+
+	/**
+	 * Cancel one job and release the resources it owns.
+	 *
+	 * `origin` distinguishes a human cancellation from the model's own, because
+	 * the main agent would otherwise read its own wording back and retry work the
+	 * user deliberately stopped. File changes the child already made are kept, and
+	 * its activity record stays readable in the panel.
+	 */
+	async cancel(
+		jobId: string,
+		origin: "model" | "user" = "model",
+	): Promise<{ jobId: string; state: SubagentJobState }> {
 		const job = this.requireJob(jobId);
+		const error =
+			origin === "user"
+				? "Subagent execution was cancelled by the user."
+				: "Subagent execution was cancelled.";
+		if (!isTerminal(job.state)) job.activity.notice(error, this.now());
 		await this.stop(
 			job,
-			{
-				state: "cancelled",
-				error: "Subagent execution was cancelled.",
-				limitations: [],
-				truncated: false,
-			},
+			{ state: "cancelled", error, limitations: [], truncated: false },
 			true,
 			new DOMException("Subagent job cancelled", "AbortError"),
 		);
@@ -419,6 +527,8 @@ export class SubagentRuntime {
 		if (isTerminal(job.state)) return;
 		job.state = child.state;
 		job.finishedAt = this.now();
+		// A closing line so the panel reports the outcome, not just an abrupt stop.
+		job.activity.notice(`Job ${child.state}.`, job.finishedAt);
 		job.result = child.result;
 		job.error = child.error;
 		// Keep setup limitations recorded at start alongside the child's own.
@@ -518,6 +628,21 @@ export class SubagentRuntime {
 			if (this.jobs.delete(job.jobId)) this.omittedJobs++;
 		}
 	}
+}
+
+/**
+ * The last activity line, formatted for the one-line widget.
+ *
+ * Only the newest event is exposed: the widget exists to say a job is alive and
+ * roughly where it is, and the panel is where the full record is read.
+ */
+function latestActivityOf(job: InternalJob): { latestActivity?: string } {
+	const events = job.activity.snapshot();
+	const latest = events.at(-1);
+	if (!latest) return {};
+	const prefix = latest.kind === "tool" ? `${latest.tool ?? "tool"} ` : "";
+	const text = `${prefix}${latest.detail}`.trim();
+	return text ? { latestActivity: text } : {};
 }
 
 function mainRequestMessage(jobId: string, requestId: string, message: string): string {
