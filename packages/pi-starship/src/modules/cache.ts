@@ -3,21 +3,20 @@ import { defineModule } from "./types.js";
 
 export const cacheModule = defineModule({
 	name: "cache",
-	variables: ["symbol", "rate", "read", "write"],
+	variables: ["symbol", "rate", "session_rate", "read", "write"],
 	defaults: {
-		format: "[$symbol (CH$rate )]($style)",
-		symbol: "📦",
+		format: "[Cache $session_rate ]($style)",
+		symbol: "",
 		style: "bold green",
-		disabled: true,
+		disabled: false,
 	},
 	values: ({ runtime }) => {
-		const { cacheRead, cacheWrite, latestCacheHitRate } = runtime.tokenTotals;
-		if (cacheRead === 0 && cacheWrite === 0) return undefined;
-		const rate = latestCacheHitRate === undefined ? "" : `${latestCacheHitRate.toFixed(1)}%`;
+		const { cacheRead, cacheWrite, latestCacheHitRate, sessionCacheHitRate } = runtime.tokenTotals;
 		return {
-			rate,
-			read: cacheRead > 0 ? formatCount(cacheRead) : "",
-			write: cacheWrite > 0 ? formatCount(cacheWrite) : "",
+			rate: latestCacheHitRate === undefined ? "—" : `${latestCacheHitRate.toFixed(1)}%`,
+			session_rate: sessionCacheHitRate === undefined ? "—" : `${sessionCacheHitRate.toFixed(1)}%`,
+			read: formatCount(cacheRead),
+			write: formatCount(cacheWrite),
 		};
 	},
 });

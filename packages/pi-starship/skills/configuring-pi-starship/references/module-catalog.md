@@ -848,23 +848,23 @@ Current model context-window usage.
 
 - Format variables: `$symbol`, `$percentage`, `$tokens`, `$window`.
 - Style variables in `format`: `$style`.
-- Default `format`: `"[$symbol ctx $percentage ]($style)"`.
+- Default `format`: `"[$symbol Ctx $tokens/$window $percentage ]($style)"`.
 - Default `symbol`: `"🪟"`.
 - Default `disabled`: `false`.
 
 Accepted state-selected style field:
 
 - `display`: array of tables with finite numeric `threshold`, valid string `style`, and boolean `hidden`.
-- Default `display`: `[{"threshold":0,"style":"bold green","hidden":true},{"threshold":30,"style":"bold green","hidden":false},{"threshold":60,"style":"bold yellow","hidden":false},{"threshold":80,"style":"bold red","hidden":false}]`.
+- Default `display`: `[{"threshold":0,"style":"bold green","hidden":false},{"threshold":30,"style":"bold green","hidden":false},{"threshold":60,"style":"bold yellow","hidden":false},{"threshold":80,"style":"bold red","hidden":false}]`.
 
 ### `tokens`
 
 Session input and output token totals.
 
-- Format variables: `$symbol`, `$input`, `$output`, `$total`.
+- Format variables: `$symbol`, `$input`, `$output`, `$total`, `$total_input`.
 - Style variables in `format`: `$style`.
-- Default `format`: `"[$symbol ↑$input ↓$output ]($style)"`.
-- Default `symbol`: `"🔢"`.
+- Default `format`: `"[ΣIn $total_input · ΣOut $output ]($style)"`.
+- Default `symbol`: `""`.
 - Default `disabled`: `false`.
 
 Accepted style fields:
@@ -877,11 +877,11 @@ Accepted style fields:
 
 Prompt-cache usage and latest cache hit rate.
 
-- Format variables: `$symbol`, `$rate`, `$read`, `$write`.
+- Format variables: `$symbol`, `$rate`, `$session_rate`, `$read`, `$write`.
 - Style variables in `format`: `$style`.
-- Default `format`: `"[$symbol (CH$rate )]($style)"`.
-- Default `symbol`: `"📦"`.
-- Default `disabled`: `true`.
+- Default `format`: `"[Cache $session_rate ]($style)"`.
+- Default `symbol`: `""`.
+- Default `disabled`: `false`.
 
 Accepted style fields:
 
@@ -895,14 +895,14 @@ Reported estimated session cost or subscription state.
 
 - Format variables: `$symbol`, `$cost`, `$subscription`.
 - Style variables in `format`: `$style`.
-- Default `format`: `"[ $symbol \\$$cost( $subscription) ]($style)"`.
-- Default `symbol`: `"💸"`.
+- Default `format`: `"[ $symbol \\$$cost$subscription ]($style)"`.
+- Default `symbol`: `""`.
 - Default `disabled`: `false`.
 
 Accepted state-selected style field:
 
 - `display`: array of tables with finite numeric `threshold`, valid string `style`, and boolean `hidden`.
-- Default `display`: `[{"threshold":0,"style":"bold green","hidden":true},{"threshold":1,"style":"bold yellow","hidden":false},{"threshold":5,"style":"bold red","hidden":false}]`.
+- Default `display`: `[{"threshold":0,"style":"bold green","hidden":false},{"threshold":1,"style":"bold yellow","hidden":false},{"threshold":5,"style":"bold red","hidden":false}]`.
 
 ### `time`
 

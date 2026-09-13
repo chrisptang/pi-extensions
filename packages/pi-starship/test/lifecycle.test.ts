@@ -737,20 +737,20 @@ test("TUI footer uses all-entry usage totals and marks subscription-backed cost"
 		);
 		const rendered = stripAnsi(footer.render(300).join("\n"));
 		assert.match(rendered, /R4\.6k W1\.5k CH0\.0%/u);
-		assert.match(rendered, /↑12k ↓287/u);
-		assert.match(rendered, /\$0\.070 \(sub\)/u);
+		assert.match(rendered, /ΣIn 18k · ΣOut 287/u);
+		assert.match(rendered, /\$0\.070 estimate/u);
 
 		oauth = false;
 		(context.ctx as { model: { provider: string; id: string } }).model = {
 			provider: "kimi-coding",
 			id: "kimi",
 		};
-		assert.match(stripAnsi(footer.render(300).join("\n")), /\$0\.070 \(sub\)/u);
+		assert.match(stripAnsi(footer.render(300).join("\n")), /\$0\.070 estimate/u);
 		(context.ctx as { model: { provider: string; id: string } }).model = {
 			provider: "anthropic",
 			id: "claude",
 		};
-		assert.doesNotMatch(stripAnsi(footer.render(300).join("\n")), /\(sub\)/u);
+		assert.doesNotMatch(stripAnsi(footer.render(300).join("\n")), /estimate/u);
 		footer.dispose();
 		await emit(mock.events, "session_shutdown", {}, context.ctx);
 	} finally {

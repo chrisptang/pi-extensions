@@ -172,6 +172,7 @@ test("built-in example is a palette-free nine-module Starship document", () => {
 	try {
 		assert.match(BUILT_IN_EXAMPLE, /^format = """/mu);
 		assert.match(BUILT_IN_EXAMPLE, /\$brand\\\n\$model\\\n\$thinking\\\n\$directory/u);
+		assert.match(BUILT_IN_EXAMPLE, /\$context\\\n\\n\\\n\$tokens\\\n\$cache\\\n\$cost/u);
 		assert.doesNotMatch(BUILT_IN_EXAMPLE, /format = '''|palette\s*=|\[palettes\.|░▒▓|/u);
 		writeFileSync(path, BUILT_IN_EXAMPLE);
 		const loaded = loadStarshipConfig(path);
@@ -185,8 +186,10 @@ test("built-in example is a palette-free nine-module Starship document", () => {
 				"$git_branch",
 				"$git_status",
 				"$activity",
-				"$context",
-				"$time",
+				"$context\n",
+				"$tokens",
+				"$cache",
+				"$cost",
 			].join(""),
 		);
 		assert.equal(loaded.config.format, BUILT_IN_CONFIG.format);
@@ -259,7 +262,7 @@ test("first-wave modules are registered in deterministic domain order", () => {
 	assert.ok(MODULE_NAMES.indexOf("openstack") < MODULE_NAMES.indexOf("os"));
 	assert.ok(MODULE_NAMES.indexOf("tokens") < MODULE_NAMES.indexOf("cache"));
 	assert.ok(MODULE_NAMES.indexOf("cache") < MODULE_NAMES.indexOf("cost"));
-	assert.equal(BUILT_IN_CONFIG.modules.cache.disabled, true);
+	assert.equal(BUILT_IN_CONFIG.modules.cache.disabled, false);
 	assert.ok(MODULE_NAMES.indexOf("fill") < MODULE_NAMES.indexOf("extension_status"));
 });
 

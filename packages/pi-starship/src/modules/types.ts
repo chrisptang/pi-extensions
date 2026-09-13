@@ -100,7 +100,9 @@ export interface StarshipRuntimeSnapshot {
 		cacheRead: number;
 		cacheWrite: number;
 		cost: number;
+		hasUsage?: boolean;
 		latestCacheHitRate?: number;
+		sessionCacheHitRate?: number;
 	};
 	usingSubscription: boolean;
 	gitBranch: string | null;

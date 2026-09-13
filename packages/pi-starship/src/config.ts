@@ -82,10 +82,13 @@ $git_branch\
 $git_status\
 $activity\
 $context\
-$time"""`;
+\n\
+$tokens\
+$cache\
+$cost"""`;
 
 const BUILT_IN_FORMAT =
-	"$brand$model$thinking$directory$git_branch$git_status$activity$context$time";
+	"$brand$model$thinking$directory$git_branch$git_status$activity$context\n$tokens$cache$cost";
 
 const BUILT_IN_MODULES = Object.fromEntries(
 	MODULE_DEFINITIONS.map(({ name, defaults, styleDefaults, displayDefaults, options }) => [

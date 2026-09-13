@@ -46,6 +46,8 @@ function fixture(overrides: Partial<StarshipRuntimeSnapshot> = {}): StarshipRunt
 			cacheRead: 0,
 			cacheWrite: 0,
 			cost: 0.1234,
+			hasUsage: true,
+			sessionCacheHitRate: 0,
 		},
 		usingSubscription: false,
 		gitBranch: "feature",
@@ -119,7 +121,7 @@ test("bundled presets render their promised Pi-native information", () => {
 	}
 });
 
-test("built-in root renders exactly the reachable nine module categories without backgrounds", () => {
+test("built-in root renders a two-line environment and session-metrics footer without backgrounds", () => {
 	const rendered = renderStatusline(BUILT_IN_CONFIG, fixture());
 	const plain = stripAnsi(rendered.ansi);
 	for (const expected of [
@@ -130,12 +132,15 @@ test("built-in root renders exactly the reachable nine module categories without
 		/feature/u,
 		/=1 !4 \+3 \?5 ⇕⇡2⇣1/u,
 		/read/u,
-		/75\.0%/u,
-		/09:05/u,
+		/750\/1\.0k 75\.0%/u,
+		/ΣIn 1\.5k · ΣOut 200/u,
+		/Cache 0\.0%/u,
+		/\$0\.123/u,
 	]) {
 		assert.match(plain, expected);
 	}
-	for (const omitted of [/anthropic/u, /PR #123/u, /↑1\.5k/u, /\$0\.123/u, /🔌 active/u]) {
+	assert.equal(plain.split("\n").length, 2);
+	for (const omitted of [/anthropic/u, /PR #123/u, /09:05/u, /🔌 active/u]) {
 		assert.doesNotMatch(plain, omitted);
 	}
 	assert.ok(rendered.chunks.every((chunk) => chunk.style?.background === undefined));
@@ -232,7 +237,7 @@ test("context supports native percentage/window precision", () => {
 	);
 });
 
-test("context display thresholds hide and select the highest matching style", () => {
+test("context display thresholds only select styles and never hide the metric", () => {
 	const config = structuredClone(BUILT_IN_CONFIG);
 	config.format = "$context";
 	config.formatAst = parseFormat(config.format);
@@ -242,8 +247,8 @@ test("context display thresholds hide and select the highest matching style", ()
 			fixture({ contextUsage: { percent, tokens: 100, contextWindow: 1000 } }),
 		).ansi;
 
-	assert.equal(renderAt(0), "");
-	assert.equal(renderAt(29.999), "");
+	assert.ok(renderAt(0).includes(`${ESC}[32;1m`));
+	assert.ok(renderAt(29.999).includes(`${ESC}[32;1m`));
 	assert.ok(renderAt(30).includes(`${ESC}[32;1m`));
 	assert.ok(renderAt(59.999).includes(`${ESC}[32;1m`));
 	assert.ok(renderAt(60).includes(`${ESC}[33;1m`));
@@ -258,7 +263,7 @@ test("context display thresholds hide and select the highest matching style", ()
 	assert.ok(renderAt(50).includes(`${ESC}[34m`));
 });
 
-test("cost display thresholds hide low values and select yellow then red", () => {
+test("cost display thresholds select styles without hiding reported zero", () => {
 	const config = structuredClone(BUILT_IN_CONFIG);
 	config.format = "$cost";
 	config.formatAst = parseFormat(config.format);
@@ -268,8 +273,8 @@ test("cost display thresholds hide low values and select yellow then red", () =>
 			fixture({ tokenTotals: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost } }),
 		).ansi;
 
-	assert.equal(renderAt(0), "");
-	assert.equal(renderAt(0.999), "");
+	assert.ok(renderAt(0).includes(`${ESC}[32;1m`));
+	assert.ok(renderAt(0.999).includes(`${ESC}[32;1m`));
 	assert.ok(renderAt(1).includes(`${ESC}[33;1m`));
 	assert.ok(renderAt(4.999).includes(`${ESC}[33;1m`));
 	assert.ok(renderAt(5).includes(`${ESC}[31;1m`));
@@ -317,7 +322,7 @@ test("username selects user and root styles without exposing private selector me
 	assert.ok(renderUser("root").startsWith(`${ESC}[95mroot`));
 });
 
-test("cache and subscription modules expose native usage semantics", () => {
+test("cache and subscription modules expose session and latest usage semantics", () => {
 	const config = structuredClone(BUILT_IN_CONFIG);
 	config.format = "$cache|$cost";
 	config.formatAst = parseFormat(config.format);
@@ -330,26 +335,31 @@ test("cache and subscription modules expose native usage semantics", () => {
 			cacheRead: 2300,
 			cacheWrite: 1500,
 			cost: 0.1234,
+			hasUsage: true,
 			latestCacheHitRate: 87.5,
+			sessionCacheHitRate: 60.5,
 		},
 		usingSubscription: true,
 	});
 
 	assert.match(
 		stripAnsi(renderStatusline(config, runtime).ansi),
-		/📦 CH87\.5% \| 💸 \$0\.123 \(sub\) /u,
+		/Cache 60\.5% \| {2}\$0\.123 estimate /u,
 	);
 
-	config.modules.cache.format = "$read/$write/$rate";
+	config.modules.cache.format = "$read/$write/$rate/$session_rate";
 	config.modules.cache.formatAst = parseFormat(config.modules.cache.format);
-	assert.match(stripAnsi(renderStatusline(config, runtime).ansi), /^2\.3k\/1\.5k\/87\.5%\|/u);
+	assert.match(
+		stripAnsi(renderStatusline(config, runtime).ansi),
+		/^2\.3k\/1\.5k\/87\.5%\/60\.5%\|/u,
+	);
 
-	config.modules.cache.format = "[$symbol:$rate]($style)";
+	config.modules.cache.format = "[$symbol:$session_rate]($style)";
 	config.modules.cache.formatAst = parseFormat(config.modules.cache.format);
 	config.modules.cache.symbol = "C";
 	config.modules.cache.style = "red";
 	assert.ok(
-		renderStatusline(config, runtime).ansi.includes(`${String.fromCharCode(27)}[31mC:87.5%`),
+		renderStatusline(config, runtime).ansi.includes(`${String.fromCharCode(27)}[31mC:60.5%`),
 	);
 
 	assert.equal(
@@ -362,12 +372,14 @@ test("cache and subscription modules expose native usage semantics", () => {
 					cacheRead: 0,
 					cacheWrite: 0,
 					cost: 0,
+					hasUsage: true,
 					latestCacheHitRate: 0,
+					sessionCacheHitRate: 0,
 				},
 				usingSubscription: false,
 			}),
 		).modules.cache.length,
-		0,
+		3,
 	);
 
 	config.format = "$cost";
@@ -388,16 +400,16 @@ test("cache and subscription modules expose native usage semantics", () => {
 				}),
 			).ansi,
 		),
-		/\$0\.000 \(sub\)/u,
+		/\$0\.000 estimate/u,
 	);
 });
 
-test("cache read and write remain available when the latest rate is unknown", () => {
+test("cache variables distinguish unknown latest and session rates", () => {
 	const config = structuredClone(BUILT_IN_CONFIG);
 	config.format = "$cache";
 	config.formatAst = parseFormat(config.format);
 	config.modules.cache.disabled = false;
-	config.modules.cache.format = "$symbol:$read/$write/$rate";
+	config.modules.cache.format = "$symbol:$read/$write/$rate/$session_rate";
 	config.modules.cache.formatAst = parseFormat(config.modules.cache.format);
 	config.modules.cache.symbol = "C";
 
@@ -408,14 +420,16 @@ test("cache read and write remain available when the latest rate is unknown", ()
 			cacheRead: 2300,
 			cacheWrite: 1500,
 			cost: 0.1,
+			hasUsage: true,
 			latestCacheHitRate: undefined,
+			sessionCacheHitRate: 60.5,
 		},
 	});
-	assert.equal(stripAnsi(renderStatusline(config, runtime).ansi), "C:2.3k/1.5k/");
+	assert.equal(stripAnsi(renderStatusline(config, runtime).ansi), "C:2.3k/1.5k/—/60.5%");
 
 	config.modules.cache.format = BUILT_IN_CONFIG.modules.cache.format;
 	config.modules.cache.formatAst = parseFormat(config.modules.cache.format);
-	assert.equal(stripAnsi(renderStatusline(config, runtime).ansi).trim(), "C");
+	assert.equal(stripAnsi(renderStatusline(config, runtime).ansi).trim(), "Cache 60.5%");
 });
 
 test("external github-pr statuses remain generic extension statuses", () => {

@@ -11,7 +11,8 @@ The only configuration source is:
 ```
 
 When this file is absent, the extension uses its palette-free default without creating the file or its parent directory.
-The built-in root is the explicit sequence `$brand$model$thinking$directory` `$git_branch$git_status$activity$context$time`; it does not start the opt-in GitHub PR query.
+The built-in footer has two rows: `$brand$model$thinking$directory$git_branch$git_status$activity$context`, then `$tokens$cache$cost`.
+It does not start the opt-in GitHub PR query; existing custom root formats remain unchanged.
 The first successful settings save creates the file atomically.
 Existing malformed documents are never overwritten.
 
@@ -97,7 +98,10 @@ $git_branch\
 $git_status\
 $activity\
 $context\
-$time"""
+\n\
+$tokens\
+$cache\
+$cost"""
 
 [model]
 format = "[ $symbol$model ]($style)"
@@ -119,7 +123,7 @@ format = "[$symbol $percentage/$window ]($style)"
 [[context.display]]
 threshold = 0
 style = "bold green"
-hidden = true
+hidden = false
 
 [[context.display]]
 threshold = 30
@@ -327,14 +331,14 @@ A later entry wins when thresholds are equal.
 Each display entry requires a finite `threshold`, a valid `style`, and boolean `hidden`.
 Invalid entries warn and are ignored; module defaults are used if none remain.
 
-The default context thresholds are hidden at `0`, `bold green` at `30`, `bold yellow` at `60`, and `bold red` at `80`.
-The default cost thresholds are hidden at `0`, `bold yellow` at `1`, and `bold red` at `5`:
+The default context thresholds are `bold green` through `59.999%`, `bold yellow` from `60%`, and `bold red` from `80%`; they never hide the context metric.
+The default cost thresholds are `bold green` below `$1`, `bold yellow` from `$1`, and `bold red` from `$5`; they never hide a reported cost:
 
 ```toml
 [[cost.display]]
 threshold = 0
 style = "bold green"
-hidden = true
+hidden = false
 
 [[cost.display]]
 threshold = 1
@@ -360,6 +364,6 @@ Choose one migration:
 
 1. Replace old aliases with direct styles such as `cyan bold`, `bold bright-yellow`, or `fg:#e3e5e5 bg:#769ff0`.
 2. Define every needed alias under your own `[palettes.<name>]` table and explicitly select it with `palette = "<name>"`.
-3. Use **Restore built-in…** from `/starship` to review and replace the complete document with the new plain nine-module configuration.
+3. Use **Restore built-in…** from `/starship` to review and replace the complete document with the built-in two-line configuration.
 
 There is no hidden compatibility overlay or automatic migration.

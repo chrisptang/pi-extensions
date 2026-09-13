@@ -56,16 +56,19 @@ test("inspection classifies explicit modules and explains each showing module on
 	const inspection = inspectStatuslineModules(config, fixture(), 80);
 	const byName = new Map(inspection.modules.map((module) => [module.name, module]));
 
+	// `cost` no longer hides at zero: it reports a measured zero so an unavailable
+	// total (`—`) stays distinguishable from one that was actually measured.
 	assert.deepEqual(
 		inspection.showing.map((module) => module.name),
-		["model"],
+		["model", "cost"],
 	);
 	assert.equal(byName.get("model")?.state, "Showing");
 	assert.match(byName.get("model")?.preview ?? "", /sonnet-4/u);
 	assert.equal((byName.get("model")?.preview ?? "").includes("\u001b"), false);
 	assert.equal(byName.get("git_branch")?.state, "Empty");
 	assert.match(byName.get("git_branch")?.reason ?? "", /current snapshot produced no output/iu);
-	assert.equal(byName.get("cost")?.state, "Empty");
+	assert.equal(byName.get("cost")?.state, "Showing");
+	assert.match(byName.get("cost")?.preview ?? "", /\$0\.00/u);
 	assert.equal(byName.get("brand")?.state, "Not in format");
 	assert.match(byName.get("brand")?.reason ?? "", /root format|\$all/iu);
 });

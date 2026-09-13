@@ -44,7 +44,8 @@ Do not enable this with `@narumitw/pi-statusline`: both own Pi's footer, and Pi 
 
 ## 🚀 Quick start
 
-Start Pi with the extension to use the built-in footer without creating a settings file.
+Start Pi with the extension to use the built-in two-line footer without creating a settings file.
+The first row shows environment, model, thinking, directory, Git, activity, and live context; the second shows session metrics such as `ΣIn`, `ΣOut`, cache rate, and reported cost.
 Run `/starship` to inspect the footer, choose a preset, or customize the configuration.
 
 The bundled configuration skill is manual-only and is not available for automatic model invocation.
@@ -94,6 +95,11 @@ format = "$model$directory$git_branch"
 [model]
 style = "bold blue"
 ```
+
+The default metrics row uses cumulative session input (`input + cacheRead + cacheWrite`), cumulative output, and a token-weighted cache-read rate.
+It shows `—` when Pi has not reported usage, but `0.0%` for measured zero cache use.
+`$rate` remains available for the latest assistant-request cache rate; `$total_input` is the new explicit inclusive input variable, while legacy `$input` and `$total` retain their existing meanings.
+Reported cost is an estimate; subscription-backed sessions are labeled `estimate`, not a billing statement.
 
 Use `/starship` for interactive configuration, preview, diagnostics, presets, and recovery.
 Manual file edits load at the next `session_start`, including `/reload`.

@@ -19,10 +19,10 @@ Use this authoritative public reference whenever a question or change involves a
 | `git_metrics` | `$symbol`, `$added`, `$deleted` | Added/deleted line totals from the working tree diff |
 | `git_status` | `$symbol`, `$all_status`, `$ahead_behind`, `$ahead`, `$behind`, `$diverged`, `$up_to_date`, `$conflicted`, `$stashed`, `$deleted`, `$renamed`, `$modified`, `$typechanged`, `$staged`, `$untracked`, and detailed index/worktree counters | Cached porcelain-v2 counters |
 | `activity` | `$symbol`, `$state`, `$tool`, `$count`, `$kind`, `$title`, `$text` | Extension UI waits, active tools, streaming, completion, or idle |
-| `context` | `$symbol`, `$percentage`, `$tokens`, `$window` | Context-window use |
-| `tokens` | `$symbol`, `$input`, `$output`, `$total` | Token totals |
-| `cache` | `$symbol`, `$rate`, `$read`, `$write` | Prompt-cache reads, writes, and latest hit rate; disabled by default |
-| `cost` | `$symbol`, `$cost`, `$subscription` | Session cost and optional `(sub)` marker |
+| `context` | `$symbol`, `$percentage`, `$tokens`, `$window` | Current context tokens, context window, and percentage |
+| `tokens` | `$symbol`, `$input`, `$output`, `$total`, `$total_input` | Session token totals; `$total_input` includes prompt cache reads and writes |
+| `cache` | `$symbol`, `$rate`, `$session_rate`, `$read`, `$write` | Prompt-cache totals, latest-request rate, and session token-weighted rate |
+| `cost` | `$symbol`, `$cost`, `$subscription` | Reported usage-cost estimate and subscription estimate marker |
 | `time` | `$symbol`, `$time` | Current local time |
 | `turn` | `$symbol`, `$count` | User turn count |
 | `package` | `$symbol`, `$version`, `$source` | Direct project manifest version |
@@ -128,19 +128,22 @@ Terraform workspace precedence is `TF_WORKSPACE`, `TF_DATA_DIR/environment`, the
 
 - During a blocking extension UI prompt, `activity` sets `$state` to `waiting`, `$kind` to the prompt kind, and `$title` to the sanitized bounded title or an empty string.
 - Prompt waiting takes precedence without losing the underlying tool, streaming, completed, or idle state, which returns when the prompt closes.
-- `tokens`, `cache`, and `cost` total every usage-bearing session entry, matching Pi's native footer.
-  This includes assistant messages, nested-LLM tool results, compactions, and branch summaries, including abandoned branches retained in the session.
-- Cache `$read` and `$write` are cumulative.
-  `$rate` uses only the latest assistant prompt with `cacheRead / (input + cacheRead + cacheWrite) * 100`.
-  The module is empty when Pi has reported no cache reads or writes.
-- `cache` is disabled and absent from the built-in root.
-  Enable it and add `$cache` to a custom root format (or use `$all`) to display it.
+- `tokens`, `cache`, and `cost` total every usage-bearing session entry, matching Pi's native session totals.
+  This includes assistant messages, nested-LLM tool results, compactions, and branch summaries, including abandoned branches retained in the session; user, custom, model-change, thinking-level-change, label, and session-info entries contribute no usage.
+- Tokens `$input`, `$output`, and `$total` retain their legacy meanings: raw input, output, and raw input plus output.
+  `$total_input` is the explicit cumulative prompt total used by the default footer: `input + cacheRead + cacheWrite`.
+- Cache `$read` and `$write` are cumulative, and the default `$session_rate` is token-weighted across the session: `cacheRead / (input + cacheRead + cacheWrite) * 100`.
+  `$rate` remains the optional latest assistant-request rate with that request's token counts.
+  With measured non-cached usage, both rates show `0.0%`; with no usage report, rates show `—`.
+- `cache` is enabled and appears in the built-in metrics row.
+  Custom root formats remain authoritative: add or remove `$cache` or use `$all` as desired.
 - Context `$percentage` uses native one-decimal precision.
-  Its default display hides values below 30%.
-  Customize `[[context.display]]` when lower values should remain visible.
+  The default always shows tokens, window, and percentage; display thresholds select color only.
+  Missing context usage renders `—` rather than a measured zero.
   The module name remains `context`, not `context_usage`.
-- Subscription-backed OAuth models and `kimi-coding` set cost `$subscription` to `(sub)`.
-  The dollar value is usage cost, not proof of an amount billed under a subscription.
+- Cost is the provider-reported usage estimate and always remains configurable through `[cost]` and `[[cost.display]]`.
+  Subscription-backed OAuth models and `kimi-coding` append `$subscription` as `estimate`; this is not proof of an amount billed under a subscription.
+  Missing usage renders cost as `—`, while measured zero renders `$0.000`.
 
 ### Directory, Git, and environment contraction
 
