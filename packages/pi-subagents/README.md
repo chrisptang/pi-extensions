@@ -20,6 +20,7 @@ Pi Subagents runs Pi jobs in separate child processes and supports authenticated
 - Publishes one asynchronous terminal completion and shows active-job progress above the editor.
 - Opens `/subagents` so you can watch a job's tool activity and visible output live, and terminate one after confirming.
 - Redacts credential-shaped text and reports file writes by size, so an inspected job never puts a secret on screen.
+- Lets `~/.pi/agent/subagent_instruction.md` replace the tool instructions the main session reads, for a model that ignores the built-in wording.
 - Starts independent jobs concurrently, up to eight active children.
 - Exposes privacy-filtered metadata without task text, output, prompts, selected tools, or broker credentials.
 - Cancels session-owned work and closes the broker during replacement, reload, or shutdown.
@@ -225,6 +226,47 @@ An alias that does not resolve to a usable model falls back to the main agent's 
 
 `/agents` lists the definitions in `~/.pi/agent/agents/` with their descriptions and any parse diagnostics.
 It never lists the fallback directories, so it reflects exactly what the session advertises.
+It also reports whether `~/.pi/agent/subagent_instruction.md` replaced any tool instructions, along with any diagnostics from parsing it.
+
+## 📝 Customizing the tool instructions
+
+The main session decides when and how to delegate from the `subagent_*` tool descriptions and their prompt guidelines.
+That wording is written for the general case, and some models follow parts of it loosely.
+
+Create `~/.pi/agent/subagent_instruction.md` to replace it with your own.
+The file is optional; without it every tool keeps its built-in text.
+
+A `##` heading names one tool and opens its section.
+Prose becomes that tool's description, and a `### Guidelines` block's list items become its prompt guidelines, which Pi renders as bullets in the system prompt.
+Anything before the first heading is a preamble for you, and never reaches the model.
+
+```markdown
+Notes to myself about how this session should delegate.
+
+## subagent_spawn
+
+Start one subagent job and return its jobId. Collect the result with subagent_wait.
+
+### Guidelines
+
+- Never start more than two jobs at once.
+- State each job's owning files in its task.
+```
+
+You can override `subagent_spawn`, `subagent_wait`, `subagent_cancel`, `subagent_inspect`, `subagent_send`, and `skill_run`.
+A heading naming anything else is reported through `/agents` rather than silently ignored.
+
+Each field is replaced only where your file defines it.
+A section with prose but no `### Guidelines` block keeps the shipped guidelines, and an empty `### Guidelines` block drops them — which is how you remove a built-in bullet instead of arguing with it.
+
+Replacement is whole-field, so a description that leaves out the parameter contract leaves it out of what the model reads.
+Keep the parts that say how the tool is called, such as collecting a `jobId` with `subagent_wait`, and rewrite the parts that say when to use it.
+
+The file is read once at session start, so an edit applies to the next session.
+It is bounded to 64 KiB and 32 guidelines per tool, and a file that cannot be read or parsed leaves every tool on its built-in text, so a broken override never disarms the tools.
+
+This file changes only what the **main session** reads.
+A subagent's own system prompt comes from its agent definition in `~/.pi/agent/agents/`, which you can already edit directly.
 
 ## 🧩 Running skills in a subagent
 
@@ -406,6 +448,8 @@ Parallel writers require disjoint ownership or workspace isolation outside this 
 - The extension does not provide peer-to-peer child messaging, retained conversations, user-directed follow-up work, mailboxes, Agent Teams, chains, fan-in aggregators, workflow DAGs, dynamic scheduling, verification orchestration, nested subagents, or extension-owned semantic memory.
 - The `/subagents` panel inspects and terminates jobs for a human. It is not an aggregator: nothing it shows enters the main agent's context, and fan-in synthesis stays with the main agent.
 - The panel requires TUI mode; in RPC, JSON, and print modes `/subagents` reports that and does nothing.
+- `subagent_instruction.md` replaces the instruction text the main session reads; it cannot make a model obey, and a description that drops the parameter contract drops it from what the model sees.
+- Instruction overrides are read once at session start, so an edit applies to the next session.
 - Bidirectional messages use request-response coordination, not a retained conversational session.
 - The main agent must verify child claims against the actual diff and deterministic checks.
 - Child requests and responses trigger a main-agent turn. A blocking job's completion does not wake an idle turn, because its caller is waiting; a `background: true` job's completion does.

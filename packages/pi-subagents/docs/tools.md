@@ -46,6 +46,8 @@ Lists the agent definitions in `~/.pi/agent/agents/` with their descriptions, fo
 
 The command deliberately never lists the fallback directories, so it reflects exactly what the session advertises.
 
+It also reports whether `~/.pi/agent/subagent_instruction.md` replaced any tool instructions, and any diagnostics from parsing it. A file that failed to parse would otherwise be invisible, because the tools keep working on their built-in text.
+
 ## `skill_run`
 
 | Parameter | Type | Required | Constraint / default |
@@ -184,3 +186,35 @@ The activity record holds tool calls with summarized arguments, their outcome an
 Each job retains its most recent 200 events, each bounded to 512 bytes of display text; older events are dropped and the panel reports how many. A job's record is released when the job is pruned.
 
 The panel is a human surface. Nothing it displays enters the main agent's context.
+
+## `~/.pi/agent/subagent_instruction.md`
+
+Replaces the instruction text the main session reads for the subagent tools. The file is optional: without it every tool keeps its built-in wording.
+
+Use it when a model ignores a rule that matters to you. The built-in text is written for the general case, and a rule you add elsewhere competes with the shipped sentence it was meant to correct; this file replaces that sentence instead.
+
+A `##` heading names one tool and opens its section. Prose in the section becomes the tool's description, and a `### Guidelines` block's list items become its prompt guidelines, which Pi renders as bullets in the system prompt's Guidelines list. Text before the first heading is a preamble for humans and never reaches the model.
+
+```markdown
+Notes to myself about how this session should delegate.
+
+## subagent_spawn
+
+Start one subagent job and return its jobId. Collect the result with subagent_wait.
+Name the files each job owns before starting it.
+
+### Guidelines
+
+- Never start more than two jobs at once.
+- State each job's owning files in its task.
+```
+
+Overridable sections: `subagent_spawn`, `subagent_wait`, `subagent_cancel`, `subagent_inspect`, `subagent_send`, `skill_run`. A heading naming anything else is reported through `/agents` rather than ignored.
+
+Each field is replaced only where the file defines it. A section with prose but no `### Guidelines` block keeps the shipped guidelines; a `### Guidelines` block with no items drops them, which is how you remove a built-in bullet rather than adding to it.
+
+Replacement is whole-field, so a description that omits the parameter contract omits it from what the model reads. Keep the parts that describe how the tool is called, such as collecting a `jobId` with `subagent_wait`, and rewrite the parts that describe when to use it.
+
+The file is read once when the session starts, so an edit takes effect in the next session. It is bounded to 64 KiB and 32 guidelines per tool; past either bound the excess is dropped and reported. A file that cannot be read or parsed leaves every tool on its built-in text, so a broken override never disarms the tools.
+
+The file changes only what the main session reads. A subagent's own system prompt comes from its agent definition in `~/.pi/agent/agents/`, which is already yours to edit.

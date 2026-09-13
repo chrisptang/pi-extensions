@@ -5,6 +5,11 @@ import type { AgentDefinition } from "./agent-definitions.js";
 import { type ModelCandidateLookup, resolveAgentModel } from "./agent-model.js";
 import { AgentRegistry } from "./agent-registry.js";
 import {
+	applyOverride,
+	type InstructionOverrides,
+	loadInstructionOverrides,
+} from "./instruction-overrides.js";
+import {
 	type BrokerInboundMessage,
 	MAX_IDENTIFIER_LENGTH,
 	MAX_MESSAGE_BYTES,
@@ -23,6 +28,42 @@ import {
 	SUBAGENT_THINKING_LEVELS,
 	type SubagentThinkingLevel,
 } from "./types.js";
+
+/**
+ * Built-in prompt text for each overridable tool, named so
+ * `~/.pi/agent/subagent_instruction.md` can replace a field without the
+ * fallback being buried in a registration call.
+ */
+const BUILTIN_INSTRUCTIONS = {
+	subagent_spawn: {
+		description:
+			"Use subagent_spawn to start one Pi subagent job and return its jobId immediately. The task defines the child's specialization, and the selected tools define its capabilities. The job may ask the main agent questions and publishes one asynchronous completion when terminal. Call it more than once in one parallel batch only for tasks that are mutually independent: each must be completable without any other's result, and parallel writers must own disjoint files. When one task needs another's output, start it only after that job's result has been collected.",
+		guidelines: [
+			"Batch multiple subagent_spawn calls only for mutually independent tasks. A task that needs another task's result is not independent and must wait for that job's completion.",
+			"Give each parallel writer disjoint file ownership. Concurrent writes to one file are not serialized or merged.",
+		],
+	},
+	skill_run: {
+		description:
+			"Use skill_run to execute one skill inside a subagent instead of loading it into this session. The skill's instructions become the child's system prompt, so its step-by-step work and intermediate file reads stay out of the main context and only the final result returns. Pass the user's request for the skill through args. Returns a jobId immediately; collect the result with subagent_wait. The same independence rule as subagent_spawn applies: batch multiple runs only when the skills' tasks do not depend on one another's results.",
+	},
+	subagent_inspect: {
+		description:
+			"Use subagent_inspect to return one privacy-filtered snapshot of retained jobs without exposing task text, complete child output, prompts, selected tools, context, credentials, or broker messages.",
+	},
+	subagent_cancel: {
+		description:
+			"Use subagent_cancel to idempotently cancel one queued or running job and release its process, timer, broker credentials, and temporary resources. Other jobs are unaffected, and file changes the child already made are kept rather than rolled back. Terminal jobs remain unchanged. A job whose error says it was cancelled by the user was stopped deliberately by the human: report that and do not restart the same work unless asked.",
+	},
+	subagent_wait: {
+		description:
+			"Use subagent_wait to wait for one job to become terminal. An incoming child request or response interrupts the wait without cancelling the job. A timeout or caller cancellation stops only this wait.",
+	},
+	subagent_send: {
+		description:
+			"Use subagent_send to send one request to an active job or answer one pending child request. For a new request, provide recipient and omit requestId. To answer a request, provide requestId and omit recipient. Provide exactly one of recipient or requestId. An accepted new request interrupts any active child response wait so delivery can proceed without consuming the child's original request.",
+	},
+} as const satisfies Record<string, { description: string; guidelines?: readonly string[] }>;
 
 const MAX_TASK_BYTES = 50 * 1024;
 /** Width the active-jobs widget can show; longer descriptions are truncated, never rejected. */
@@ -161,6 +202,8 @@ export interface SubagentToolsDependencies extends RuntimeDependencies {
 	createBroker?: (onMessage: (message: BrokerInboundMessage) => void) => MessageBroker;
 	agents?: AgentRegistry;
 	skills?: SkillRegistry;
+	/** Injectable for tests; defaults to reading the user's instruction file. */
+	instructions?: InstructionOverrides;
 }
 
 export interface RegisteredSubagentTools {
@@ -180,18 +223,23 @@ export function registerSubagentTools(
 	const runtime = new SubagentRuntime(pi, broker, dependencies);
 	const agents = dependencies.agents ?? new AgentRegistry();
 	const skills = dependencies.skills ?? new SkillRegistry();
+	const overrides = dependencies.instructions ?? loadInstructionOverrides();
+	// Text is resolved once at registration: Pi reads descriptions and guidelines
+	// when it builds the system prompt, so a later edit takes effect next session.
+	const instruction = (name: keyof typeof BUILTIN_INSTRUCTIONS) => {
+		const builtin = BUILTIN_INSTRUCTIONS[name];
+		const guidelines = "guidelines" in builtin ? [...builtin.guidelines] : undefined;
+		return applyOverride(overrides, name, { description: builtin.description, guidelines });
+	};
 	let lifecycle = Promise.resolve();
 
+	const spawnInstruction = instruction("subagent_spawn");
 	pi.registerTool({
 		name: "subagent_spawn",
 		label: "Subagent · Spawn",
-		description:
-			"Use subagent_spawn to start one Pi subagent job and return its jobId immediately. The task defines the child's specialization, and the selected tools define its capabilities. The job may ask the main agent questions and publishes one asynchronous completion when terminal. Call it more than once in one parallel batch only for tasks that are mutually independent: each must be completable without any other's result, and parallel writers must own disjoint files. When one task needs another's output, start it only after that job's result has been collected.",
+		description: spawnInstruction.description,
 		promptSnippet: "Use subagent_spawn to start one Pi subagent job",
-		promptGuidelines: [
-			"Batch multiple subagent_spawn calls only for mutually independent tasks. A task that needs another task's result is not independent and must wait for that job's completion.",
-			"Give each parallel writer disjoint file ownership. Concurrent writes to one file are not serialized or merged.",
-		],
+		promptGuidelines: spawnInstruction.guidelines,
 		parameters: buildSpawnParameters(agents),
 		prepareArguments: prepareSpawnArguments,
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
@@ -234,8 +282,7 @@ export function registerSubagentTools(
 	pi.registerTool({
 		name: "skill_run",
 		label: "Subagent · Skill",
-		description:
-			"Use skill_run to execute one skill inside a subagent instead of loading it into this session. The skill's instructions become the child's system prompt, so its step-by-step work and intermediate file reads stay out of the main context and only the final result returns. Pass the user's request for the skill through args. Returns a jobId immediately; collect the result with subagent_wait. The same independence rule as subagent_spawn applies: batch multiple runs only when the skills' tasks do not depend on one another's results.",
+		description: instruction("skill_run").description,
 		promptSnippet: "Use skill_run to execute one skill inside a subagent",
 		parameters: buildSkillRunParameters(skills),
 		prepareArguments: prepareSkillRunArguments,
@@ -279,8 +326,7 @@ export function registerSubagentTools(
 	pi.registerTool({
 		name: "subagent_inspect",
 		label: "Subagent · Inspect",
-		description:
-			"Use subagent_inspect to return one privacy-filtered snapshot of retained jobs without exposing task text, complete child output, prompts, selected tools, context, credentials, or broker messages.",
+		description: instruction("subagent_inspect").description,
 		promptSnippet: "Use subagent_inspect to inspect retained subagent jobs",
 		parameters: InspectParameters,
 		async execute(_toolCallId, _params, signal) {
@@ -293,8 +339,7 @@ export function registerSubagentTools(
 	pi.registerTool({
 		name: "subagent_cancel",
 		label: "Subagent · Cancel",
-		description:
-			"Use subagent_cancel to idempotently cancel one queued or running job and release its process, timer, broker credentials, and temporary resources. Other jobs are unaffected, and file changes the child already made are kept rather than rolled back. Terminal jobs remain unchanged. A job whose error says it was cancelled by the user was stopped deliberately by the human: report that and do not restart the same work unless asked.",
+		description: instruction("subagent_cancel").description,
 		promptSnippet: "Use subagent_cancel to cancel one active subagent job",
 		parameters: CancelParameters,
 		async execute(_toolCallId, params, signal) {
@@ -306,8 +351,7 @@ export function registerSubagentTools(
 	pi.registerTool({
 		name: "subagent_wait",
 		label: "Subagent · Wait",
-		description:
-			"Use subagent_wait to wait for one job to become terminal. An incoming child request or response interrupts the wait without cancelling the job. A timeout or caller cancellation stops only this wait.",
+		description: instruction("subagent_wait").description,
 		promptSnippet: "Use subagent_wait to wait for one subagent job or incoming message",
 		parameters: WaitParameters,
 		prepareArguments: prepareWaitArguments,
@@ -322,8 +366,7 @@ export function registerSubagentTools(
 	pi.registerTool({
 		name: "subagent_send",
 		label: "Subagent · Send",
-		description:
-			"Use subagent_send to send one request to an active job or answer one pending child request. For a new request, provide recipient and omit requestId. To answer a request, provide requestId and omit recipient. Provide exactly one of recipient or requestId. An accepted new request interrupts any active child response wait so delivery can proceed without consuming the child's original request.",
+		description: instruction("subagent_send").description,
 		promptSnippet: "Use subagent_send to send or answer one subagent message",
 		parameters: SendParameters,
 		async execute(_toolCallId, params, signal) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test, vi } from "vitest";
 import { createMockContext, createMockPi } from "../../../test/support.js";
 import { AgentRegistry } from "../src/agent-registry.js";
+import { emptyOverrides } from "../src/instruction-overrides.js";
 import type { SubagentRuntime } from "../src/runtime.js";
 import { SkillRegistry } from "../src/skill-registry.js";
 import subagents, { type SubagentsDependencies } from "../src/subagents.js";
@@ -195,6 +196,46 @@ test("the spawn contract tells the model that a parallel batch must be independe
 		"expected a disjoint-ownership guideline",
 	);
 });
+
+test("a user instruction file replaces the spawn description and guidelines", async () => {
+	const overrides = emptyOverrides();
+	overrides.tools.set("subagent_spawn", {
+		description: "Spawn only when the user has named the files each job owns.",
+		guidelines: ["Never run more than two jobs at once."],
+	});
+	const { mock } = await setup({ instructions: overrides });
+	const spawn = promptSurface(mock, "subagent_spawn");
+	assert.equal(spawn.description, "Spawn only when the user has named the files each job owns.");
+	assert.deepEqual(spawn.promptGuidelines, ["Never run more than two jobs at once."]);
+});
+
+test("an override for one tool leaves the others on their built-in text", async () => {
+	const overrides = emptyOverrides();
+	overrides.tools.set("subagent_cancel", { description: "Cancel nothing without asking me." });
+	const { mock } = await setup({ instructions: overrides });
+	assert.equal(
+		promptSurface(mock, "subagent_cancel").description,
+		"Cancel nothing without asking me.",
+	);
+	// The untouched tools still carry the shipped contract.
+	assert.match(promptSurface(mock, "subagent_spawn").description, /mutually independent/u);
+	assert.match(promptSurface(mock, "subagent_wait").description, /become terminal/u);
+});
+
+function promptSurface(
+	mock: Mock,
+	name: string,
+): { description: string; promptGuidelines?: string[] } {
+	const found = (
+		mock.tools as unknown as Array<{
+			name: string;
+			description: string;
+			promptGuidelines?: string[];
+		}>
+	).find((candidate) => candidate.name === name);
+	assert.ok(found, `expected tool ${name}`);
+	return found;
+}
 
 function tool(mock: Mock, name: string): RegisteredTool {
 	const found = (mock.tools as unknown as RegisteredTool[]).find(

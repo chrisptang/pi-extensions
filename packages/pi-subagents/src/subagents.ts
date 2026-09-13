@@ -3,6 +3,7 @@ import { AgentRegistry } from "./agent-registry.js";
 import { registerAgentsCommand } from "./agents-command.js";
 import { type SeedResult, seedBuiltinAgents } from "./builtin-agents.js";
 import { registerCompletionRenderer } from "./completion-renderer.js";
+import { loadInstructionOverrides } from "./instruction-overrides.js";
 import { registerSubagentsPanelCommand } from "./panel.js";
 import type { SubagentRuntime } from "./runtime.js";
 import { registerSkillsCommand } from "./skills-command.js";
@@ -27,9 +28,11 @@ export default function subagents(
 	if (seeded) agents.noteSeed(seeded.diagnostics);
 
 	registerCompletionRenderer(pi);
-	const tools = registerSubagentTools(pi, { ...dependencies, agents });
+	// Loaded once and shared, so `/agents` reports exactly the text the tools got.
+	const instructions = dependencies.instructions ?? loadInstructionOverrides();
+	const tools = registerSubagentTools(pi, { ...dependencies, agents, instructions });
 	dependencies.onRuntime?.(tools.runtime);
-	registerAgentsCommand(pi, agents);
+	registerAgentsCommand(pi, agents, instructions);
 	registerSkillsCommand(pi, tools.skills);
 	const panel = registerSubagentsPanelCommand(tools.runtime);
 	pi.registerCommand(panel.name, panel.options);
