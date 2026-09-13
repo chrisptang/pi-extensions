@@ -1,4 +1,4 @@
-import { sanitizeTerminalText } from "./message-broker.js";
+import { sanitizeTerminalText } from "./text.js";
 
 export const MAX_MODEL_TEXT_BYTES = 50 * 1024;
 export const MAX_MODEL_TEXT_LINES = 2_000;

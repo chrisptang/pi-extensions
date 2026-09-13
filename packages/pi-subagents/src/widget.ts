@@ -1,7 +1,7 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
-import { sanitizeTerminalText } from "./message-broker.js";
 import type { ActiveJobDisplay, SubagentRuntime } from "./runtime.js";
+import { sanitizeTerminalText } from "./text.js";
 
 export const SUBAGENT_WIDGET_KEY = "subagents";
 export const SUBAGENT_WIDGET_REFRESH_INTERVAL_MS = 1_000;

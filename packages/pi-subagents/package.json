@@ -1,7 +1,7 @@
 {
 	"name": "@narumitw/pi-subagents",
 	"version": "3.0.1",
-	"description": "Subagent jobs with asynchronous main-agent messaging for Pi.",
+	"description": "One-way subagent jobs with live inspection and termination for Pi.",
 	"type": "module",
 	"license": "MIT",
 	"private": false,

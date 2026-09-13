@@ -1,6 +1,6 @@
 import { type ExtensionAPI, getMarkdownTheme, keyText } from "@earendil-works/pi-coding-agent";
 import { Box, type Component, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
-import { sanitizeTerminalText } from "./message-broker.js";
+import { sanitizeTerminalText } from "./text.js";
 
 export const COMPLETION_MESSAGE_TYPE = "pi-subagents-completion";
 

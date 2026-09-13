@@ -1,4 +1,4 @@
-import { sanitizeTerminalText } from "./message-broker.js";
+import { sanitizeTerminalText } from "./text.js";
 
 /** Events retained per job. The oldest are dropped once the buffer is full. */
 export const MAX_ACTIVITY_EVENTS = 200;

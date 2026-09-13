@@ -7,17 +7,11 @@ import path from "node:path";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import {
 	buildPiArgs,
-	childCommunicationBridgePath,
 	resolveTimeoutMs,
 	runChild,
 	terminateWindowsProcessTree,
 } from "../src/process.js";
-import {
-	CHILD_CORE_TOOL_NAMES,
-	type ChildActivity,
-	type ChildControl,
-	type ChildRequest,
-} from "../src/types.js";
+import { CHILD_CORE_TOOL_NAMES, type ChildActivity, type ChildRequest } from "../src/types.js";
 
 let directory: string;
 let previousPackageDirectory: string | undefined;
@@ -42,57 +36,56 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-test("buildPiArgs isolates the RPC child and preserves selected communication tools", () => {
+test("buildPiArgs isolates the RPC child and grants only its selected work tools", () => {
 	const args = buildPiArgs(childRequest());
-	assert.deepEqual(args.slice(0, 7), [
+	assert.deepEqual(args.slice(0, 6), [
 		"--mode",
 		"rpc",
 		"--no-session",
 		"--no-extensions",
 		"--no-skills",
 		"--no-prompt-templates",
-		"-e",
 	]);
-	assert.equal(args[7], childCommunicationBridgePath());
+	// No extension is injected into a child at all, so there is no `-e` argument.
+	assert.equal(args.includes("-e"), false);
 	assert.equal(args[args.indexOf("--model") + 1], "test-provider/test-model");
 	assert.equal(args[args.indexOf("--thinking") + 1], "medium");
 	assert.ok(args.includes("--no-approve"));
-	assert.equal(args[args.indexOf("--tools") + 1], "read,grep,find,ls,subagent_send,subagent_wait");
+	assert.equal(args[args.indexOf("--tools") + 1], "read,grep,find,ls");
 	assert.doesNotMatch(args.join(" "), /\bbash\b|\bwrite\b|append-system-prompt/u);
 	assert.equal(args.includes("Task: task"), false);
 
 	const writable = buildPiArgs(
 		childRequest({
-			tools: ["read", "bash", "write", "subagent_send", "subagent_wait"],
+			tools: ["read", "bash", "write"],
 			thinkingLevel: "xhigh",
 			projectTrusted: true,
 		}),
 	);
 	assert.ok(writable.includes("--approve"));
 	assert.equal(writable[writable.indexOf("--thinking") + 1], "xhigh");
-	assert.equal(
-		writable[writable.indexOf("--tools") + 1],
-		"read,bash,write,subagent_send,subagent_wait",
-	);
+	assert.equal(writable[writable.indexOf("--tools") + 1], "read,bash,write");
 
+	// An empty selection stays empty: nothing is added on the child's behalf.
 	const noWorkTools = buildPiArgs(childRequest({ tools: [] }));
-	assert.equal(noWorkTools[noWorkTools.indexOf("--tools") + 1], "subagent_send,subagent_wait");
+	assert.equal(noWorkTools[noWorkTools.indexOf("--tools") + 1], "");
 });
 
 test("a child is launched without any way to spawn a grandchild", () => {
 	// Nesting is blocked by what the child process holds, not only by the depth
 	// guard in the spawn tool, which a child with `bash` could unset.
 	const args = buildPiArgs(childRequest());
-	// The extension defining subagent_spawn and skill_run is never loaded.
+	// The extension defining subagent_spawn and skill_run is never loaded, and no
+	// extension is injected in its place.
 	assert.ok(args.includes("--no-extensions"));
-	assert.equal(args.filter((arg) => arg === "-e").length, 1);
-	assert.equal(args[args.indexOf("-e") + 1], childCommunicationBridgePath());
+	assert.equal(args.includes("-e"), false);
 
-	// The only subagent tools a child receives are the two communication tools.
-	const granted = (args[args.indexOf("--tools") + 1] ?? "").split(",");
+	// A child holds no subagent tool whatsoever: there is no channel back to the
+	// parent, so it cannot spawn, cancel, wait on, or message anything.
+	const granted = (args[args.indexOf("--tools") + 1] ?? "").split(",").filter(Boolean);
 	assert.deepEqual(
 		granted.filter((tool) => tool.startsWith("subagent_") || tool === "skill_run"),
-		["subagent_send", "subagent_wait"],
+		[],
 	);
 
 	// No requestable tool list can smuggle a spawn tool past the allowlist.
@@ -103,20 +96,6 @@ test("a child is launched without any way to spawn a grandchild", () => {
 			`${tool} must not be requestable for a child`,
 		);
 	}
-});
-
-test("the child bridge registers only the two communication tools", async () => {
-	const registered: string[] = [];
-	const bridge = await import("../src/child-communication-tools.js");
-	bridge.createChildCommunicationExtension({
-		send: async () => ({ accepted: true }),
-		wait: async () => ({ type: "timeout" }),
-	} as never)({
-		registerTool: (tool: { name: string }) => registered.push(tool.name),
-		registerCommand: () => undefined,
-		on: () => undefined,
-	} as never);
-	assert.deepEqual(registered.sort(), ["subagent_send", "subagent_wait"]);
 });
 
 test("runChild uses a bundled Pi executable when its manifest CLI is absent", async () => {
@@ -205,106 +184,6 @@ async function handle(command) {
 	assert.match(result.limitations.join("\n"), /malformed or oversized/i);
 });
 
-test("runChild exposes RPC steering only after prompt acceptance", async () => {
-	installFakePi(`
-async function handle(command) {
-  if (command.type === "prompt") {
-    respond(command);
-    return;
-  }
-  if (command.type === "steer") {
-    respond(command);
-    event(message("answered: " + command.message));
-    event({ type: "agent_settled" });
-  }
-}
-`);
-	let resolveControl!: (control: ChildControl) => void;
-	const controlReady = new Promise<ChildControl>((resolve) => {
-		resolveControl = resolve;
-	});
-	const work = runChild(childRequest({ onControl: resolveControl }));
-	const control = await controlReady;
-	await control.send("question from main");
-	const result = await work;
-	assert.equal(result.state, "completed");
-	assert.equal(result.result, "answered: question from main");
-	await assert.rejects(() => control.send("late"), /no longer accepting|no longer active/i);
-});
-
-test("runChild surfaces an RPC steering rejection without terminating accepted work", async () => {
-	installFakePi(`
-async function handle(command) {
-  if (command.type === "prompt") {
-    respond(command);
-    return;
-  }
-  if (command.type === "steer") {
-    respond(command, false, "steer rejected");
-  }
-}
-`);
-	const controller = new AbortController();
-	let resolveControl!: (control: ChildControl) => void;
-	const controlReady = new Promise<ChildControl>((resolve) => {
-		resolveControl = resolve;
-	});
-	const work = runChild(childRequest({ signal: controller.signal, onControl: resolveControl }));
-	const control = await controlReady;
-	await assert.rejects(() => control.send("question"), /steer rejected/i);
-	controller.abort();
-	assert.equal((await work).state, "cancelled");
-});
-
-test("runChild rejects asynchronous RPC stdin write errors without an unhandled error", async () => {
-	// Accept the prompt, then stop draining stdin and exit shortly after. The child is still alive
-	// when the steer is sent, so it passes sendCommand's guards and reaches stdin.write; the payload
-	// is larger than the pipe buffer, so it stays queued and fails asynchronously with EPIPE.
-	installFakePi(`
-async function handle(command) {
-  if (command.type !== "prompt") return;
-  respond(command);
-  process.stdin.pause();
-  setTimeout(() => process.exit(0), 600);
-}
-setInterval(() => {}, 1000);
-`);
-	const controller = new AbortController();
-	let resolveControl!: (control: ChildControl) => void;
-	const controlReady = new Promise<ChildControl>((resolve) => {
-		resolveControl = resolve;
-	});
-	const work = runChild(childRequest({ signal: controller.signal, onControl: resolveControl }));
-	const control = await controlReady;
-	await assert.rejects(() => control.send("x".repeat(64 * 1024 * 1024)), /EPIPE/iu);
-	controller.abort();
-	assert.equal((await work).state, "cancelled");
-});
-
-test("runChild aborts an in-flight RPC steering command", async () => {
-	installFakePi(`
-async function handle(command) {
-  if (command.type === "prompt") respond(command);
-}
-setInterval(() => {}, 1000);
-`);
-	const processController = new AbortController();
-	let resolveControl!: (control: ChildControl) => void;
-	const controlReady = new Promise<ChildControl>((resolve) => {
-		resolveControl = resolve;
-	});
-	const work = runChild(
-		childRequest({ signal: processController.signal, onControl: resolveControl }),
-	);
-	const control = await controlReady;
-	const sendController = new AbortController();
-	const pending = control.send("unacknowledged question", sendController.signal);
-	sendController.abort();
-	await assert.rejects(pending, (error: Error) => error.name === "AbortError");
-	processController.abort();
-	assert.equal((await work).state, "cancelled");
-});
-
 test("runChild bounds child result text below the complete tool-output budget", async () => {
 	installFakePi(`
 async function handle(command) {
@@ -319,32 +198,6 @@ async function handle(command) {
 	assert.equal(result.truncated, true);
 	assert.ok(Buffer.byteLength(result.result ?? "", "utf8") <= 32 * 1024);
 	assert.match(result.limitations.join("\n"), /truncated/i);
-});
-
-test("passes broker credentials through a private descriptor outside the initial environment", async () => {
-	installFakePi(`
-async function handle(command) {
-  if (command.type !== "prompt") return;
-  respond(command);
-  const initialEnvironment = process.platform === "linux"
-    ? fs.readFileSync("/proc/self/environ")
-    : Buffer.from(Object.entries(process.env).map(([key, value]) => key + "=" + value).join("\\0"));
-  const text = JSON.stringify({
-    credentialsReceived: brokerCredentials.host === "127.0.0.1" && brokerCredentials.port === 31337,
-    initialEnvironmentContainsToken: initialEnvironment.includes(Buffer.from(brokerCredentials.token)),
-    descriptorMarker: process.env.PI_SUBAGENT_BROKER_FD,
-  });
-  event(message(text));
-  event({ type: "agent_settled" });
-}
-`);
-	const result = await runChild(childRequest());
-	assert.equal(result.state, "completed");
-	assert.deepEqual(JSON.parse(result.result ?? "{}"), {
-		credentialsReceived: true,
-		initialEnvironmentContainsToken: false,
-		descriptorMarker: "3",
-	});
 });
 
 test("handles late credential-pipe errors after child launch failure", async () => {
@@ -375,27 +228,17 @@ async function handle(command) {
 }
 setInterval(() => {}, 1000);
 `);
-	let timeoutReady!: (control: ChildControl) => void;
-	const timedOut = runChild(
-		childRequest({
-			timeout: 0.025,
-			onControl: (control) => timeoutReady(control),
-		}),
-	);
-	await new Promise<ChildControl>((resolve) => {
+	let timeoutReady!: () => void;
+	const timedOut = runChild(childRequest({ timeout: 0.025, onReady: () => timeoutReady() }));
+	await new Promise<void>((resolve) => {
 		timeoutReady = resolve;
 	});
 	assert.equal((await timedOut).state, "timed_out");
 
 	const controller = new AbortController();
-	let cancelReady!: (control: ChildControl) => void;
-	const work = runChild(
-		childRequest({
-			signal: controller.signal,
-			onControl: (control) => cancelReady(control),
-		}),
-	);
-	await new Promise<ChildControl>((resolve) => {
+	let cancelReady!: () => void;
+	const work = runChild(childRequest({ signal: controller.signal, onReady: () => cancelReady() }));
+	await new Promise<void>((resolve) => {
 		cancelReady = resolve;
 	});
 	controller.abort();
@@ -419,12 +262,12 @@ setInterval(() => {}, 1000);
 		return originalKill(pid, signal);
 	});
 	const controller = new AbortController();
-	let resolveControl!: (control: ChildControl) => void;
-	const ready = new Promise<ChildControl>((resolve) => {
-		resolveControl = resolve;
+	let resolveReady!: () => void;
+	const ready = new Promise<void>((resolve) => {
+		resolveReady = resolve;
 	});
 	const work = runChild(
-		childRequest({ signal: controller.signal, timeout: 0.05, onControl: resolveControl }),
+		childRequest({ signal: controller.signal, timeout: 0.05, onReady: resolveReady }),
 	);
 	await ready;
 	setTimeout(() => controller.abort(), 60);
@@ -626,11 +469,6 @@ function childRequest(overrides: Partial<ChildRequest> = {}): ChildRequest {
 		thinkingLevel: "medium",
 		cwd: directory,
 		projectTrusted: false,
-		communication: {
-			host: "127.0.0.1",
-			port: 31_337,
-			token: "a".repeat(64),
-		},
 		signal: new AbortController().signal,
 		...overrides,
 	};
@@ -643,9 +481,7 @@ function installFakePi(source: string, options: { bundled?: boolean } = {}): voi
 	mkdirSync(packageDirectory, { recursive: true });
 	writeFileSync(
 		executablePath,
-		`${options.bundled ? "#!/usr/bin/env node\n" : ""}import fs from "node:fs";
-const brokerCredentials = JSON.parse(fs.readFileSync(3, "utf8"));
-const event = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
+		`${options.bundled ? "#!/usr/bin/env node\n" : ""}const event = (value) => process.stdout.write(JSON.stringify(value) + "\\n");
 const respond = (command, success = true, error) => event({
   id: command.id,
   type: "response",

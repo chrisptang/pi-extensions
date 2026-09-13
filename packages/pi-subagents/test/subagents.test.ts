@@ -8,9 +8,6 @@ import { createMockContext, createMockPi } from "../../../test/support.js";
 import type { AgentDefinition } from "../src/agent-definitions.js";
 import { AgentRegistry } from "../src/agent-registry.js";
 import { renderAgentList } from "../src/agents-command.js";
-import { createBrokerClient } from "../src/child-communication-bridge.js";
-import { createChildCommunicationExtension } from "../src/child-communication-tools.js";
-import { MAX_MESSAGE_BYTES, MAX_MESSAGE_LINES, MessageBroker } from "../src/message-broker.js";
 import { MAX_MODEL_TEXT_BYTES, MAX_MODEL_TEXT_LINES } from "../src/model-output.js";
 import type { SkillDefinition } from "../src/skill-definitions.js";
 import { SkillRegistry } from "../src/skill-registry.js";
@@ -64,20 +61,13 @@ afterEach(async () => {
 	vi.restoreAllMocks();
 });
 
-test("registers six fixed main-agent tools with stable schemas and explicit limits", async () => {
+test("registers five fixed main-agent tools with stable schemas and explicit limits", async () => {
 	const { mock, context } = await setup();
 	assert.ok(mock.messageRenderers.has("pi-subagents-completion"));
 	const tools = mock.tools as unknown as RegisteredTool[];
 	assert.deepEqual(
 		tools.map((candidate) => candidate.name),
-		[
-			"subagent_spawn",
-			"skill_run",
-			"subagent_inspect",
-			"subagent_cancel",
-			"subagent_wait",
-			"subagent_send",
-		],
+		["subagent_spawn", "skill_run", "subagent_inspect", "subagent_cancel", "subagent_wait"],
 	);
 	assert.equal(tools[0]?.parameters.properties?.task?.maxLength, 50 * 1024);
 	assert.equal(tools[0]?.parameters.properties?.tools?.maxItems, 64);
@@ -94,10 +84,6 @@ test("registers six fixed main-agent tools with stable schemas and explicit limi
 		"xhigh",
 		"max",
 	]);
-	const send = tool(mock, "subagent_send");
-	assert.equal(send.parameters.properties?.message?.maxLength, MAX_MESSAGE_BYTES);
-	assert.equal(send.parameters.properties?.recipient?.maxLength, 128);
-	assert.equal(send.parameters.properties?.requestId?.maxLength, 128);
 	assert.deepEqual(Object.keys(tool(mock, "subagent_inspect").parameters.properties ?? {}), []);
 	assert.deepEqual(tools[0]?.prepareArguments?.({ task: "old", timeoutMs: 1_500 }), {
 		task: "old",
@@ -134,25 +120,6 @@ test("registers six fixed main-agent tools with stable schemas and explicit limi
 		true,
 	);
 	assert.deepEqual([...mock.commands.keys()], ["agents", "skills", "subagents"]);
-	const childMock = createMockPi();
-	createChildCommunicationExtension({
-		async send() {
-			return { requestId: "req_1", accepted: true, duplicate: false };
-		},
-		async wait() {
-			return "response";
-		},
-	})(childMock.pi);
-	const childSend = (childMock.tools as unknown as RegisteredTool[]).find(
-		(candidate) => candidate.name === "subagent_send",
-	);
-	assert.ok(childSend);
-	assert.equal(childSend.label, "Subagent · Send to Main");
-	assert.equal(childSend.parameters.properties?.recipient, undefined);
-	assert.notDeepEqual(
-		providerVisibleDefinition(tools[4] as RegisteredTool),
-		providerVisibleDefinition(childSend),
-	);
 	const definitions = JSON.stringify(
 		tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
 	);
@@ -266,11 +233,6 @@ test("spawns jobs with default and explicit tools and thinking levels", async ()
 			},
 		],
 	);
-	for (const request of requests) {
-		assert.equal(request.communication.host, "127.0.0.1");
-		assert.ok(request.communication.port > 0);
-		assert.match(request.communication.token, /^[a-f0-9]{64}$/u);
-	}
 	release();
 	await Promise.all([
 		waitFor(mock, context, String(inherited.details.jobId)),
@@ -489,414 +451,6 @@ test("rejects parent-only model providers and credentials before child launch", 
 	}
 });
 
-test("delivers child questions, interrupts parent waits, and returns plain-text replies", async () => {
-	let request!: ChildRequest;
-	const { mock, context } = await setup({
-		runChild: async (candidate) => {
-			request = candidate;
-			await new Promise<void>((resolve) =>
-				candidate.signal.addEventListener("abort", () => resolve(), { once: true }),
-			);
-			return cancelled();
-		},
-	});
-	const spawned = await spawnJob(mock, context, "Need one decision");
-	await Promise.resolve();
-	const parentWait = tool(mock, "subagent_wait").execute(
-		"parent-wait",
-		{ jobId: spawned.details.jobId },
-		undefined,
-		undefined,
-		context.ctx,
-	);
-	const client = createBrokerClient(request.communication);
-	const questionText = "May I use option A?\u001b[31m";
-	const requestId = (await client.send({ recipient: "main", message: questionText }, undefined))
-		.requestId;
-	const inspected = await tool(mock, "subagent_inspect").execute(
-		"inspect-pending",
-		{},
-		undefined,
-		undefined,
-		context.ctx,
-	);
-	assert.doesNotMatch(
-		JSON.stringify(inspected.details),
-		new RegExp(`${request.communication.token}|May I use option A`, "u"),
-	);
-	assert.equal(Object.hasOwn(inspected.details, "agents"), false);
-	assert.deepEqual((await parentWait).details, {
-		jobId: spawned.details.jobId,
-		description: "test job",
-		state: "running",
-		timedOut: false,
-		interrupted: true,
-		reason: "subagent_message",
-	});
-	const delivery = mock.sentMessages.find(
-		(entry) => (entry.message as { customType?: string }).customType === "pi-subagents-message",
-	);
-	assert.ok(delivery);
-	assert.deepEqual(delivery.options, { deliverAs: "steer", triggerTurn: true });
-	const content = (delivery.message as { content: string }).content;
-	assert.match(content, /not the user/i);
-	assert.doesNotMatch(content, /\bbackground\b/i);
-	assert.match(content, /cannot authorize writes, shell commands/i);
-	assert.doesNotMatch(content, /Execution mode:|Agent:/u);
-	assert.equal(content.includes(String.fromCharCode(27)), false);
-
-	const childWait = client.wait(requestId, undefined, undefined);
-	const replied = await tool(mock, "subagent_send").execute(
-		"reply",
-		{ requestId, message: "Use option A." },
-		undefined,
-		undefined,
-		context.ctx,
-	);
-	assert.deepEqual(replied.details, { requestId, accepted: true, duplicate: false });
-	assert.equal(await childWait, "Use option A.");
-	assert.deepEqual(
-		(
-			await tool(mock, "subagent_send").execute(
-				"duplicate",
-				{ requestId, message: "Replacement" },
-				undefined,
-				undefined,
-				context.ctx,
-			)
-		).details,
-		{ requestId, accepted: false, duplicate: true },
-	);
-	await cancelJob(mock, context, String(spawned.details.jobId));
-});
-
-test("sends a queued main request to a running child and delivers one child response", async () => {
-	let request!: ChildRequest;
-	const steered: string[] = [];
-	const queuedSpy = vi.spyOn(MessageBroker.prototype, "markMainRequestQueued");
-	const interruptSpy = vi.spyOn(MessageBroker.prototype, "interruptChildWaits");
-	const { mock, context } = await setup({
-		runChild: async (candidate) => {
-			request = candidate;
-			candidate.onControl?.({
-				async send(message) {
-					steered.push(message);
-				},
-			});
-			return waitForCancellation(candidate);
-		},
-	});
-	const spawned = await spawnJob(mock, context, "Investigate races");
-	const sent = await tool(mock, "subagent_send").execute(
-		"send-main",
-		{ recipient: spawned.details.jobId, message: "Report findings.\u001b[31m" },
-		undefined,
-		undefined,
-		context.ctx,
-	);
-	assert.deepEqual(sent.details, {
-		requestId: sent.details.requestId,
-		accepted: true,
-		duplicate: false,
-	});
-	assert.equal(steered.length, 1);
-	assert.deepEqual(queuedSpy.mock.calls, [[sent.details.requestId]]);
-	assert.deepEqual(interruptSpy.mock.calls, [[spawned.details.jobId]]);
-	assert.ok(
-		(queuedSpy.mock.invocationCallOrder[0] ?? 0) < (interruptSpy.mock.invocationCallOrder[0] ?? 0),
-	);
-	assert.match(steered[0] ?? "", /MAIN_AGENT_REQUEST.*Report findings/is);
-	assert.match(steered[0] ?? "", /not the user/i);
-	assert.match(steered[0] ?? "", /subagent_send.*requestId/i);
-	assert.equal((steered[0] ?? "").includes(String.fromCharCode(27)), false);
-
-	const parentWait = waitFor(mock, context, String(spawned.details.jobId));
-	const client = createBrokerClient(request.communication);
-	const responded = await client.send(
-		{ requestId: String(sent.details.requestId), message: "Found two races.\u001b[32m" },
-		undefined,
-	);
-	assert.deepEqual(responded, {
-		requestId: sent.details.requestId,
-		accepted: true,
-		duplicate: false,
-	});
-	assert.deepEqual((await parentWait).details, {
-		jobId: spawned.details.jobId,
-		description: "test job",
-		state: "running",
-		timedOut: false,
-		interrupted: true,
-		reason: "subagent_message",
-	});
-	const responseDelivery = mock.sentMessages.find(
-		(entry) =>
-			(entry.message as { customType?: string; details?: { kind?: string } }).customType ===
-				"pi-subagents-message" &&
-			(entry.message as { details?: { kind?: string } }).details?.kind === "response",
-	);
-	assert.ok(responseDelivery);
-	assert.deepEqual(responseDelivery.options, { deliverAs: "steer", triggerTurn: true });
-	const responseContent = (responseDelivery.message as { content: string }).content;
-	assert.match(responseContent, /SUBAGENT_RESPONSE.*Found two races/is);
-	assert.equal(responseContent.includes(String.fromCharCode(27)), false);
-	assert.deepEqual(
-		await client.send(
-			{ requestId: String(sent.details.requestId), message: "replacement" },
-			undefined,
-		),
-		{ requestId: sent.details.requestId, accepted: false, duplicate: true },
-	);
-	await cancelJob(mock, context, String(spawned.details.jobId));
-});
-
-test("delivers maximum main messages intact inside bounded protocol envelopes", async () => {
-	const steered: string[] = [];
-	const { mock, context } = await setup({
-		runChild: async (candidate) => {
-			candidate.onControl?.({
-				async send(message) {
-					steered.push(message);
-				},
-			});
-			return waitForCancellation(candidate);
-		},
-	});
-	const spawned = await spawnJob(mock, context, "Receive large questions");
-	const payloads = [
-		"q".repeat(MAX_MESSAGE_BYTES),
-		Array.from({ length: MAX_MESSAGE_LINES }, () => "q").join("\n"),
-	];
-	for (const [index, message] of payloads.entries()) {
-		const sent = await tool(mock, "subagent_send").execute(
-			`send-boundary-${index}`,
-			{ recipient: spawned.details.jobId, message },
-			undefined,
-			undefined,
-			context.ctx,
-		);
-		assert.equal(sent.details.accepted, true);
-	}
-	assert.equal(steered.length, payloads.length);
-	for (const [index, content] of steered.entries()) {
-		assert.ok(Buffer.byteLength(content, "utf8") <= MAX_MODEL_TEXT_BYTES);
-		assert.ok(content.split("\n").length <= MAX_MODEL_TEXT_LINES);
-		assert.ok(content.endsWith(`Request:\n${payloads[index]}`));
-		assert.doesNotMatch(content, /… \[truncated\]/u);
-	}
-	await cancelJob(mock, context, String(spawned.details.jobId));
-});
-
-test("replays a child response once when it arrives before the main wait", async () => {
-	let request!: ChildRequest;
-	const { mock, context } = await setup({
-		runChild: async (candidate) => {
-			request = candidate;
-			candidate.onControl?.({ async send() {} });
-			return waitForCancellation(candidate);
-		},
-	});
-	const spawned = await spawnJob(mock, context, "Respond before main waits");
-	const sent = await tool(mock, "subagent_send").execute(
-		"send-before-wait",
-		{ recipient: spawned.details.jobId, message: "Reply immediately" },
-		undefined,
-		undefined,
-		context.ctx,
-	);
-	const client = createBrokerClient(request.communication);
-	await client.send(
-		{ requestId: String(sent.details.requestId), message: "Already answered" },
-		undefined,
-	);
-
-	assert.deepEqual((await waitFor(mock, context, String(spawned.details.jobId))).details, {
-		jobId: spawned.details.jobId,
-		description: "test job",
-		state: "running",
-		timedOut: false,
-		interrupted: true,
-		reason: "subagent_message",
-	});
-	assert.deepEqual(
-		(
-			await tool(mock, "subagent_wait").execute(
-				"second-wait",
-				{ jobId: spawned.details.jobId, timeout: 0.001 },
-				undefined,
-				undefined,
-				context.ctx,
-			)
-		).details,
-		{ jobId: spawned.details.jobId, description: "test job", state: "running", timedOut: true },
-	);
-	await cancelJob(mock, context, String(spawned.details.jobId));
-});
-
-test("preserves a main request when cancellation races with queued RPC delivery", async () => {
-	let request!: ChildRequest;
-	let steered = "";
-	let resolveSendStarted!: () => void;
-	let releaseSend!: () => void;
-	const sendStarted = new Promise<void>((resolve) => {
-		resolveSendStarted = resolve;
-	});
-	const sendReleased = new Promise<void>((resolve) => {
-		releaseSend = resolve;
-	});
-	const { mock, context } = await setup({
-		runChild: async (candidate) => {
-			request = candidate;
-			candidate.onControl?.({
-				async send(message, signal) {
-					assert.equal(signal, undefined);
-					steered = message;
-					resolveSendStarted();
-					await sendReleased;
-				},
-			});
-			return waitForCancellation(candidate);
-		},
-	});
-	const spawned = await spawnJob(mock, context, "Long RPC send");
-	const controller = new AbortController();
-	const pending = tool(mock, "subagent_send").execute(
-		"cancel-in-flight",
-		{ recipient: spawned.details.jobId, message: "Cancel this request" },
-		controller.signal,
-		undefined,
-		context.ctx,
-	);
-	await sendStarted;
-	controller.abort();
-	await assert.rejects(pending, (error: Error) => error.name === "AbortError");
-
-	const requestId = steered.match(/^Request ID: (req_[^\n]+)$/mu)?.[1];
-	assert.ok(requestId);
-	const client = createBrokerClient(request.communication);
-	assert.deepEqual(
-		await client.send({ requestId, message: "Response after caller cancellation" }, undefined),
-		{ requestId, accepted: true, duplicate: false },
-	);
-	releaseSend();
-	await cancelJob(mock, context, String(spawned.details.jobId));
-});
-
-test("rolls back failed or cancelled main sends and rejects invalid selectors", async () => {
-	let failDelivery = true;
-	let request!: ChildRequest;
-	const { mock, context } = await setup({
-		runChild: async (candidate) => {
-			request = candidate;
-			candidate.onControl?.({
-				async send() {
-					if (failDelivery) throw new Error("synthetic steer failure");
-				},
-			});
-			return waitForCancellation(candidate);
-		},
-	});
-	const spawned = await spawnJob(mock, context, "Long task");
-	await Promise.resolve();
-	for (let index = 0; index < 5; index++) {
-		await assert.rejects(
-			() =>
-				tool(mock, "subagent_send").execute(
-					`failed-${index}`,
-					{ recipient: spawned.details.jobId, message: `Request ${index}` },
-					undefined,
-					undefined,
-					context.ctx,
-				),
-			/synthetic steer failure/i,
-		);
-	}
-	failDelivery = false;
-	const accepted = await tool(mock, "subagent_send").execute(
-		"accepted",
-		{ recipient: spawned.details.jobId, message: "Accepted request" },
-		undefined,
-		undefined,
-		context.ctx,
-	);
-	assert.equal(accepted.details.accepted, true);
-	for (const params of [
-		{ message: "missing selector" },
-		{ recipient: spawned.details.jobId, requestId: accepted.details.requestId, message: "both" },
-		{ recipient: "main", message: "wrong recipient" },
-		{ requestId: accepted.details.requestId, message: "answer own request" },
-	]) {
-		await assert.rejects(() =>
-			tool(mock, "subagent_send").execute("invalid", params, undefined, undefined, context.ctx),
-		);
-	}
-	await cancelJob(mock, context, String(spawned.details.jobId));
-	await assert.rejects(() =>
-		tool(mock, "subagent_send").execute(
-			"terminal",
-			{ recipient: spawned.details.jobId, message: "late" },
-			undefined,
-			undefined,
-			context.ctx,
-		),
-	);
-	assert.equal(request.signal.aborted, true);
-
-	let queuedRequest!: ChildRequest;
-	const queued = await setup({
-		runChild: async (candidate) => {
-			queuedRequest = candidate;
-			return waitForCancellation(candidate);
-		},
-	});
-	const queuedJob = await spawnJob(queued.mock, queued.context, "Queued send");
-	const controller = new AbortController();
-	const pendingSend = tool(queued.mock, "subagent_send").execute(
-		"cancelled-send",
-		{ recipient: queuedJob.details.jobId, message: "cancel me" },
-		controller.signal,
-		undefined,
-		queued.context.ctx,
-	);
-	await Promise.resolve();
-	controller.abort();
-	await assert.rejects(pendingSend, (error: Error) => error.name === "AbortError");
-	await cancelJob(queued.mock, queued.context, String(queuedJob.details.jobId));
-	assert.equal(queuedRequest.signal.aborted, true);
-});
-
-test("delivers maximum child messages intact inside bounded protocol envelopes", async () => {
-	let request!: ChildRequest;
-	const { mock, context } = await setup({
-		runChild: async (candidate) => {
-			request = candidate;
-			return waitForCancellation(candidate);
-		},
-	});
-	const spawned = await spawnJob(mock, context, "Ask large questions");
-	await Promise.resolve();
-	const client = createBrokerClient(request.communication);
-	const payloads = [
-		"q".repeat(MAX_MESSAGE_BYTES),
-		Array.from({ length: MAX_MESSAGE_LINES }, () => "q").join("\n"),
-	];
-	for (const message of payloads) {
-		await client.send({ recipient: "main", message }, undefined);
-	}
-	const deliveries = mock.sentMessages.filter(
-		(entry) => (entry.message as { customType?: string }).customType === "pi-subagents-message",
-	);
-	assert.equal(deliveries.length, payloads.length);
-	for (const [index, delivery] of deliveries.entries()) {
-		const content = (delivery.message as { content: string }).content;
-		assert.ok(Buffer.byteLength(content, "utf8") <= MAX_MODEL_TEXT_BYTES);
-		assert.ok(content.split("\n").length <= MAX_MODEL_TEXT_LINES);
-		assert.ok(content.endsWith(`Request:\n${payloads[index]}`));
-		assert.doesNotMatch(content, /… \[truncated\]/u);
-	}
-	await cancelJob(mock, context, String(spawned.details.jobId));
-});
-
 test("sanitizes terminal controls at child-output display boundaries", async () => {
 	const raw = "reported\u001b[31m output";
 	const { mock, context } = await setup({ runChild: async () => completed(raw) });
@@ -1029,36 +583,6 @@ test("jobs share the eight-job capacity", async () => {
 	await Promise.all(jobIds.map((jobId) => cancelJob(mock, context, jobId)));
 });
 
-test("broker startup failure leaves inspect available and prevents child launch", async () => {
-	let launched = false;
-	const { mock, context } = await setup({
-		runChild: async () => {
-			launched = true;
-			return completed("unexpected");
-		},
-		createBroker: (onMessage) =>
-			new MessageBroker({
-				onMessage,
-				createServer: () => {
-					throw new Error("synthetic bind failure");
-				},
-			}),
-	});
-	const inspected = await tool(mock, "subagent_inspect").execute(
-		"inspect",
-		{},
-		undefined,
-		undefined,
-		context.ctx,
-	);
-	assert.deepEqual(inspected.details, { jobs: [], omitted: { jobs: 0 } });
-	await assert.rejects(
-		() => spawnJob(mock, context, "must not launch"),
-		/messaging is unavailable.*synthetic bind failure/i,
-	);
-	assert.equal(launched, false);
-});
-
 test("session shutdown waits for child teardown without delivering stale completion", async () => {
 	let aborted = false;
 	let releaseTeardown!: () => void;
@@ -1107,12 +631,9 @@ test("session replacement cancels old jobs and permits a clean new session", asy
 	});
 	await spawnJob(mock, context, "Old session");
 	await Promise.resolve();
-	const oldClient = createBrokerClient(requests[0]?.communication as ChildRequest["communication"]);
 	await emit(mock, "session_start", { reason: "new" }, context.ctx);
+	// The replaced session's child is aborted, so its work cannot outlive it.
 	assert.equal(requests[0]?.signal.aborted, true);
-	await assert.rejects(() =>
-		oldClient.send({ recipient: "main", message: "stale session" }, undefined),
-	);
 	const next = await spawnJob(mock, context, "New session");
 	assert.equal(next.details.state, "queued");
 });
@@ -1596,16 +1117,6 @@ function cancelled(): ChildResult {
 		error: "cancelled",
 		limitations: [],
 		truncated: false,
-	};
-}
-
-function providerVisibleDefinition(tool: RegisteredTool) {
-	return {
-		name: tool.name,
-		label: tool.label,
-		description: tool.description,
-		promptSnippet: tool.promptSnippet,
-		parameters: tool.parameters,
 	};
 }
 

@@ -121,10 +121,10 @@ test("guidelines past the cap are dropped and reported", () => {
 });
 
 test("an empty section keeps the built-in text and says so", () => {
-	const file = writeInstruction(["## subagent_send", "", "   ", ""].join("\n"));
+	const file = writeInstruction(["## subagent_inspect", "", "   ", ""].join("\n"));
 	const overrides = loadInstructionOverrides(file);
 	assert.equal(overrides.tools.size, 0);
-	assert.match(overrides.diagnostics[0] ?? "", /Section for subagent_send is empty/u);
+	assert.match(overrides.diagnostics[0] ?? "", /Section for subagent_inspect is empty/u);
 });
 
 test("a later duplicate section wins and the collision is reported", () => {

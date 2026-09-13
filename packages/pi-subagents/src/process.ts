@@ -2,15 +2,8 @@ import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { StringDecoder } from "node:string_decoder";
-import { fileURLToPath } from "node:url";
 import { getPackageDir } from "@earendil-works/pi-coding-agent";
-import {
-	BROKER_CREDENTIAL_FD,
-	brokerCredentialEnvironment,
-	serializeBrokerCredentials,
-} from "./broker-credentials.js";
-import { CHILD_COMMUNICATION_TOOL_NAMES } from "./child-communication-tools.js";
-import type { ChildActivity, ChildControl, ChildRequest, ChildResult } from "./types.js";
+import type { ChildActivity, ChildRequest, ChildResult } from "./types.js";
 
 const CORE_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -94,24 +87,20 @@ export function buildPiArgs(request: ChildRequest): string[] {
 		"--no-extensions",
 		"--no-skills",
 		"--no-prompt-templates",
-		"-e",
-		childCommunicationBridgePath(),
 		"--model",
 		request.model,
 		"--thinking",
 		request.thinkingLevel,
 		request.projectTrusted ? "--approve" : "--no-approve",
 	];
-	const tools = [...new Set([...request.tools, ...CHILD_COMMUNICATION_TOOL_NAMES])];
-	args.push("--tools", tools.join(","));
+	// A child holds only its selected work tools. Nothing is added: the child has
+	// no channel back to the parent, so there is no communication tool to grant,
+	// and no `subagent_*` tool reaches a child at all.
+	args.push("--tools", [...new Set(request.tools)].join(","));
 	// The agent definition specializes the child through its system prompt rather
 	// than the task, so the task text stays free for the caller's own instructions.
 	if (request.systemPrompt) args.push("--append-system-prompt", request.systemPrompt);
 	return args;
-}
-
-export function childCommunicationBridgePath(): string {
-	return fileURLToPath(new URL("./child-communication-bridge.ts", import.meta.url));
 }
 
 async function executeProcess(
@@ -131,7 +120,7 @@ async function executeProcess(
 	const pendingCommands = new Map<string, PendingRpcCommand>();
 	let rpcInputError: Error | undefined;
 	let sendCommand: (
-		command: { type: "prompt" | "steer"; message: string },
+		command: { type: "prompt"; message: string },
 		onAccepted?: () => void,
 		signal?: AbortSignal,
 	) => Promise<void> = () => Promise.reject(new Error("Subagent RPC process is unavailable."));
@@ -329,10 +318,9 @@ async function executeProcess(
 				cwd: request.cwd,
 				detached: globalThis.process.platform !== "win32",
 				shell: false,
-				stdio: ["pipe", "pipe", "pipe", "pipe"],
+				stdio: ["pipe", "pipe", "pipe"],
 				env: {
 					...globalThis.process.env,
-					...brokerCredentialEnvironment(),
 					PI_SUBAGENT_DEPTH: String(
 						(Number.parseInt(globalThis.process.env.PI_SUBAGENT_DEPTH ?? "0", 10) || 0) + 1,
 					),
@@ -413,15 +401,11 @@ async function executeProcess(
 						}, timeoutMs);
 						deadline.unref();
 					}
-					const control: ChildControl = {
-						send: async (message, signal) => {
-							if (!ready || completed || terminating) {
-								throw new Error("Subagent job is no longer accepting messages.");
-							}
-							await sendCommand({ type: "steer", message }, undefined, signal);
-						},
-					};
-					request.onControl?.(control);
+					try {
+						request.onReady?.();
+					} catch {
+						// Observers cannot interrupt the child's lifecycle.
+					}
 				},
 				request.signal,
 			).catch((error) => {
@@ -450,28 +434,6 @@ async function executeProcess(
 			if (spawned) terminate(1);
 			else finish(1, error.message);
 		});
-		const credentialPipe = process.stdio[BROKER_CREDENTIAL_FD];
-		if (!credentialPipe || !("end" in credentialPipe)) {
-			errorMessage = "Subagent broker credential pipe is unavailable.";
-			terminate(1);
-		} else {
-			const onCredentialError = () => {
-				if (settled || finishRequested) return;
-				errorMessage = "Subagent broker credential transfer failed.";
-				terminate(1);
-			};
-			const removeCredentialListeners = () => {
-				credentialPipe.removeListener("error", onCredentialError);
-				credentialPipe.removeListener("close", removeCredentialListeners);
-			};
-			credentialPipe.on("error", onCredentialError);
-			credentialPipe.once("close", removeCredentialListeners);
-			try {
-				credentialPipe.end(serializeBrokerCredentials(request.communication));
-			} catch {
-				onCredentialError();
-			}
-		}
 	});
 
 	const output = terminalOutput ?? latestOutput;

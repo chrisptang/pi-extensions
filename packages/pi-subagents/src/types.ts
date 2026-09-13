@@ -50,16 +50,6 @@ export interface ChildResult {
 	truncated: boolean;
 }
 
-export interface BrokerCredentials {
-	host: "127.0.0.1";
-	port: number;
-	token: string;
-}
-
-export interface ChildControl {
-	send(message: string, signal?: AbortSignal): Promise<void>;
-}
-
 /**
  * Progress reported by a running child, for human inspection only.
  *
@@ -82,9 +72,12 @@ export interface ChildRequest {
 	cwd: string;
 	timeout?: number;
 	projectTrusted: boolean;
-	communication: BrokerCredentials;
 	signal: AbortSignal;
-	onControl?: (control: ChildControl) => void;
+	/**
+	 * Called once the child's RPC has accepted the task prompt, which is also when
+	 * its timeout starts. Observation only: nothing can be sent to a child.
+	 */
+	onReady?: () => void;
 	/** Observer for child progress. Must not throw; failures are the caller's to contain. */
 	onActivity?: (activity: ChildActivity) => void;
 }

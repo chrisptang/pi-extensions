@@ -24,7 +24,6 @@ export const OVERRIDABLE_TOOLS = [
 	"subagent_wait",
 	"subagent_cancel",
 	"subagent_inspect",
-	"subagent_send",
 	"skill_run",
 ] as const;
 

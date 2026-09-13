@@ -18,7 +18,7 @@ The call does not wait for its child, and each job owns its own child process, s
 
 The active-jobs widget labels the job with its `agent` name, or its job ID when no agent was selected, followed by `description`. That is the only place the job announces what it is doing while it runs, so the description should name the work rather than restate the agent. A description longer than 60 characters is truncated for display rather than rejected, so an over-long label never costs the caller a turn.
 
-The runtime always adds `subagent_send` and `subagent_wait` to the selected tools.
+The runtime adds nothing to the selected tools. A child receives exactly what `tools` names, and no `subagent_*` tool ever reaches a child.
 
 A definition's `model: inherit` keeps the main agent's model without reporting a limitation, the same as omitting the field.
 
@@ -37,8 +37,6 @@ A process-local runtime API key, including a parent-only `--api-key` value, also
 Use Pi's stored credentials or environment credentials that the child process can read.
 
 Unavailable or extension-only tool names throw before the job is queued.
-
-Throws without launching a child when the session broker is unavailable.
 
 ## `/agents`
 
@@ -76,7 +74,7 @@ The `name` parameter description lists only the skills in `.pi/skills/` and `~/.
 
 `disable-model-invocation: true` removes a skill from that roster while leaving it runnable by explicit name, which is what the flag reserves it for.
 
-An unknown name throws before the job is queued. Every spawn-time rule above — extension providers, runtime API keys, unavailable tool names, and broker availability — applies unchanged.
+An unknown name throws before the job is queued. Every spawn-time rule above — extension providers, runtime API keys, and unavailable tool names — applies unchanged.
 
 ## `/skills`
 
@@ -94,7 +92,7 @@ No parameters.
 | --- | --- | --- | --- |
 | `jobId` | `string` | Yes | Job ID returned by `subagent_spawn`. |
 
-Cancels one queued or running job idempotently and releases its child process, timer, broker credentials, and temporary resources. Other jobs are unaffected.
+Cancels one queued or running job idempotently and releases its child process, timer, and temporary resources. Other jobs are unaffected.
 
 File changes the child already made are kept and are not rolled back, and the job's activity record stays readable in the `/subagents` panel.
 
@@ -102,76 +100,16 @@ A job a human terminated through `/subagents` reports `Subagent execution was ca
 
 ## `subagent_wait`
 
-### Main agent
-
 | Parameter | Type | Required | Constraint / default |
 | --- | --- | --- | --- |
 | `jobId` | `string` | Yes | Job ID to wait for. |
 | `timeout` | `number` | No | Seconds; `> 0` through `2,147,483.647`; no default and does not cancel the job. |
 
-Returns `{ jobId, state, timedOut: false, interrupted: true, reason: "subagent_message" }` without cancelling the job when a child request or response arrives.
+Returns when the job reaches a terminal state. A timeout or caller cancellation stops only that wait and leaves the job running.
 
-### Subagent
+There is no early return for an incoming message: a child has no channel to send one. The only outcomes are terminal, timeout, and cancellation.
 
-| Parameter | Type | Required | Constraint / default |
-| --- | --- | --- | --- |
-| `requestId` | `string` | Yes | Request ID returned by a child-originated `subagent_send`. |
-| `timeout` | `number` | No | Seconds; `> 0` through `2,147,483.647`; no default and does not cancel the request. |
-
-Returns the main agent's response as plain text.
-
-A timeout, caller cancellation, or incoming main-agent request throws and stops only that wait, so the child may wait for the same request again.
-
-The runtime interrupts an active child wait only after Pi RPC accepts the incoming main request for steering.
-
-## `subagent_send`
-
-Main and child processes receive separate provider-visible definitions for their own context.
-
-### Main agent
-
-| Parameter | Type | Required | Constraint / default |
-| --- | --- | --- | --- |
-| `recipient` | `string` | Conditional | Active job ID for a new request. |
-| `requestId` | `string` | Conditional | Pending child request to answer. |
-| `message` | `string` | Yes | Plain-text request or response, up to 48 KiB of UTF-8 text and 1,992 lines. |
-
-Provide exactly one of `recipient` or `requestId`.
-
-A new request provides an active queued or running job ID as `recipient` and omits `requestId`.
-
-A response provides `requestId` and omits `recipient`.
-
-### Subagent
-
-| Parameter | Type | Required | Constraint / default |
-| --- | --- | --- | --- |
-| `requestId` | `string` | No | Pending main-agent request to answer; omit to start a new request to main. |
-| `message` | `string` | Yes | Plain-text request or response, up to 48 KiB of UTF-8 text and 1,992 lines. |
-
-A new request omits `requestId` and returns a request ID immediately for an optional `subagent_wait` call.
-
-A response provides the pending main-agent `requestId`.
-
-A main-originated request waits for the child RPC prompt to be accepted and then uses Pi steering to reach the running child.
-
-After steering is queued, the runtime interrupts active child response waits without consuming their original requests.
-
-Caller cancellation before RPC delivery starts rolls the request back.
-
-Once RPC delivery starts, cancellation stops only the caller's wait; the request may still arrive and remains answerable until delivery fails or the job terminates.
-
-A child response arrives asynchronously in the main session and interrupts the next active main-agent `subagent_wait`, including when the response arrived immediately before the wait started.
-
-The first accepted response wins, and repeated responses acknowledge the existing response without replacing it.
-
-Each job may have up to four unresolved or answered-but-not-consumed requests across both directions.
-
-Requests and responses are limited to 1,992 lines so their protocol envelopes fit Pi's 2,000-line model-text bound.
-
-Terminal jobs, unknown requests, cross-job responses, responses from the request originator, and stale session credentials throw.
-
-A successful call returns `{ requestId, accepted, duplicate }`.
+Subagents do not have this tool, or any other `subagent_*` tool.
 
 ## `/subagents`
 
@@ -191,7 +129,7 @@ The panel is a human surface. Nothing it displays enters the main agent's contex
 
 Only the main session can create jobs. A child cannot spawn a grandchild.
 
-Children are launched with `--no-extensions`, so the extension defining `subagent_spawn` and `skill_run` is not loaded in a child process. The only extension injected into a child is the communication bridge, which registers `subagent_send` and `subagent_wait` and nothing else.
+Children are launched with `--no-extensions`, and no extension is injected in its place, so the extension defining every `subagent_*` tool is not loaded in a child process.
 
 The `tools` allowlist holds the eight core work tools — `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls` — so `subagent_spawn` cannot be requested for a child, and an agent definition naming it has it dropped with a diagnostic.
 
@@ -219,7 +157,7 @@ Name the files each job owns before starting it.
 - State each job's owning files in its task.
 ```
 
-Overridable sections: `subagent_spawn`, `subagent_wait`, `subagent_cancel`, `subagent_inspect`, `subagent_send`, `skill_run`. A heading naming anything else is reported through `/agents` rather than ignored.
+Overridable sections: `subagent_spawn`, `subagent_wait`, `subagent_cancel`, `subagent_inspect`, `skill_run`. A heading naming anything else is reported through `/agents` rather than ignored.
 
 Each field is replaced only where the file defines it. A section with prose but no `### Guidelines` block keeps the shipped guidelines; a `### Guidelines` block with no items drops them, which is how you remove a built-in bullet rather than adding to it.
 

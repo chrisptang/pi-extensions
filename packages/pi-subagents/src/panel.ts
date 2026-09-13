@@ -1,8 +1,8 @@
 import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { ActivityEvent } from "./activity.js";
-import { sanitizeTerminalText } from "./message-broker.js";
 import type { PanelJob, SubagentRuntime } from "./runtime.js";
+import { sanitizeTerminalText } from "./text.js";
 import { TERMINAL_JOB_STATES } from "./types.js";
 
 /** Panel repaint cadence, matching the active-jobs widget. */
@@ -79,7 +79,7 @@ export async function openSubagentsPanel(
 		[
 			`Terminate ${jobLabel(job)}?`,
 			"",
-			"Its child process, timer, and broker credentials are released.",
+			"Its child process and timer are released.",
 			"File changes it already made are kept and are not rolled back.",
 			"Other jobs are unaffected.",
 		].join("\n"),

@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { piAgentDirectory } from "./agent-definitions.js";
 import { isInheritedModel } from "./agent-model.js";
-import { sanitizeTerminalText } from "./message-broker.js";
+import { sanitizeTerminalText } from "./text.js";
 import {
 	CHILD_CORE_TOOL_NAMES,
 	DEFAULT_SUBAGENT_TOOLS,

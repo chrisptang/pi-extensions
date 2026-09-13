@@ -6,7 +6,7 @@ import {
 	type InstructionOverrides,
 	instructionFilePath,
 } from "./instruction-overrides.js";
-import { sanitizeTerminalText } from "./message-broker.js";
+import { sanitizeTerminalText } from "./text.js";
 
 /**
  * Register `/agents`.

@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { sanitizeTerminalText } from "./message-broker.js";
 import type { SkillRegistry } from "./skill-registry.js";
+import { sanitizeTerminalText } from "./text.js";
 
 /**
  * Register `/skills`.
