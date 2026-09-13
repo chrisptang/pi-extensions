@@ -187,6 +187,16 @@ Each job retains its most recent 200 events, each bounded to 512 bytes of displa
 
 The panel is a human surface. Nothing it displays enters the main agent's context.
 
+## Nesting
+
+Only the main session can create jobs. A child cannot spawn a grandchild.
+
+Children are launched with `--no-extensions`, so the extension defining `subagent_spawn` and `skill_run` is not loaded in a child process. The only extension injected into a child is the communication bridge, which registers `subagent_send` and `subagent_wait` and nothing else.
+
+The `tools` allowlist holds the eight core work tools — `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls` — so `subagent_spawn` cannot be requested for a child, and an agent definition naming it has it dropped with a diagnostic.
+
+Each child additionally inherits `PI_SUBAGENT_DEPTH` incremented by one, and `subagent_spawn` and `skill_run` refuse to run above zero. That layer is defence in depth: a child holding `bash` could unset the variable, but the process it runs in still has no spawn tool, so the guarantee rests on the tool set rather than the environment.
+
 ## `~/.pi/agent/subagent_instruction.md`
 
 Replaces the instruction text the main session reads for the subagent tools. The file is optional: without it every tool keeps its built-in wording.

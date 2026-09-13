@@ -21,6 +21,7 @@ Pi Subagents runs Pi jobs in separate child processes and supports authenticated
 - Opens `/subagents` so you can watch a job's tool activity and visible output live, and terminate one after confirming.
 - Redacts credential-shaped text and reports file writes by size, so an inspected job never puts a secret on screen.
 - Lets `~/.pi/agent/subagent_instruction.md` replace the tool instructions the main session reads, for a model that ignores the built-in wording.
+- Restricts job creation to the main session: a child loads no extensions and holds no spawn tool, so it cannot start a grandchild.
 - Starts independent jobs concurrently, up to eight active children.
 - Exposes privacy-filtered metadata without task text, output, prompts, selected tools, or broker credentials.
 - Cancels session-owned work and closes the broker during replacement, reload, or shutdown.
@@ -128,6 +129,22 @@ The task should state the child's role, objective, scope, constraints, and expec
 For reusable delegation policy, you can create your own project skill under `.pi/skills/<your-skill>/SKILL.md` or global skill under `~/.pi/agent/skills/<your-skill>/SKILL.md`.
 Choose its name, trigger, tool policy, task format, and verification workflow for your use case.
 The package intentionally registers and publishes no skill; the repository-only [`using-pi-subagents` example](https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-subagents/skills/using-pi-subagents) is an optional starting point.
+
+Installing is deliberately left to you, and the example is not copied into `~/.pi/agent/skills/` on install, for two reasons.
+A skill in that directory joins the `skill_run` roster, so the example — whose body is guidance about *when to delegate* — would become something the model can hand to a child to "execute", which is meaningless work.
+And unlike the built-in agent definitions, which are argument values `subagent_spawn` cannot work without, a delegation skill is policy text the extension is complete without.
+
+If you do want it installed, copy it under a name of your own and hide it from the roster:
+
+```bash
+mkdir -p ~/.pi/agent/skills/my-delegation-policy
+cp packages/pi-subagents/skills/using-pi-subagents/SKILL.md \
+   ~/.pi/agent/skills/my-delegation-policy/SKILL.md
+```
+
+Then set `name: my-delegation-policy` in its frontmatter and add `disable-model-invocation: true`, which keeps it callable by name while leaving it out of what the model is offered.
+
+For delegation rules you want the main session to follow on *every* turn rather than only when a skill is loaded, prefer [`subagent_instruction.md`](#-customizing-the-tool-instructions): its guidelines are rendered into the system prompt each turn.
 
 The optional `tools` list limits what the child can do:
 
@@ -427,6 +444,19 @@ Selecting `bash`, `powershell`, `edit`, or `write` permits workspace mutation wi
 Every child disables session persistence, unrelated extensions, skills, and prompt templates.
 Provider selection therefore supports Pi's child-visible built-in and configured providers, not providers registered only by a parent extension.
 Credentials must be available independently to the child through Pi's stored credentials or its inherited environment.
+
+### Only the main session can start jobs
+
+A child cannot spawn a grandchild, and this is enforced structurally rather than by instruction.
+
+Children are launched with `--no-extensions`, so the extension that defines `subagent_spawn` and `skill_run` is never loaded in a child process at all.
+The one extension injected into a child is the communication bridge, and it registers exactly two tools, `subagent_send` and `subagent_wait`, neither of which can start a job.
+
+The `tools` list is an allowlist of the eight core work tools — `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`.
+`subagent_spawn` is not among them, so it cannot be requested for a child, and an agent definition that names it has it dropped with a diagnostic rather than honoured.
+
+As defence in depth, each child also inherits `PI_SUBAGENT_DEPTH` incremented by one, and both `subagent_spawn` and `skill_run` refuse to run when it is above zero.
+This layer is the weaker of the two: a child holding `bash` could unset the variable, but it would still face a process with no spawn tool and no loaded runtime to call, so the guarantee rests on the tool set rather than on the environment.
 
 The broker accepts only loopback TCP connections with an active per-job token.
 The token is bootstrapped through a private inherited pipe and is absent from the child's initial environment and command line.

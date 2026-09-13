@@ -12,7 +12,12 @@ import {
 	runChild,
 	terminateWindowsProcessTree,
 } from "../src/process.js";
-import type { ChildActivity, ChildControl, ChildRequest } from "../src/types.js";
+import {
+	CHILD_CORE_TOOL_NAMES,
+	type ChildActivity,
+	type ChildControl,
+	type ChildRequest,
+} from "../src/types.js";
 
 let directory: string;
 let previousPackageDirectory: string | undefined;
@@ -72,6 +77,46 @@ test("buildPiArgs isolates the RPC child and preserves selected communication to
 
 	const noWorkTools = buildPiArgs(childRequest({ tools: [] }));
 	assert.equal(noWorkTools[noWorkTools.indexOf("--tools") + 1], "subagent_send,subagent_wait");
+});
+
+test("a child is launched without any way to spawn a grandchild", () => {
+	// Nesting is blocked by what the child process holds, not only by the depth
+	// guard in the spawn tool, which a child with `bash` could unset.
+	const args = buildPiArgs(childRequest());
+	// The extension defining subagent_spawn and skill_run is never loaded.
+	assert.ok(args.includes("--no-extensions"));
+	assert.equal(args.filter((arg) => arg === "-e").length, 1);
+	assert.equal(args[args.indexOf("-e") + 1], childCommunicationBridgePath());
+
+	// The only subagent tools a child receives are the two communication tools.
+	const granted = (args[args.indexOf("--tools") + 1] ?? "").split(",");
+	assert.deepEqual(
+		granted.filter((tool) => tool.startsWith("subagent_") || tool === "skill_run"),
+		["subagent_send", "subagent_wait"],
+	);
+
+	// No requestable tool list can smuggle a spawn tool past the allowlist.
+	for (const tool of ["subagent_spawn", "skill_run", "subagent_cancel"]) {
+		assert.equal(
+			CHILD_CORE_TOOL_NAMES.includes(tool as (typeof CHILD_CORE_TOOL_NAMES)[number]),
+			false,
+			`${tool} must not be requestable for a child`,
+		);
+	}
+});
+
+test("the child bridge registers only the two communication tools", async () => {
+	const registered: string[] = [];
+	const bridge = await import("../src/child-communication-tools.js");
+	bridge.createChildCommunicationExtension({
+		send: async () => ({ accepted: true }),
+		wait: async () => ({ type: "timeout" }),
+	} as never)({
+		registerTool: (tool: { name: string }) => registered.push(tool.name),
+		registerCommand: () => undefined,
+		on: () => undefined,
+	} as never);
+	assert.deepEqual(registered.sort(), ["subagent_send", "subagent_wait"]);
 });
 
 test("runChild uses a bundled Pi executable when its manifest CLI is absent", async () => {

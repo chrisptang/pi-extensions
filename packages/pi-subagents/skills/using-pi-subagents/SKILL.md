@@ -18,7 +18,7 @@ Keep planning, critical-path work, integration, deterministic checks, authorizat
 
 Do the work directly when it is simple, latency-sensitive, tightly coupled to the current context, likely to need user clarification, or faster than preparing and verifying a delegation.
 
-Nested subagents are unsupported.
+Nested subagents are unsupported, and a child cannot create one: it loads no extensions and holds no spawn tool, so a task that depends on the child delegating further will not run that part at all.
 
 ## Spawn one least-privilege job
 
