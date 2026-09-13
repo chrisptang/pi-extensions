@@ -237,6 +237,39 @@ function promptSurface(
 	return found;
 }
 
+test("the spawn contract tells the model to do the work itself by default", async () => {
+	const { mock } = await setup();
+	const spawn = (
+		mock.tools as unknown as Array<{
+			name: string;
+			description: string;
+			promptGuidelines?: string[];
+			parameters: { properties?: Record<string, { description?: string }> };
+		}>
+	).find((candidate) => candidate.name === "subagent_spawn");
+	assert.ok(spawn);
+	const guidelines = spawn?.promptGuidelines ?? [];
+	// The restraint rule is first, so a model that reads one bullet reads this one.
+	assert.match(guidelines[0] ?? "", /do the work yourself by default/iu);
+	// It names the three cases that justify the cost, and says the cost exists.
+	assert.match(guidelines[0] ?? "", /independent tasks/iu);
+	assert.match(guidelines[0] ?? "", /flood this context/iu);
+	assert.match(guidelines[0] ?? "", /user asks/iu);
+	assert.match(guidelines[0] ?? "", /verify its claims/iu);
+	// Work that must stay in the main session is named rather than implied.
+	assert.ok(
+		guidelines.some((line) => /never delegate planning/iu.test(line)),
+		"expected a keep-it-here guideline",
+	);
+	// A child cannot ask, so the task has to be self-contained.
+	assert.match(spawn?.description ?? "", /cannot ask you anything/iu);
+	// Thinking level inherits the session rather than being chosen per job.
+	assert.match(
+		spawn?.parameters.properties?.thinkingLevel?.description ?? "",
+		/inherits this session's effective level/iu,
+	);
+});
+
 function tool(mock: Mock, name: string): RegisteredTool {
 	const found = (mock.tools as unknown as RegisteredTool[]).find(
 		(candidate) => candidate.name === name,

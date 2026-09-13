@@ -1,5 +1,15 @@
 # Pi Subagents tools
 
+## When to use a subagent at all
+
+The main session does the work; a subagent is the exception. A child starts cold, re-reads files this session already has, and its result must still be verified here, so delegating a task one tool call would finish is strictly worse than doing it.
+
+A job earns its cost in three cases: the user asked for one, several genuinely independent tasks can run at once, or a wide search would flood the main context with files the session does not otherwise need.
+
+Planning, the critical path, integration, deterministic checks, authorization decisions, and the final answer stay in the main session.
+
+`subagent_spawn` states this to the model through its prompt guidelines. `~/.pi/agent/subagent_instruction.md` replaces them when a model needs a stricter rule.
+
 ## `subagent_spawn`
 
 | Parameter | Type | Required | Constraint / default |

@@ -30,8 +30,14 @@ import {
 const BUILTIN_INSTRUCTIONS = {
 	subagent_spawn: {
 		description:
-			"Use subagent_spawn to start one Pi subagent job and return its jobId immediately. The task defines the child's specialization, and the selected tools define its capabilities. The job may ask the main agent questions and publishes one asynchronous completion when terminal. Call it more than once in one parallel batch only for tasks that are mutually independent: each must be completable without any other's result, and parallel writers must own disjoint files. When one task needs another's output, start it only after that job's result has been collected.",
+			"Use subagent_spawn to start one Pi subagent job and return its jobId immediately. The task defines the child's specialization, and the selected tools define its capabilities. A job cannot ask you anything: it runs to completion and publishes one asynchronous result, so the task must carry every decision the child needs. Call it more than once in one parallel batch only for tasks that are mutually independent: each must be completable without any other's result, and parallel writers must own disjoint files. When one task needs another's output, start it only after that job's result has been collected.",
 		guidelines: [
+			// The restraint rule comes first: a model that reads only one of these
+			// bullets should read the one that stops an unnecessary delegation. The
+			// cost is real and invisible to the model — a child re-reads the files
+			// this session already has, and its result still has to be verified here.
+			"Do the work yourself by default. A subagent is worth its cost in three cases: several independent tasks can run at once, a wide search or file survey would flood this context, or the user asks for one. Otherwise it is slower and you must verify its claims anyway.",
+			"Never delegate planning, the critical path, integration, deterministic checks, authorization decisions, or the final answer to the user. Keep those here even when subagents are doing other work.",
 			"Batch multiple subagent_spawn calls only for mutually independent tasks. A task that needs another task's result is not independent and must wait for that job's completion.",
 			"Give each parallel writer disjoint file ownership. Concurrent writes to one file are not serialized or merged.",
 		],
@@ -107,7 +113,8 @@ function buildSpawnParameters(agents: AgentRegistry) {
 			),
 			thinkingLevel: Type.Optional(
 				StringEnum(SUBAGENT_THINKING_LEVELS, {
-					description: "Child thinking level. Defaults to the main agent's effective level.",
+					description:
+						"Child thinking level. Omit it: the child inherits this session's effective level, which is almost always right. Set it only to deliberately spend less thinking on a mechanical job or more on a hard one.",
 				}),
 			),
 			timeout: Type.Optional(

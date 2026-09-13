@@ -4,16 +4,33 @@
 
 Pi Subagents runs Pi jobs in separate child processes. A job is one-way by design: the main session starts it, watches it, and reads its final result. A child has no channel back to the parent — when it hits a decision it cannot make, it returns the decision instead of asking.
 
+## 🎯 What this is for
+
+**The main session does the work. A subagent is the exception, not the default.**
+
+Subagents are expensive in ways a model cannot see: a child starts cold and re-reads files this session already has, its result still has to be verified here, and every job is one more thing for you to track. Delegating a task that one tool call would finish is strictly worse than doing it.
+
+There are three cases where a job earns its cost:
+
+1. **The user asked for one.**
+2. **Several genuinely independent tasks can run at once** — none needs another's result, and parallel writers own disjoint files.
+3. **A wide search or file survey would flood the main context** — the child reads twenty files and returns the three-line answer.
+
+Everything else belongs in the main session: planning, the critical path, integration, running tests, authorization decisions, and the final answer to the user.
+
+This shapes the design rather than just the documentation. Jobs are one-way so there is no conversation to manage. A child holds only the work tools you name and no `subagent_*` tool at all, so it cannot spawn or coordinate anything. The tool contract states the restraint rule to the model as a system-prompt guideline, and [`subagent_instruction.md`](#-customizing-the-tool-instructions) lets you tighten it further for a model that over-delegates.
+
 ## ✨ Features
 
 - Runs each job in an isolated Pi child process and returns its job ID immediately.
+- Tells the model to do the work itself by default, and names the three cases where a job is worth its cost.
 - Uses the task to define the child's specialization and the tool list to limit its capabilities.
 - Ships two built-in agent definitions, `explorer` and `builder`, seeded into `~/.pi/agent/agents/` and kept current on every load.
 - Runs a skill inside a subagent through `skill_run`, keeping its instructions and intermediate work out of the main session.
 - Advertises only that directory's definitions, and resolves any other name on demand from `~/.claude/agents/` and `~/.agents/agents/`.
 - Runs a job blocking or in the background, where a background completion interrupts the main agent with the result.
 - Defaults work tools to `read`, `grep`, `find`, and `ls`.
-- Inherits the main agent's effective model and uses its thinking level by default.
+- Inherits the main session's effective model and thinking level, so a job needs neither argument unless you deliberately want a different one.
 - Publishes one asynchronous terminal completion and shows active-job progress above the editor.
 - Opens `/subagents` so you can watch a job's tool activity and visible output live, and terminate one after confirming.
 - Redacts credential-shaped text and reports file writes by size, so an inspected job never puts a secret on screen.
@@ -61,7 +78,9 @@ Review the source before installing or invoking the extension.
 
 ## 🚀 Quick start
 
-Call `subagent_spawn` with a self-contained task and only the work tools that task needs.
+First decide whether you need a subagent at all — see [What this is for](#-what-this-is-for). Most tasks are finished faster in the main session.
+
+When a job does earn its cost, call `subagent_spawn` with a self-contained task and only the work tools that task needs.
 
 The call returns a `jobId` immediately, and the job continues in the background.
 Continue useful main-agent work until the result is required or a completion arrives.
@@ -262,6 +281,35 @@ It is bounded to 64 KiB and 32 guidelines per tool, and a file that cannot be re
 
 This file changes only what the **main session** reads.
 A subagent's own system prompt comes from its agent definition in `~/.pi/agent/agents/`, which you can already edit directly.
+
+### A stricter preset for models that over-delegate
+
+The shipped guidelines already tell the model to do the work itself by default.
+Some models still reach for a subagent on anything that sounds like more than one step, which costs you latency and a verification pass for nothing.
+
+If that is happening, tighten the rule rather than arguing with the model turn by turn.
+Write this to `~/.pi/agent/subagent_instruction.md`:
+
+```markdown
+My delegation policy. Everything above the first heading is for me, not the model.
+
+## subagent_spawn
+
+Start one subagent job and return its jobId immediately. Collect the result with
+subagent_wait. A job cannot ask you anything, so the task must contain every
+decision the child needs.
+
+### Guidelines
+
+- Do the work yourself. Do not start a subagent unless one of these is true, and say which one: (1) the user asked for it, (2) three or more genuinely independent tasks can run at the same time, (3) a search or survey would read more than ten files you do not otherwise need.
+- One step, one file, or one question is never a reason to delegate. Neither is a task that merely sounds long.
+- Never delegate planning, the critical path, integration, running tests, authorization decisions, or the final answer to the user.
+- A subagent's report is a claim, not proof. Verify file changes against the diff and behaviour against a real check before you rely on it.
+```
+
+The first bullet is the one that does the work: it makes the model **name** its justification, which is much harder to do spuriously than to skip a soft "prefer not to".
+
+Drop the whole `### Guidelines` block instead if you want no delegation guidance at all, and keep the prose so the calling contract survives.
 
 ## 🧩 Running skills in a subagent
 
