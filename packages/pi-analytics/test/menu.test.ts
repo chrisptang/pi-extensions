@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { stripVTControlCharacters } from "node:util";
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { type KeyId, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { resolveMenuScreen, runConfirmation, runMenu } from "@narumitw/pi-tui-kit";
 import { createRpcHarness, createTuiHarness } from "@narumitw/pi-tui-kit/testing";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import { createMockContext } from "../../../test/support.js";
 import {
 	type AnalyticsMenuDataSource,
@@ -610,6 +610,91 @@ test("dashboard rendering is width-safe and owner cancellation settles the menu"
 	}
 	owner.abort();
 	assert.equal((await running).kind, "stale");
+});
+
+test.each(["r", "R", "\u001b[114u", "\u001b[114;2u"])(
+	"dashboard cycles immediately with %j and preserves selection",
+	async (key) => {
+		const loaded: string[] = [];
+		const tui = createTuiHarness({ width: 100, rows: 40 });
+		const { ctx } = createMockContext({ hasUI: true, mode: "tui", custom: tui.custom });
+		const running = showAnalyticsMenu(
+			ctx,
+			source({
+				async load(range) {
+					loaded.push(range.id ?? "custom");
+					return { kind: "ready", snapshot };
+				},
+			}),
+			{ signal: new AbortController().signal, isCurrent: () => true },
+		);
+		await vi.waitFor(() => assert.match(tui.render().join("\n"), /Press R To Change Cycle/));
+		assert.doesNotMatch(tui.render().join("\n"), /Change time range/);
+		tui.press("tui.select.down");
+		for (const label of ["Last 30 days", "All time", "Last 7 days"]) {
+			tui.send(key);
+			await vi.waitFor(() => assert.match(tui.render().join("\n"), new RegExp(label)));
+		}
+		assert.deepEqual(loaded, ["7d", "30d", "all", "7d"]);
+		tui.press("tui.select.confirm");
+		await vi.waitFor(() => assert.match(tui.render().join("\n"), /Session length is wall-clock/));
+		tui.press("tui.select.cancel");
+		await vi.waitFor(() => assert.match(tui.render().join("\n"), /Press R To Change Cycle/));
+		tui.press("ctrl+c");
+		await running;
+	},
+);
+
+test("range shortcut yields to remapped standard actions", async () => {
+	const keybindings = {
+		getKeys: (binding: string): KeyId[] =>
+			binding === "tui.select.cancel" ? ["r", "shift+r"] : [],
+		matches: (data: string, binding: string) =>
+			binding === "tui.select.cancel" && (matchesKey(data, "r") || matchesKey(data, "shift+r")),
+	};
+	const tui = createTuiHarness({ width: 100, keybindings });
+	const { ctx } = createMockContext({ hasUI: true, mode: "tui", custom: tui.custom });
+	const running = showAnalyticsMenu(ctx, source(), {
+		signal: new AbortController().signal,
+		isCurrent: () => true,
+	});
+	await vi.waitFor(() => assert.match(tui.render().join("\n"), /Analytics · Last 7 days/));
+	assert.doesNotMatch(tui.render().join("\n"), /Press R To Change Cycle/);
+	tui.send("r");
+	await running;
+});
+
+test.each(["cancel", "dispose", "replace"])("range query aborts on %s", async (exit) => {
+	let querySignal: AbortSignal | undefined;
+	const owner = new AbortController();
+	const tui = createTuiHarness({ width: 100 });
+	const { ctx } = createMockContext({ hasUI: true, mode: "tui", custom: tui.custom });
+	const running = showAnalyticsMenu(
+		ctx,
+		source({
+			async load(range, signal) {
+				if (range.id !== "7d") {
+					querySignal = signal;
+					await new Promise<void>((resolve) =>
+						signal.addEventListener("abort", () => resolve(), { once: true }),
+					);
+				}
+				return { kind: "ready", snapshot };
+			},
+		}),
+		{ signal: owner.signal, isCurrent: () => !owner.signal.aborted },
+	);
+	await vi.waitFor(() => assert.match(tui.render().join("\n"), /Press R To Change Cycle/));
+	tui.send("r");
+	await vi.waitFor(() => assert.ok(querySignal));
+	if (exit === "replace") owner.abort();
+	else {
+		await tui.waitForOpen();
+		if (exit === "dispose") tui.dispose();
+		else tui.press("ctrl+c");
+	}
+	await running;
+	assert.equal(querySignal?.aborted, true);
 });
 
 test("sessions screen reports streaks, a heatmap and per-project totals", async () => {

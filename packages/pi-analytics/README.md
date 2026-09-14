@@ -64,7 +64,8 @@ Recovered errors                    3
 Tokens                             1.08M · $4.13
 ```
 
-Use the menu to change the range or inspect Tokens & cost, Skills, Tools, Provider reliability, Response cycles, and Data & privacy.
+On the terminal dashboard, press `r` or `R` to cycle `7D → 30D → ALL → 7D` immediately, without Enter. The menu cursor stays in place. Standard configured navigation and cancellation keys take priority over this shortcut. RPC retains the time-range picker, including Today.
+Use the menu to inspect Tokens & cost, Skills, Tools, Provider reliability, Response cycles, and Data & privacy.
 The dashboard includes finalized cycles and omits active work.
 
 ## 📐 Metric definitions

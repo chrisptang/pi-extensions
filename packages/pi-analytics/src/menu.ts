@@ -190,7 +190,7 @@ export function createAnalyticsMenu(
 						// The host can dispose the current UI after the ownership check.
 					}
 				}
-				return signal.aborted || !isCurrent ? { kind: "close" } : { kind: "to", screen: "main" };
+				return signal.aborted || !isCurrent ? { kind: "close" } : { kind: "back" };
 			},
 		},
 	};
@@ -209,7 +209,7 @@ export async function showAnalyticsMenu(
 	source: AnalyticsMenuDataSource,
 	options: { signal: AbortSignal; isCurrent: () => boolean },
 ): Promise<void> {
-	const { runConfirmation, runMenu, runTask } = await import("@narumitw/pi-tui-kit");
+	const { runConfirmation, runLiveChoice, runMenu, runTask } = await import("@narumitw/pi-tui-kit");
 	if (options.signal.aborted || !options.isCurrent()) return;
 	const controller = createAnalyticsMenu(source, Date.now, {
 		runConfirmation,
@@ -231,14 +231,60 @@ export async function showAnalyticsMenu(
 		}
 		return;
 	}
-	await runMenu(ctx, controller.menu, {
+	const runtime = {
 		getState: controller.getState,
-		signal: options.signal,
-		isCurrent: options.isCurrent,
-		onError: (_ctx, error) => {
+		...options,
+		onError: (_ctx: ExtensionCommandContext, error: unknown) => {
 			ctx.ui.notify(`Analytics failed: ${safeErrorMessage(error)}`, "error");
 		},
-	});
+	};
+	if (ctx.mode !== "tui") {
+		await runMenu(ctx, controller.menu, runtime);
+		return;
+	}
+	// Kit's live choice owns shortcut precedence and cancellation; keep the cursor across cycles.
+	let selectedItemId = "tokens";
+	while (!options.signal.aborted && options.isCurrent()) {
+		const current = await controller.getState({ signal: options.signal });
+		if (options.signal.aborted || !options.isCurrent()) return;
+		const main = controller.menu.screens.main({ state: current });
+		if (main.kind !== "actions") return;
+		const items = main.items.filter((item) => item.id !== "range");
+		const result = await runLiveChoice(ctx, {
+			title: main.title,
+			lines: main.lines,
+			items,
+			initialItemId: selectedItemId,
+			hint: "close",
+			shortcuts: [{ id: "cycle", keys: ["r", "shift+r"], label: "Press R To Change Cycle" }],
+			...options,
+			onError: runtime.onError,
+		});
+		if (options.signal.aborted || !options.isCurrent()) return;
+		if (result.kind !== "selected" && result.kind !== "shortcut") return;
+		selectedItemId = result.itemId;
+		if (result.kind === "shortcut") {
+			const next = { today: "7d", "7d": "30d", "30d": "all", all: "7d" }[current.rangeId];
+			const changed = await runTask(ctx, {
+				label: "Loading local analytics…",
+				...options,
+				onError: runtime.onError,
+				task: ({ signal }) =>
+					controller.menu.actions.setRange({
+						ctx,
+						state: current,
+						signal,
+						itemId: next,
+					}),
+			});
+			if (changed.kind !== "completed") return;
+			continue;
+		}
+		const item = items.find((item) => item.id === result.itemId);
+		if (!item || item.close || !item.to) return;
+		const detail = await runMenu(ctx, { ...controller.menu, start: item.to }, runtime);
+		if (detail.kind !== "closed" || detail.reason !== "back") return;
+	}
 }
 
 function overviewLines(result: AnalyticsLoadResult): string[] {
