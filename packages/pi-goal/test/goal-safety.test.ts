@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "vitest";
 import {
+	fingerprintToolRun,
 	fingerprintVisibleAssistantOutput,
 	hasAssistantToolCall,
 	nextToolFreeRepeatState,
@@ -917,4 +918,169 @@ test("three blank automatic runs pause for no progress without a fourth continua
 	assert.equal(stopped.safetyPauseCause, "no_progress");
 	assert.equal(stalled.mock.sentUserMessages.length, 4);
 	assert.match(stalled.notifications.at(-1)?.message ?? "", /no progress.*3 automatic runs/i);
+});
+
+test("repeated failing tool calls count as no progress", () => {
+	const failedFind = [
+		{ toolName: "bash", args: { command: "find ~/.m2 -name '*.jar'" }, isError: true },
+	];
+	let state: ReturnType<typeof nextToolFreeRepeatState> = { toolFreeRepeatCount: 0 };
+	state = nextToolFreeRepeatState(state, [], failedFind);
+	assert.equal(state.toolFreeRepeatCount, 1);
+	state = nextToolFreeRepeatState(state, [], failedFind);
+	assert.equal(state.toolFreeRepeatCount, 2);
+	state = nextToolFreeRepeatState(state, [], failedFind);
+	assert.equal(state.toolFreeRepeatCount, 3);
+
+	// Argument key order alone must not look like a different call.
+	const reordered = [
+		{ toolName: "bash", args: { command: "grep foo", timeout: 30 }, isError: true },
+	];
+	const swapped = [{ toolName: "bash", args: { timeout: 30, command: "grep foo" }, isError: true }];
+	assert.equal(fingerprintToolRun(reordered), fingerprintToolRun(swapped));
+});
+
+test("a successful tool call in a run resets no progress", () => {
+	const failing = [{ toolName: "bash", args: { command: "javap -p Missing" }, isError: true }];
+	let state: ReturnType<typeof nextToolFreeRepeatState> = { toolFreeRepeatCount: 0 };
+	state = nextToolFreeRepeatState(state, [], failing);
+	state = nextToolFreeRepeatState(state, [], failing);
+	assert.equal(state.toolFreeRepeatCount, 2);
+
+	// Same command, but it worked this time.
+	state = nextToolFreeRepeatState(state, [], [{ ...failing[0], isError: false }]);
+	assert.deepEqual(state, { toolFreeRepeatCount: 0 });
+
+	// A run that mixes one success into failures is still progress.
+	state = nextToolFreeRepeatState(state, [], failing);
+	state = nextToolFreeRepeatState(
+		state,
+		[],
+		[...failing, { toolName: "read", args: { path: "a.java" }, isError: false }],
+	);
+	assert.deepEqual(state, { toolFreeRepeatCount: 0 });
+});
+
+test("changing failing tool calls counts as exploration, not repetition", () => {
+	let state: ReturnType<typeof nextToolFreeRepeatState> = { toolFreeRepeatCount: 0 };
+	state = nextToolFreeRepeatState(
+		state,
+		[],
+		[{ toolName: "bash", args: { command: "ls /one" }, isError: true }],
+	);
+	assert.equal(state.toolFreeRepeatCount, 1);
+	state = nextToolFreeRepeatState(
+		state,
+		[],
+		[{ toolName: "bash", args: { command: "ls /two" }, isError: true }],
+	);
+	assert.equal(state.toolFreeRepeatCount, 1);
+	state = nextToolFreeRepeatState(
+		state,
+		[],
+		[{ toolName: "bash", args: { command: "ls /three" }, isError: true }],
+	);
+	assert.equal(state.toolFreeRepeatCount, 1);
+});
+
+test("switching between text and failing-tool repetition restarts the count", () => {
+	const text = [{ role: "assistant", content: [{ type: "text", text: "still looking" }] }];
+	const failing = [{ toolName: "bash", args: { command: "rg Missing" }, isError: true }];
+	let state: ReturnType<typeof nextToolFreeRepeatState> = { toolFreeRepeatCount: 0 };
+	state = nextToolFreeRepeatState(state, text, false);
+	state = nextToolFreeRepeatState(state, text, false);
+	assert.equal(state.toolFreeRepeatCount, 2);
+
+	// A failing tool run is a different signal, so it starts its own streak.
+	state = nextToolFreeRepeatState(state, text, failing);
+	assert.equal(state.toolFreeRepeatCount, 1);
+	state = nextToolFreeRepeatState(state, text, failing);
+	assert.equal(state.toolFreeRepeatCount, 2);
+
+	// And back again.
+	state = nextToolFreeRepeatState(state, text, false);
+	assert.equal(state.toolFreeRepeatCount, 1);
+});
+
+test("an unobserved tool run keeps its legacy progress meaning", () => {
+	const state = nextToolFreeRepeatState({ toolFreeRepeatCount: 2 }, [], true);
+	assert.deepEqual(state, { toolFreeRepeatCount: 0 });
+});
+
+test("a repeating failed tool loop pauses the goal instead of continuing forever", async () => {
+	const stalled = await startGoalForTest({}, "finish", LOW_LIMITS_SETTINGS_PATH);
+	const failingCall = {
+		toolCallId: "call-1",
+		toolName: "bash",
+		args: { command: "javap -p SystemOriginEnum" },
+		result: { content: [] },
+		isError: true,
+	};
+	const toolUseMessages = [
+		{
+			role: "assistant",
+			stopReason: "toolUse",
+			content: [{ type: "toolCall", name: "bash", arguments: failingCall.args }],
+		},
+	];
+
+	// The first run is the manual kickoff, which never counts toward the guard; the
+	// three automatic continuations after it are what reach the threshold.
+	for (let run = 1; run <= 4; run++) {
+		const prompt = stalled.mock.sentUserMessages.at(-1)?.text ?? "";
+		stalled.mock.events.get("before_agent_start")?.[0]?.(
+			{ prompt, systemPrompt: "base" },
+			stalled.ctx,
+		);
+		stalled.mock.events.get("tool_call")?.[0]?.(
+			{ toolCallId: failingCall.toolCallId, toolName: "bash", input: failingCall.args },
+			stalled.ctx,
+		);
+		await stalled.mock.events.get("tool_execution_end")?.[0]?.(failingCall, stalled.ctx);
+		await stalled.mock.events.get("agent_end")?.[0]?.({ messages: toolUseMessages }, stalled.ctx);
+		await stalled.mock.events.get("agent_settled")?.[0]?.({}, stalled.ctx);
+		if (run === 1) assert.equal(requireLastGoal(stalled.mock).toolFreeRepeatCount, 0);
+	}
+
+	assert.equal(lastGoalStatus(stalled.mock), "paused");
+	const stopped = requireLastGoal(stalled.mock);
+	assert.equal(stopped.toolFreeRepeatCount, 3);
+	assert.equal(stopped.safetyPauseCause, "no_progress");
+});
+
+test("a repeating but succeeding tool loop keeps running", async () => {
+	const working = await startGoalForTest({}, "finish", LOW_LIMITS_SETTINGS_PATH);
+	const args = { command: "npm test" };
+	const succeedingCall = {
+		toolCallId: "call-1",
+		toolName: "bash",
+		args,
+		result: { content: [] },
+		isError: false,
+	};
+	const toolUseMessages = [
+		{
+			role: "assistant",
+			stopReason: "toolUse",
+			content: [{ type: "toolCall", name: "bash", arguments: args }],
+		},
+	];
+
+	for (let run = 1; run <= 4; run++) {
+		const prompt = working.mock.sentUserMessages.at(-1)?.text ?? "";
+		working.mock.events.get("before_agent_start")?.[0]?.(
+			{ prompt, systemPrompt: "base" },
+			working.ctx,
+		);
+		working.mock.events.get("tool_call")?.[0]?.(
+			{ toolCallId: succeedingCall.toolCallId, toolName: "bash", input: args },
+			working.ctx,
+		);
+		await working.mock.events.get("tool_execution_end")?.[0]?.(succeedingCall, working.ctx);
+		await working.mock.events.get("agent_end")?.[0]?.({ messages: toolUseMessages }, working.ctx);
+		await working.mock.events.get("agent_settled")?.[0]?.({}, working.ctx);
+	}
+
+	assert.equal(lastGoalStatus(working.mock), "active");
+	assert.equal(requireLastGoal(working.mock).toolFreeRepeatCount, 0);
 });

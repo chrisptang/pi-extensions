@@ -28,7 +28,11 @@ import {
 	serializeGoalState,
 } from "./persistence.js";
 import { buildContinuePrompt, type GoalStatus } from "./prompts.js";
-import { nextToolFreeRepeatState, resetGoalSafetyEpoch } from "./safety.js";
+import {
+	nextToolFreeRepeatState,
+	resetGoalSafetyEpoch,
+	type ToolRunObservation,
+} from "./safety.js";
 
 export { queueGoalSafetyReset, resetGoalSafetyEpoch } from "./safety.js";
 
@@ -71,10 +75,15 @@ export interface GoalRecovery {
 	errorMessage?: string;
 }
 
+/** Bounds the per-run tool record so a long run cannot grow it without limit. */
+const MAX_TOOL_RUN_OBSERVATIONS = 64;
+
 export interface CompletedGoalRun {
 	goalId?: string | null;
 	origin?: GoalRunOrigin;
 	toolAttempted: boolean;
+	/** Undefined when the run's tool calls were not fully observed. */
+	toolObservations?: ToolRunObservation[];
 }
 
 type StoppedGoalStatus = "paused" | "blocked" | "usage_limited" | "budget_limited";
@@ -235,6 +244,9 @@ export class GoalRuntime {
 	agentRunGoalId?: string | null;
 	agentRunOrigin?: GoalRunOrigin;
 	agentRunToolAttempted = false;
+	agentRunToolObservations: ToolRunObservation[] = [];
+	/** Set when a run made more tool calls than the no-progress classifier records. */
+	agentRunToolObservationsTruncated = false;
 	guardAbortGoalId?: string;
 	staleGoalToolCallsBlocked = false;
 	private readonly workflowMutex: WorkflowMutex;
@@ -354,6 +366,8 @@ export class GoalRuntime {
 		this.agentRunGoalId = goalId;
 		this.agentRunOrigin = origin;
 		this.agentRunToolAttempted = false;
+		this.agentRunToolObservations = [];
+		this.agentRunToolObservationsTruncated = false;
 	}
 
 	beginRecoveryRunIfNeeded() {
@@ -367,11 +381,25 @@ export class GoalRuntime {
 		if (this.agentRunGoalId !== undefined) this.agentRunToolAttempted = true;
 	}
 
+	recordAgentToolResult(observation: ToolRunObservation) {
+		if (this.agentRunGoalId === undefined) return;
+		if (this.agentRunToolObservations.length >= MAX_TOOL_RUN_OBSERVATIONS) {
+			this.agentRunToolObservationsTruncated = true;
+			return;
+		}
+		this.agentRunToolObservations.push(observation);
+	}
+
 	finishAgentRun(): CompletedGoalRun {
 		const run = {
 			goalId: this.agentRunGoalId,
 			origin: this.agentRunOrigin,
 			toolAttempted: this.agentRunToolAttempted,
+			// A truncated run cannot be compared call-for-call, so fall back to the
+			// boolean signal rather than fingerprinting a partial list.
+			toolObservations: this.agentRunToolObservationsTruncated
+				? undefined
+				: this.agentRunToolObservations,
 		};
 		this.clearAgentRun();
 		return run;
@@ -381,6 +409,8 @@ export class GoalRuntime {
 		this.agentRunGoalId = undefined;
 		this.agentRunOrigin = undefined;
 		this.agentRunToolAttempted = false;
+		this.agentRunToolObservations = [];
+		this.agentRunToolObservationsTruncated = false;
 	}
 
 	reclassifyAgentRunAsManual() {
@@ -815,13 +845,14 @@ export class GoalRuntime {
 		ctx: StatusContext,
 		goalId: string,
 		messages: readonly unknown[],
-		toolAttempted: boolean,
+		toolRun: readonly ToolRunObservation[] | boolean,
 	) {
 		const goal = this.activeGoal;
 		if (goal?.id !== goalId || goal.status !== "active") return false;
-		const next = nextToolFreeRepeatState(goal, messages, toolAttempted);
+		const next = nextToolFreeRepeatState(goal, messages, toolRun);
 		goal.toolFreeRepeatCount = next.toolFreeRepeatCount;
 		goal.lastToolFreeOutputFingerprint = next.lastToolFreeOutputFingerprint;
+		goal.lastFailedToolRunFingerprint = next.lastFailedToolRunFingerprint;
 		this.persistGoal(goal);
 		this.updateStatus(ctx, goal);
 		const limit = this.settings.continuationLimits.noProgressTurns;

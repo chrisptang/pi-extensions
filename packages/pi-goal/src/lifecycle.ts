@@ -13,6 +13,7 @@ import {
 	type AssistantMessageLike,
 	abortCurrentTurn,
 	blocksStaleGoalToolCalls,
+	type CompletedGoalRun,
 	findFinalAssistantMessage,
 	type GoalRuntime,
 	incrementGoal,
@@ -35,6 +36,22 @@ const REMOVED_PERSISTED_QUEUE_WARNING =
 
 interface GoalLifecycleOptions {
 	settingsPath?: string;
+}
+
+/**
+ * Chooses the no-progress signal for a finished run.
+ *
+ * The observation list is authoritative when it accounts for every tool call the run
+ * made. When a call was attempted but went unobserved — a blocked or aborted call, or
+ * a run past the observation cap — the list would understate the work, so fall back to
+ * the plain "a tool ran" boolean, which the classifier treats as progress.
+ */
+function resolveToolRun(run: CompletedGoalRun, messages: readonly unknown[]) {
+	const attempted = run.toolAttempted || hasAssistantToolCall(messages);
+	const observations = run.toolObservations;
+	if (!observations) return attempted;
+	if (attempted && observations.length === 0) return true;
+	return observations;
 }
 
 export function registerGoalLifecycle(
@@ -373,7 +390,12 @@ export function registerGoalLifecycle(
 		};
 	});
 
-	pi.on("tool_execution_end", (_event, ctx) => {
+	pi.on("tool_execution_end", (event, ctx) => {
+		runtime.recordAgentToolResult({
+			toolName: event.toolName,
+			args: (event as { args?: unknown }).args,
+			isError: event.isError === true,
+		});
 		if (
 			runtime.activeGoal?.status === "budget_limited" &&
 			runtime.budgetWrapUp?.goalId === runtime.activeGoal.id &&
@@ -565,7 +587,7 @@ export function registerGoalLifecycle(
 				ctx,
 				goalId,
 				event.messages,
-				run.toolAttempted || hasAssistantToolCall(event.messages),
+				resolveToolRun(run, event.messages),
 			)
 		) {
 			return;

@@ -262,7 +262,7 @@ export function registerGoalTools(pi: ExtensionAPI, runtime: GoalRuntime) {
 	const goalWaitTool = defineTool({
 		name: GOAL_WAIT_TOOL,
 		label: "Goal Wait",
-		description: `Keep an active /goal quiet only when the latest effective Goal contract explicitly says Goal mode is active, supplies the matching current goal_id, and progress depends on an arranged external wake event or one safety deadline. Tool visibility alone does not activate Goal mode. Call goal_wait alone. Requests below ${MIN_GOAL_WAIT_DELAY_MS}ms are clamped to ${MIN_GOAL_WAIT_DELAY_MS}ms. Never call for ordinary unfinished work.`,
+		description: `Keep an active /goal quiet only when the latest effective Goal contract explicitly says Goal mode is active, supplies the matching current goal_id, and progress depends on an arranged external wake event, an answer only the user can give, or one safety deadline. When waiting on the user, ask the question in your response first and omit resume_after_ms. Tool visibility alone does not activate Goal mode. Call goal_wait alone. Requests below ${MIN_GOAL_WAIT_DELAY_MS}ms are clamped to ${MIN_GOAL_WAIT_DELAY_MS}ms. Never call for ordinary unfinished work.`,
 		parameters: Type.Object({
 			goal_id: Type.String({
 				minLength: 1,
@@ -272,7 +272,8 @@ export function registerGoalTools(pi: ExtensionAPI, runtime: GoalRuntime) {
 			reason: Type.String({
 				minLength: 1,
 				maxLength: MAX_GOAL_WAIT_REASON_LENGTH,
-				description: "Why the goal is waiting and which external event should wake it.",
+				description:
+					"Why the goal is waiting and what should wake it: the external event, or the question the user needs to answer.",
 			}),
 			resume_after_ms: Type.Optional(
 				Type.Integer({

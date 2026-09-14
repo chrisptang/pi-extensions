@@ -30,6 +30,7 @@ export interface ActiveGoal {
 	automaticModelTurns: number;
 	toolFreeRepeatCount: number;
 	lastToolFreeOutputFingerprint?: string;
+	lastFailedToolRunFingerprint?: string;
 	safetyPauseCause?: SafetyPauseCause;
 	safetyResetPending?: boolean;
 	waiting?: GoalWait;
@@ -185,6 +186,7 @@ export function normalizeLoadedGoal(goal: ActiveGoal): ActiveGoal {
 		automaticModelTurns: normalizeSafetyCounter(goal.automaticModelTurns),
 		toolFreeRepeatCount: normalizeSafetyCounter(goal.toolFreeRepeatCount),
 		lastToolFreeOutputFingerprint: normalizeOutputFingerprint(goal.lastToolFreeOutputFingerprint),
+		lastFailedToolRunFingerprint: normalizeOutputFingerprint(goal.lastFailedToolRunFingerprint),
 		safetyPauseCause: normalizeSafetyPauseCause(goal.safetyPauseCause),
 		safetyResetPending: goal.safetyResetPending === true ? true : undefined,
 		waiting,

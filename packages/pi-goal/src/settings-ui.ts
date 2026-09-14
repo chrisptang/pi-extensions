@@ -69,7 +69,8 @@ export async function showGoalSettings(
 					{
 						id: "noProgressTurns",
 						label: "No-progress guard",
-						description: "Pause after repeated or empty tool-free automatic runs.",
+						description:
+							"Pause after repeated or empty output, or the same tool calls failing again.",
 						currentValue: formatNoProgressSettingValue(
 							runtime.settings.continuationLimits.noProgressTurns,
 						),
@@ -181,7 +182,7 @@ function limitChoiceScreen(
 				? [
 						field === "automaticTurns"
 							? `Active goal: ${goal.automaticModelTurns} automatic responses used`
-							: `Active goal: ${goal.toolFreeRepeatCount} repeated or empty runs detected`,
+							: `Active goal: ${goal.toolFreeRepeatCount} unproductive runs detected`,
 					]
 				: []),
 		],
@@ -221,17 +222,18 @@ function limitChoices(
 		{
 			value: "default",
 			label: `After ${defaultLimit} repeated runs (default)`,
-			description: "Pause after the default number of repeated or empty tool-free runs.",
+			description:
+				"Pause after the default number of consecutive unproductive runs: repeated or empty output, or the same tool calls failing again.",
 		},
 		{
 			value: "custom",
 			label: "Set threshold…",
-			description: "Choose a whole number of repeated or empty runs before pausing.",
+			description: "Choose a whole number of consecutive unproductive runs before pausing.",
 		},
 		{
 			value: "off",
 			label: "Off",
-			description: "Do not pause based on repeated or empty tool-free runs.",
+			description: "Do not pause based on unproductive runs.",
 		},
 	];
 }
