@@ -172,7 +172,10 @@ test("built-in example is a palette-free nine-module Starship document", () => {
 	try {
 		assert.match(BUILT_IN_EXAMPLE, /^format = """/mu);
 		assert.match(BUILT_IN_EXAMPLE, /\$brand\\\n\$model\\\n\$thinking\\\n\$directory/u);
-		assert.match(BUILT_IN_EXAMPLE, /\$context\\\n\\n\\\n\$tokens\\\n\$cache\\\n\$cost/u);
+		assert.match(
+			BUILT_IN_EXAMPLE,
+			/\$activity\\\n\\n\\\n\$tokens\\\n\$cache\\\n\$context\\\n\$cost/u,
+		);
 		assert.doesNotMatch(BUILT_IN_EXAMPLE, /format = '''|palette\s*=|\[palettes\.|░▒▓|/u);
 		writeFileSync(path, BUILT_IN_EXAMPLE);
 		const loaded = loadStarshipConfig(path);
@@ -185,10 +188,10 @@ test("built-in example is a palette-free nine-module Starship document", () => {
 				"$directory",
 				"$git_branch",
 				"$git_status",
-				"$activity",
-				"$context\n",
+				"$activity\n",
 				"$tokens",
 				"$cache",
+				"$context",
 				"$cost",
 			].join(""),
 		);
