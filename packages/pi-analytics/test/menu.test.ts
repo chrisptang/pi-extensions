@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { stripVTControlCharacters } from "node:util";
 import { initTheme } from "@earendil-works/pi-coding-agent";
-import { type KeyId, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
+import {
+	KeybindingsManager,
+	type KeyId,
+	matchesKey,
+	TUI_KEYBINDINGS,
+	visibleWidth,
+} from "@earendil-works/pi-tui";
 import { resolveMenuScreen, runConfirmation, runMenu } from "@narumitw/pi-tui-kit";
 import { createRpcHarness, createTuiHarness } from "@narumitw/pi-tui-kit/testing";
 import { test, vi } from "vitest";
@@ -173,19 +179,27 @@ test("dashboard exposes nine primary rows and concise settled metrics", async ()
 		screen.items.map(({ label }) => label),
 		[
 			"Change time range",
-			"Tokens & cost",
-			"Sessions & activity",
-			"Skills",
-			"Tools",
-			"Provider reliability",
 			"Response cycles",
+			"Tools",
+			"Skills",
+			"Provider reliability",
+			"Sessions & activity",
+			"Tokens & cost",
 			"Data & privacy",
 			"Close",
 		],
 	);
 	assert.match(screen.title, /Last 7 days/);
-	assert.match(screen.lines?.join("\n") ?? "", /Response cycles\s+83/);
-	assert.match(screen.lines?.join("\n") ?? "", /Includes settled response cycles only/);
+	const lines = screen.lines?.join("\n") ?? "";
+	assert.match(lines, /Collected\nResponse cycles\s+83/);
+	assert.match(lines, /Tool calls\s+414 · 7 errors/);
+	assert.match(lines, /Skills\s+31 activations/);
+	assert.match(lines, /Reliability\s+4 provider errors · 3 recovered/);
+	assert.match(lines, /Imported\nSessions\s+12/);
+	assert.match(lines, /LLM calls\s+190/);
+	assert.match(lines, /Tokens\s+1\.08M · \$4\.13/);
+	assert.match(lines, /Active days\s+4\/7/);
+	assert.ok(lines.indexOf("Collected") < lines.indexOf("Imported"));
 });
 
 test("tokens screen separates cached prompt tokens from billed input and lists models", async () => {
@@ -512,8 +526,8 @@ test("empty and unavailable states remain actionable", async () => {
 	const emptyMain = resolveMenuScreen(empty.menu, "main", await state(empty));
 	// Imported sessions stay visible even before the first response cycle is collected.
 	const emptyText = emptyMain.lines?.join("\n") ?? "";
-	assert.match(emptyText, /No response cycles recorded yet/);
-	assert.match(emptyText, /Imported sessions\s+12/);
+	assert.match(emptyText, /Response cycles\s+0/);
+	assert.match(emptyText, /Imported\nSessions\s+12/);
 	const unavailable = createAnalyticsMenu(
 		source({
 			async load() {
@@ -616,7 +630,11 @@ test.each(["r", "R", "\u001b[114u", "\u001b[114;2u"])(
 	"dashboard cycles immediately with %j and preserves selection",
 	async (key) => {
 		const loaded: string[] = [];
-		const tui = createTuiHarness({ width: 100, rows: 40 });
+		const tui = createTuiHarness({
+			width: 100,
+			rows: 40,
+			keybindings: new KeybindingsManager(TUI_KEYBINDINGS),
+		});
 		const { ctx } = createMockContext({ hasUI: true, mode: "tui", custom: tui.custom });
 		const running = showAnalyticsMenu(
 			ctx,
@@ -628,22 +646,59 @@ test.each(["r", "R", "\u001b[114u", "\u001b[114;2u"])(
 			}),
 			{ signal: new AbortController().signal, isCurrent: () => true },
 		);
-		await vi.waitFor(() => assert.match(tui.render().join("\n"), /Press R To Change Cycle/));
+		await vi.waitFor(() => assert.match(tui.render().join("\n"), /range 7D\/30D\/ALL/));
 		assert.doesNotMatch(tui.render().join("\n"), /Change time range/);
-		tui.press("tui.select.down");
-		for (const label of ["Last 30 days", "All time", "Last 7 days"]) {
+		assert.match(tui.render().join("\n"), /Input \(uncached\)/);
+		for (let index = 0; index < 5; index += 1) tui.send("\u001b[C");
+		for (const label of ["Analytics · 30D", "Analytics · ALL", "Analytics · 7D"]) {
 			tui.send(key);
 			await vi.waitFor(() => assert.match(tui.render().join("\n"), new RegExp(label)));
 		}
 		assert.deepEqual(loaded, ["7d", "30d", "all", "7d"]);
-		tui.press("tui.select.confirm");
-		await vi.waitFor(() => assert.match(tui.render().join("\n"), /Session length is wall-clock/));
+		assert.match(tui.render().join("\n"), /Session length is wall-clock/);
 		tui.press("tui.select.cancel");
-		await vi.waitFor(() => assert.match(tui.render().join("\n"), /Press R To Change Cycle/));
-		tui.press("ctrl+c");
 		await running;
 	},
 );
+
+test("tabs show ordered read-only metrics, wrap safely, scroll, and close directly", async () => {
+	const tui = createTuiHarness({
+		width: 120,
+		rows: 24,
+		keybindings: new KeybindingsManager(TUI_KEYBINDINGS),
+	});
+	const { ctx } = createMockContext({ hasUI: true, mode: "tui", custom: tui.custom });
+	const running = showAnalyticsMenu(ctx, source(), {
+		signal: new AbortController().signal,
+		isCurrent: () => true,
+	});
+	await vi.waitFor(() => assert.match(tui.render().join("\n"), /Analytics · 7D/));
+	const frame = stripVTControlCharacters(tui.render().join("\n"));
+	assert.match(
+		frame,
+		/Tokens & cost.*Response cycles.*Tools.*Skills.*Provider reliability.*Sessions & activity/,
+	);
+	assert.doesNotMatch(frame, /Data & privacy|enter select|→ /);
+	for (const metric of [
+		/Calls per response/,
+		/Average duration/,
+		/Model initiated/,
+		/HTTP 429/,
+		/Longest streak/,
+		/Input \(uncached\)/,
+	]) {
+		tui.send("\t");
+		assert.match(tui.render().join("\n"), metric);
+	}
+	tui.press("tui.select.pageDown");
+	assert.match(tui.render().join("\n"), /openai\/gpt-a/);
+	for (const width of [1, 20, 40, 80, 120]) {
+		tui.resize({ width, rows: 24 });
+		for (const line of tui.render()) assert.ok(visibleWidth(line) <= width);
+	}
+	tui.send("\u001b");
+	await running;
+});
 
 test("range shortcut yields to remapped standard actions", async () => {
 	const keybindings = {
@@ -658,8 +713,8 @@ test("range shortcut yields to remapped standard actions", async () => {
 		signal: new AbortController().signal,
 		isCurrent: () => true,
 	});
-	await vi.waitFor(() => assert.match(tui.render().join("\n"), /Analytics · Last 7 days/));
-	assert.doesNotMatch(tui.render().join("\n"), /Press R To Change Cycle/);
+	await vi.waitFor(() => assert.match(tui.render().join("\n"), /Analytics · 7D/));
+	assert.doesNotMatch(tui.render().join("\n"), /range 7D\/30D\/ALL/);
 	tui.send("r");
 	await running;
 });
@@ -684,7 +739,7 @@ test.each(["cancel", "dispose", "replace"])("range query aborts on %s", async (e
 		}),
 		{ signal: owner.signal, isCurrent: () => !owner.signal.aborted },
 	);
-	await vi.waitFor(() => assert.match(tui.render().join("\n"), /Press R To Change Cycle/));
+	await vi.waitFor(() => assert.match(tui.render().join("\n"), /range 7D\/30D\/ALL/));
 	tui.send("r");
 	await vi.waitFor(() => assert.ok(querySignal));
 	if (exit === "replace") owner.abort();
@@ -743,6 +798,6 @@ test("a database with neither runs nor sessions shows only the collection hint",
 	);
 	const screen = resolveMenuScreen(controller.menu, "main", await state(controller));
 	const lines = screen.lines?.join("\n") ?? "";
-	assert.match(lines, /No response cycles recorded yet/);
-	assert.doesNotMatch(lines, /Imported sessions/);
+	assert.match(lines, /Response cycles\s+0/);
+	assert.match(lines, /Imported\nSessions\s+0/);
 });

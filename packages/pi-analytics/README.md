@@ -48,25 +48,24 @@ Complete at least one Pi response, then run:
 /analytics
 ```
 
-The default overview covers the last seven rolling days:
+The terminal dashboard opens **Tokens & cost** for the last seven rolling days:
 
 ```text
-Analytics · Last 7 days
+Analytics · 7D
 
-Response cycles                    83
-LLM calls                         192
-Calls per response        2.31 · P95 6
-Tool calls                        414
-Tool errors                         7
-Skill activations                  31
-Provider errors                     4
-Recovered errors                    3
-Tokens                             1.08M · $4.13
+[Tokens & cost]  Response cycles  Tools  Skills  Provider reliability  Sessions & activity
+
+Input (uncached)          120k
+Cache read               880k
+Cache write              42k
+Output                   38k
+Total                    1.08M
+Cost                     $4.13
 ```
 
-On the terminal dashboard, press `r` or `R` to cycle `7D → 30D → ALL → 7D` immediately, without Enter. The menu cursor stays in place. Standard configured navigation and cancellation keys take priority over this shortcut. RPC retains the time-range picker, including Today.
-Use the menu to inspect Tokens & cost, Skills, Tools, Provider reliability, Response cycles, and Data & privacy.
-The dashboard includes finalized cycles and omits active work.
+Use Left/Right or Tab to switch tabs; data appears immediately without Enter. Press `r` or `R` to cycle `7D → 30D → ALL → 7D` across all tabs while keeping the active tab. Up/Down and Page Up/Down scroll the read-only metrics, including tool and skill model breakdowns. Narrow terminals wrap the tab strip.
+Escape closes the dashboard from any tab; Ctrl+C always closes it. Configured standard bindings take priority over range shortcuts, and the footer reflects the effective bindings. Each new `/analytics` invocation starts at Tokens & cost, 7D; this preference is not saved to disk.
+RPC retains its menu, time-range picker (including Today), and Data & privacy controls. Collected metrics include finalized cycles and omit active work.
 
 ## 📐 Metric definitions
 
@@ -123,7 +122,7 @@ Raw error messages are classified in memory and discarded.
 
 Run `/analytics` to inspect local usage, skills, tools, and provider reliability over a chosen time range.
 It accepts no arguments and supports TUI and RPC; print and JSON modes reject it before reading analytics data.
-Deleting analytics data requires confirmation, and cancellation leaves data unchanged.
+RPC data deletion requires confirmation, and cancellation leaves data unchanged. The terminal dashboard has no deletion action.
 
 ## 🔒 Security and privacy
 
@@ -154,7 +153,7 @@ The extension reports the first failed write and a later recovery without exposi
 
 ### Clear analytics data
 
-Choose **Data & privacy → Clear analytics data…** to delete every record in one transaction.
+In RPC mode, choose **Data & privacy → Clear analytics data…** to delete every record in one transaction. This entry is not shown in the terminal dashboard.
 Other Pi processes observe the empty database on their next read.
 A record racing with Clear can land immediately before or after it.
 

@@ -147,7 +147,7 @@ test("runtime builds are deterministic, mapped, external, and remove stale outpu
 		assert.ok(files.includes("index.ts.map"));
 		assert.equal(
 			files.some((path) => path.startsWith("chunks/") && path.endsWith(".js")),
-			forbiddenEagerInputs.length > 0,
+			true, // The terminal dashboard is loaded only when /analytics opens in TUI mode.
 		);
 		for (const runtimePath of files.filter(
 			(path) => path.endsWith(".ts") || path.endsWith(".js"),

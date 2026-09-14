@@ -35,7 +35,8 @@
 		"@narumitw/pi-tui-kit": "^0.59.0"
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": "*"
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.11",

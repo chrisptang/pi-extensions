@@ -1,6 +1,7 @@
 import { stripVTControlCharacters } from "node:util";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { MenuDefinition } from "@narumitw/pi-tui-kit";
+import type { AnalyticsTab, DashboardResult } from "./dashboard.js";
 import type { ClearAnalyticsResult } from "./storage/database.js";
 import type {
 	ActivityDay,
@@ -78,12 +79,12 @@ export function createAnalyticsMenu(
 				lines: overviewLines(state.result),
 				items: [
 					{ id: "range", label: "Change time range", to: "range" },
-					{ id: "tokens", label: "Tokens & cost", to: "tokens" },
-					{ id: "sessions", label: "Sessions & activity", to: "sessions" },
-					{ id: "skills", label: "Skills", to: "skills" },
-					{ id: "tools", label: "Tools", to: "tools" },
-					{ id: "reliability", label: "Provider reliability", to: "reliability" },
 					{ id: "responses", label: "Response cycles", to: "responses" },
+					{ id: "tools", label: "Tools", to: "tools" },
+					{ id: "skills", label: "Skills", to: "skills" },
+					{ id: "reliability", label: "Provider reliability", to: "reliability" },
+					{ id: "sessions", label: "Sessions & activity", to: "sessions" },
+					{ id: "tokens", label: "Tokens & cost", to: "tokens" },
 					{ id: "privacy", label: "Data & privacy", to: "privacy" },
 					{ id: "close", label: "Close", close: true },
 				],
@@ -209,7 +210,9 @@ export async function showAnalyticsMenu(
 	source: AnalyticsMenuDataSource,
 	options: { signal: AbortSignal; isCurrent: () => boolean },
 ): Promise<void> {
-	const { runConfirmation, runLiveChoice, runMenu, runTask } = await import("@narumitw/pi-tui-kit");
+	const { runConfirmation, runCustomInteraction, runMenu, runTask } = await import(
+		"@narumitw/pi-tui-kit"
+	);
 	if (options.signal.aborted || !options.isCurrent()) return;
 	const controller = createAnalyticsMenu(source, Date.now, {
 		runConfirmation,
@@ -242,28 +245,33 @@ export async function showAnalyticsMenu(
 		await runMenu(ctx, controller.menu, runtime);
 		return;
 	}
-	// Kit's live choice owns shortcut precedence and cancellation; keep the cursor across cycles.
-	let selectedItemId = "tokens";
+	const { createDashboard } = await import("./dashboard.js");
+	if (options.signal.aborted || !options.isCurrent()) return;
+	let selectedTab: AnalyticsTab = "tokens";
 	while (!options.signal.aborted && options.isCurrent()) {
 		const current = await controller.getState({ signal: options.signal });
 		if (options.signal.aborted || !options.isCurrent()) return;
-		const main = controller.menu.screens.main({ state: current });
-		if (main.kind !== "actions") return;
-		const items = main.items.filter((item) => item.id !== "range");
-		const result = await runLiveChoice(ctx, {
-			title: main.title,
-			lines: main.lines,
-			items,
-			initialItemId: selectedItemId,
-			hint: "close",
-			shortcuts: [{ id: "cycle", keys: ["r", "shift+r"], label: "Press R To Change Cycle" }],
+		const result = await runCustomInteraction<DashboardResult>(ctx, {
 			...options,
 			onError: runtime.onError,
+			create: (interaction) =>
+				createDashboard(interaction, {
+					tab: selectedTab,
+					range: current.rangeId.toUpperCase(),
+					lines: (tab) => {
+						const screen = controller.menu.screens[tab]({ state: current });
+						if (screen.kind !== "browse") return screen.lines ?? [];
+						return [
+							...(screen.lines ?? []),
+							...screen.items.flatMap((item) => [item.label, ...(item.details ?? []), ""]),
+						];
+					},
+				}),
 		});
 		if (options.signal.aborted || !options.isCurrent()) return;
-		if (result.kind !== "selected" && result.kind !== "shortcut") return;
-		selectedItemId = result.itemId;
-		if (result.kind === "shortcut") {
+		if (result.kind !== "completed" || !result.value.cycle) return;
+		selectedTab = result.value.tab;
+		{
 			const next = { today: "7d", "7d": "30d", "30d": "all", all: "7d" }[current.rangeId];
 			const changed = await runTask(ctx, {
 				label: "Loading local analytics…",
@@ -278,12 +286,7 @@ export async function showAnalyticsMenu(
 					}),
 			});
 			if (changed.kind !== "completed") return;
-			continue;
 		}
-		const item = items.find((item) => item.id === result.itemId);
-		if (!item || item.close || !item.to) return;
-		const detail = await runMenu(ctx, { ...controller.menu, start: item.to }, runtime);
-		if (detail.kind !== "closed" || detail.reason !== "back") return;
 	}
 }
 
@@ -291,46 +294,22 @@ function overviewLines(result: AnalyticsLoadResult): string[] {
 	if (result.kind === "unavailable") {
 		return [result.message, "", "No analytics are being collected."];
 	}
-	const stats = result.snapshot.overview;
-	if (stats.responseCycles === 0) {
-		const sessions = result.snapshot.sessions;
-		return [
-			"No response cycles recorded yet.",
-			"Collection is active. Complete one Pi response cycle, then open /analytics again.",
-			...(sessions.count > 0
-				? [
-						"",
-						metric("Imported sessions", sessions.count),
-						metric("Active days", `${sessions.activeDays}/${sessions.totalDays}`),
-						metric("Tokens", `${formatTokens(sessions.tokens)} · ${formatCost(sessions.cost)}`),
-					]
-				: []),
-			"",
-			"Includes settled response cycles only.",
-		];
-	}
+	const { overview, sessions } = result.snapshot;
 	return [
-		metric("Response cycles", stats.responseCycles),
-		metric("LLM calls", stats.llmCalls),
+		"Collected",
+		metric("Response cycles", overview.responseCycles),
+		metric("Tool calls", `${overview.toolCalls} · ${overview.toolErrors} errors`),
+		metric("Skills", `${overview.skillActivations} activations`),
 		metric(
-			"Calls per response",
-			`${formatDecimal(stats.callsPerResponse)} · P95 ${stats.p95CallsPerResponse}`,
-		),
-		metric("Tool calls", stats.toolCalls),
-		metric("Tool errors", stats.toolErrors),
-		metric("Skill activations", stats.skillActivations),
-		metric("Provider errors", stats.providerErrors),
-		metric("Recovered errors", stats.recoveredErrors),
-		metric(
-			"Tokens",
-			`${formatTokens(result.snapshot.tokens.tokens)} · ${formatCost(result.snapshot.tokens.cost)}`,
-		),
-		metric(
-			"Sessions",
-			`${result.snapshot.sessions.count} · ${result.snapshot.sessions.activeDays}/${result.snapshot.sessions.totalDays} active days`,
+			"Reliability",
+			`${overview.providerErrors} provider errors · ${overview.recoveredErrors} recovered`,
 		),
 		"",
-		"Includes settled response cycles only.",
+		"Imported",
+		metric("Sessions", sessions.count),
+		metric("LLM calls", sessions.llmCalls),
+		metric("Tokens", `${formatTokens(sessions.tokens)} · ${formatCost(sessions.cost)}`),
+		metric("Active days", `${sessions.activeDays}/${sessions.totalDays}`),
 	];
 }
 
