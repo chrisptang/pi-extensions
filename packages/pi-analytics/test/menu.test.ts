@@ -74,11 +74,68 @@ const snapshot: AnalyticsSnapshot = {
 		maximum: 9,
 		distribution: { one: 31, twoToThree: 34, fourToSix: 15, sevenPlus: 3 },
 	},
+	tokens: {
+		input: 120_000,
+		output: 38_000,
+		cacheRead: 880_000,
+		cacheWrite: 42_000,
+		cost: 4.13,
+		tokens: 1_080_000,
+		measuredCalls: 190,
+		unmeasuredCalls: 2,
+		cacheHitRate: 84.45,
+		models: [
+			{
+				provider: "anthropic",
+				model: "claude-b",
+				calls: 150,
+				tokens: 900_000,
+				input: 100_000,
+				output: 30_000,
+				cacheRead: 740_000,
+				cacheWrite: 30_000,
+				cost: 3.5,
+			},
+			{
+				provider: "openai",
+				model: "gpt-a",
+				calls: 40,
+				tokens: 180_000,
+				input: 20_000,
+				output: 8_000,
+				cacheRead: 140_000,
+				cacheWrite: 12_000,
+				cost: 0.63,
+			},
+		],
+	},
+	sessions: {
+		count: 12,
+		llmCalls: 190,
+		activeDays: 4,
+		totalDays: 7,
+		longestStreak: 3,
+		currentStreak: 2,
+		tokens: 1_080_000,
+		cost: 4.13,
+		averageDurationMs: 1_800_000,
+		longestDurationMs: 9_000_000,
+		projects: [
+			{ project: "pi-extensions", sessions: 8, llmCalls: 150, tokens: 900_000, cost: 3.5 },
+			{ project: "demo", sessions: 4, llmCalls: 40, tokens: 180_000, cost: 0.63 },
+		],
+		days: [
+			{ date: "2026-08-03", sessions: 2, llmCalls: 40, tokens: 200_000, cost: 0.8 },
+			{ date: "2026-08-04", sessions: 4, llmCalls: 70, tokens: 400_000, cost: 1.6 },
+			{ date: "2026-08-05", sessions: 4, llmCalls: 60, tokens: 380_000, cost: 1.4 },
+			{ date: "2026-08-07", sessions: 2, llmCalls: 20, tokens: 100_000, cost: 0.33 },
+		],
+	},
 };
 
 function source(overrides: Partial<AnalyticsMenuDataSource> = {}): AnalyticsMenuDataSource {
 	return {
-		path: "/home/test/.pi/agent/pi-analytics",
+		path: "/home/test/.pi/agent/pi-analytics.db",
 		async load() {
 			return { kind: "ready", snapshot };
 		},
@@ -106,16 +163,18 @@ function withRpcUi(
 	return { ...base, ui: { ...base.ui, ...rpc.ui } } as never;
 }
 
-test("dashboard exposes seven primary rows and concise settled metrics", async () => {
+test("dashboard exposes nine primary rows and concise settled metrics", async () => {
 	const controller = createAnalyticsMenu(source());
 	const screen = resolveMenuScreen(controller.menu, "main", await state(controller));
 	assert.equal(screen.kind, "actions");
 	if (screen.kind !== "actions") return;
-	assert.equal(screen.items.length, 7);
+	assert.equal(screen.items.length, 9);
 	assert.deepEqual(
 		screen.items.map(({ label }) => label),
 		[
 			"Change time range",
+			"Tokens & cost",
+			"Sessions & activity",
 			"Skills",
 			"Tools",
 			"Provider reliability",
@@ -127,6 +186,24 @@ test("dashboard exposes seven primary rows and concise settled metrics", async (
 	assert.match(screen.title, /Last 7 days/);
 	assert.match(screen.lines?.join("\n") ?? "", /Response cycles\s+83/);
 	assert.match(screen.lines?.join("\n") ?? "", /Includes settled response cycles only/);
+});
+
+test("tokens screen separates cached prompt tokens from billed input and lists models", async () => {
+	const controller = createAnalyticsMenu(source());
+	const screen = resolveMenuScreen(controller.menu, "tokens", await state(controller));
+	assert.equal(screen.kind, "detail");
+	const lines = screen.lines?.join("\n") ?? "";
+	assert.match(lines, /Input \(uncached\)\s+120k/);
+	assert.match(lines, /Cache read\s+880k/);
+	assert.match(lines, /Cache write\s+42k/);
+	assert.match(lines, /Output\s+38k/);
+	assert.match(lines, /Total\s+1\.08M/);
+	assert.match(lines, /Cost\s+\$4\.13/);
+	assert.match(lines, /Cache hit rate\s+84\.45%/);
+	// Calls the provider reported without usage counters stay visible instead of reading as zero.
+	assert.match(lines, /Calls without usage\s+2/);
+	assert.match(lines, /anthropic\/claude-b\s+900k · \$3\.50 · 150 calls/);
+	assert.match(lines, /openai\/gpt-a\s+180k · \$0\.63 · 40 calls/);
 });
 
 test("skill and tool browse details preserve attribution and model breakdowns", async () => {
@@ -433,7 +510,10 @@ test("empty and unavailable states remain actionable", async () => {
 		}),
 	);
 	const emptyMain = resolveMenuScreen(empty.menu, "main", await state(empty));
-	assert.match(emptyMain.lines?.join("\n") ?? "", /No analytics yet/);
+	// Imported sessions stay visible even before the first response cycle is collected.
+	const emptyText = emptyMain.lines?.join("\n") ?? "";
+	assert.match(emptyText, /No response cycles recorded yet/);
+	assert.match(emptyText, /Imported sessions\s+12/);
 	const unavailable = createAnalyticsMenu(
 		source({
 			async load() {
@@ -530,4 +610,54 @@ test("dashboard rendering is width-safe and owner cancellation settles the menu"
 	}
 	owner.abort();
 	assert.equal((await running).kind, "stale");
+});
+
+test("sessions screen reports streaks, a heatmap and per-project totals", async () => {
+	const controller = createAnalyticsMenu(source());
+	const screen = resolveMenuScreen(controller.menu, "sessions", await state(controller));
+	assert.equal(screen.kind, "detail");
+	const lines = screen.lines?.join("\n") ?? "";
+	assert.match(lines, /Sessions\s+12/);
+	assert.match(lines, /Active days\s+4\/7/);
+	assert.match(lines, /Longest streak\s+3 days/);
+	assert.match(lines, /Current streak\s+2 days/);
+	assert.match(lines, /Average session\s+30m/);
+	assert.match(lines, /Longest session\s+2h 30m/);
+	// The heatmap keeps one row per week with a Monday-first header.
+	assert.match(lines, /Mon Tue Wed Thu Fri Sat Sun/);
+	assert.match(lines, /less · ░ ▒ ▓ █ more/);
+	assert.match(lines, /pi-extensions\s+8 sessions · 900k · \$3\.50/);
+	assert.match(lines, /demo\s+4 sessions · 180k · \$0\.63/);
+	assert.match(lines, /Session length is wall-clock time/);
+});
+
+test("sessions screen points at the backfill script when nothing is imported", async () => {
+	const empty: AnalyticsSnapshot = {
+		...snapshot,
+		sessions: { ...snapshot.sessions, count: 0, days: [], projects: [] },
+	};
+	const controller = createAnalyticsMenu(
+		source({
+			load: async () => ({ kind: "ready", snapshot: empty }),
+		}),
+	);
+	const screen = resolveMenuScreen(controller.menu, "sessions", await state(controller));
+	const lines = screen.lines?.join("\n") ?? "";
+	assert.match(lines, /No sessions recorded in this range/);
+	assert.match(lines, /backfill-sessions\.mjs/);
+});
+
+test("a database with neither runs nor sessions shows only the collection hint", async () => {
+	const blank: AnalyticsSnapshot = {
+		...snapshot,
+		overview: { ...snapshot.overview, responseCycles: 0 },
+		sessions: { ...snapshot.sessions, count: 0, tokens: 0, cost: 0, days: [], projects: [] },
+	};
+	const controller = createAnalyticsMenu(
+		source({ load: async () => ({ kind: "ready", snapshot: blank }) }),
+	);
+	const screen = resolveMenuScreen(controller.menu, "main", await state(controller));
+	const lines = screen.lines?.join("\n") ?? "";
+	assert.match(lines, /No response cycles recorded yet/);
+	assert.doesNotMatch(lines, /Imported sessions/);
 });

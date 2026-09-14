@@ -23,6 +23,14 @@ export type ProviderErrorCategory =
 	| "network_other"
 	| "provider_other";
 
+export interface UsageRecord {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cost: number;
+}
+
 export interface ModelIdentity {
 	provider: string;
 	model: string;
@@ -46,6 +54,7 @@ export interface GenerationRecord {
 	durationMs?: number;
 	stopReason?: string;
 	outcome: GenerationOutcome;
+	usage?: UsageRecord;
 	responses: ProviderResponseRecord[];
 }
 
@@ -99,4 +108,21 @@ export interface SettledRun {
 	toolErrorCount: number;
 	providerErrorCount: number;
 	recoveredErrorCount: number;
+	usage: UsageRecord;
+}
+
+/**
+ * One Pi session, reconstructed from the agent's session log.
+ *
+ * Sessions are not observable from extension events (no event carries a session id), so these rows
+ * only ever arrive through the one-off backfill script.
+ */
+export interface SessionRecord {
+	id: string;
+	/** Working-directory basename only; the full path is deliberately not stored. */
+	project: string;
+	startedAtMs: number;
+	endedAtMs: number;
+	llmCalls: number;
+	usage: UsageRecord;
 }

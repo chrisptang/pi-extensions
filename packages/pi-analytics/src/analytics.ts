@@ -8,12 +8,12 @@ import {
 import { ResponseCollector } from "./collector.js";
 import { type AnalyticsMenuDataSource, showAnalyticsMenu } from "./menu.js";
 import { SkillTracker } from "./skills.js";
-import type { ClearAnalyticsResult } from "./storage/files.js";
+import type { ClearAnalyticsResult } from "./storage/database.js";
 import type { AnalyticsSnapshot, TimeRange } from "./storage/queries.js";
 import { AnalyticsStore } from "./storage/store.js";
-import type { ModelIdentity, SettledRun, TriggerSource } from "./types.js";
+import type { ModelIdentity, SettledRun, TriggerSource, UsageRecord } from "./types.js";
 
-const STORAGE_DIRECTORY = "pi-analytics";
+const DATABASE_FILE = "pi-analytics.db";
 
 export interface AnalyticsStorePort {
 	readonly path: string;
@@ -90,9 +90,9 @@ export function createAnalyticsExtension(
 			writeFailureActive = false;
 			pendingTriggerSource = "unknown";
 			pendingAttemptWithoutRun = false;
-			const storageRoot = path.join(deps.getAgentDir(), STORAGE_DIRECTORY);
+			const databasePath = path.join(deps.getAgentDir(), DATABASE_FILE);
 			try {
-				store = deps.createStore(storageRoot);
+				store = deps.createStore(databasePath);
 			} catch {
 				storageFailure = unavailableMessage();
 				safeNotify(ctx, storageFailure, "warning");
@@ -183,6 +183,7 @@ export function createAnalyticsExtension(
 				now: deps.now(),
 				stopReason: event.message.stopReason,
 				errorMessage: event.message.errorMessage,
+				usage: usageRecord(event.message.usage),
 			});
 		});
 
@@ -319,7 +320,7 @@ export function createAnalyticsExtension(
 
 		function menuSource(generation: number, signal: AbortSignal): AnalyticsMenuDataSource {
 			return {
-				path: store?.path ?? path.join(deps.getAgentDir(), STORAGE_DIRECTORY),
+				path: store?.path ?? path.join(deps.getAgentDir(), DATABASE_FILE),
 				async load(range, actionSignal) {
 					assertCurrent(generation, signal);
 					const activeStore = store;
@@ -345,6 +346,39 @@ export function createAnalyticsExtension(
 			}
 		}
 	};
+}
+
+// Pi reports every assistant message with complete usage counters, but a provider or a
+// replayed message can still omit them; a partial record is dropped rather than counted as zero.
+function usageRecord(usage: unknown): UsageRecord | undefined {
+	if (typeof usage !== "object" || usage === null) return undefined;
+	const source = usage as Record<string, unknown>;
+	const cost = source.cost;
+	const total =
+		typeof cost === "object" && cost !== null ? (cost as Record<string, unknown>).total : undefined;
+	const input = source.input;
+	const output = source.output;
+	const cacheRead = source.cacheRead;
+	const cacheWrite = source.cacheWrite;
+	if (
+		!isFiniteNumber(input) ||
+		!isFiniteNumber(output) ||
+		!isFiniteNumber(cacheRead) ||
+		!isFiniteNumber(cacheWrite)
+	) {
+		return undefined;
+	}
+	return {
+		input,
+		output,
+		cacheRead,
+		cacheWrite,
+		cost: isFiniteNumber(total) ? total : 0,
+	};
+}
+
+function isFiniteNumber(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 function modelIdentity(ctx: ExtensionContext, pi: ExtensionAPI): ModelIdentity | undefined {

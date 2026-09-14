@@ -1,54 +1,45 @@
-import type { SettledRun } from "../types.js";
-import {
-	AnalyticsGenerationChangedError,
-	AnalyticsRunFiles,
-	type ClearAnalyticsResult,
-} from "./files.js";
+import type { SessionRecord, SettledRun } from "../types.js";
+import { AnalyticsDatabase, type ClearAnalyticsResult } from "./database.js";
 import { type AnalyticsSnapshot, querySnapshot, type TimeRange } from "./queries.js";
 
 export class AnalyticsStore {
-	private readonly files: AnalyticsRunFiles;
+	private readonly database: AnalyticsDatabase;
 
 	constructor(
-		rootPath: string,
+		databasePath: string,
 		dependencies: {
-			files?: AnalyticsRunFiles;
-			createId?: () => string;
-			writeTimeoutMs?: number;
+			database?: AnalyticsDatabase;
+			busyTimeoutMs?: number;
 		} = {},
 	) {
-		this.files =
-			dependencies.files ??
-			new AnalyticsRunFiles(rootPath, {
-				createId: dependencies.createId,
-				writeTimeoutMs: dependencies.writeTimeoutMs,
-			});
+		this.database =
+			dependencies.database ??
+			new AnalyticsDatabase(databasePath, { busyTimeoutMs: dependencies.busyTimeoutMs });
 	}
 
 	get path(): string {
-		return this.files.path;
+		return this.database.path;
 	}
 
 	recordRun(run: SettledRun, signal?: AbortSignal): Promise<void> {
-		return this.files.append(run, signal);
+		return this.database.recordRun(run, signal);
+	}
+
+	recordSessions(sessions: readonly SessionRecord[], signal?: AbortSignal): Promise<void> {
+		return this.database.recordSessions(sessions, signal);
 	}
 
 	async getSnapshot(range: TimeRange, signal?: AbortSignal): Promise<AnalyticsSnapshot> {
-		for (let attempt = 0; attempt < 2; attempt += 1) {
-			try {
-				return await querySnapshot(this.files.read(signal), range, signal);
-			} catch (error) {
-				if (!(error instanceof AnalyticsGenerationChangedError) || attempt > 0) throw error;
-			}
-		}
-		throw new AnalyticsGenerationChangedError();
+		const runs = await this.database.readRuns(range.fromMs, range.toMs, signal);
+		const sessions = await this.database.readSessions(range.fromMs, range.toMs, signal);
+		return querySnapshot(runs, range, signal, sessions);
 	}
 
 	clearAll(signal?: AbortSignal): Promise<ClearAnalyticsResult> {
-		return this.files.clear(signal);
+		return this.database.clearAll(signal);
 	}
 
 	close(): Promise<void> {
-		return this.files.close();
+		return this.database.close();
 	}
 }

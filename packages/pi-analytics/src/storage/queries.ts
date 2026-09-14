@@ -1,4 +1,4 @@
-import type { ProviderErrorCategory, SettledRun } from "../types.js";
+import type { ProviderErrorCategory, SessionRecord, SettledRun } from "../types.js";
 
 export type TimeRangeId = "today" | "7d" | "30d" | "all";
 export interface TimeRange {
@@ -61,12 +61,76 @@ export interface ResponseStats {
 	distribution: { one: number; twoToThree: number; fourToSix: number; sevenPlus: number };
 }
 
+export interface TokenTotals {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cost: number;
+}
+
+export interface ModelTokenStats extends TokenTotals {
+	provider?: string;
+	model?: string;
+	calls: number;
+	tokens: number;
+}
+
+export interface TokenStats extends TokenTotals {
+	/** Prompt tokens billed at full rate, excluding cache reads and writes. */
+	tokens: number;
+	/** Calls whose usage counters were reported by the provider. */
+	measuredCalls: number;
+	/** Calls that finished without usage counters, so their tokens are absent here. */
+	unmeasuredCalls: number;
+	cacheHitRate: number;
+	models: ModelTokenStats[];
+}
+
+export interface ActivityDay {
+	/** Local calendar day as YYYY-MM-DD. */
+	date: string;
+	sessions: number;
+	llmCalls: number;
+	tokens: number;
+	cost: number;
+}
+
+export interface ProjectStats {
+	project: string;
+	sessions: number;
+	llmCalls: number;
+	tokens: number;
+	cost: number;
+}
+
+export interface SessionStats {
+	count: number;
+	llmCalls: number;
+	/** Distinct local calendar days with at least one session. */
+	activeDays: number;
+	/** Calendar days spanned by the range, bounded by the first recorded session. */
+	totalDays: number;
+	longestStreak: number;
+	currentStreak: number;
+	/** Prompt, cache and output tokens across imported sessions. */
+	tokens: number;
+	cost: number;
+	averageDurationMs: number;
+	longestDurationMs: number;
+	projects: ProjectStats[];
+	/** One entry per active day, oldest first. */
+	days: ActivityDay[];
+}
+
 export interface AnalyticsSnapshot {
 	overview: OverviewStats;
 	skills: SkillStats[];
 	tools: ToolStats[];
 	reliability: ReliabilityStats;
 	responses: ResponseStats;
+	tokens: TokenStats;
+	sessions: SessionStats;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
@@ -94,6 +158,7 @@ export async function querySnapshot(
 	runs: AsyncIterable<SettledRun> | Iterable<SettledRun>,
 	range: TimeRange,
 	signal?: AbortSignal,
+	sessions: readonly SessionRecord[] = [],
 ): Promise<AnalyticsSnapshot> {
 	const generationCounts: number[] = [];
 	const seenRunIds = new Set<string>();
@@ -108,6 +173,10 @@ export async function querySnapshot(
 	let http429 = 0;
 	let http5xx = 0;
 	let terminal = 0;
+	const tokenModels = new Map<string, ModelTokenStats>();
+	const tokenTotals: TokenTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+	let measuredCalls = 0;
+	let unmeasuredCalls = 0;
 
 	for await (const run of runs) {
 		throwIfAborted(signal);
@@ -172,6 +241,37 @@ export async function querySnapshot(
 				if (response.status === 429) http429 += 1;
 				if (response.status >= 500 && response.status < 600) http5xx += 1;
 			}
+			const usage = generation.usage;
+			if (!usage) {
+				unmeasuredCalls += 1;
+				continue;
+			}
+			measuredCalls += 1;
+			tokenTotals.input += usage.input;
+			tokenTotals.output += usage.output;
+			tokenTotals.cacheRead += usage.cacheRead;
+			tokenTotals.cacheWrite += usage.cacheWrite;
+			tokenTotals.cost += usage.cost;
+			const key = `${generation.provider ?? ""}/${generation.model ?? ""}`;
+			const item = tokenModels.get(key) ?? {
+				provider: generation.provider,
+				model: generation.model,
+				calls: 0,
+				tokens: 0,
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
+				cost: 0,
+			};
+			item.calls += 1;
+			item.input += usage.input;
+			item.output += usage.output;
+			item.cacheRead += usage.cacheRead;
+			item.cacheWrite += usage.cacheWrite;
+			item.cost += usage.cost;
+			item.tokens = item.input + item.output + item.cacheRead + item.cacheWrite;
+			tokenModels.set(key, item);
 		}
 	}
 
@@ -202,7 +302,140 @@ export async function querySnapshot(
 			categories,
 		},
 		responses,
+		sessions: sessionStatistics(sessions, range),
+		tokens: {
+			...tokenTotals,
+			tokens:
+				tokenTotals.input + tokenTotals.output + tokenTotals.cacheRead + tokenTotals.cacheWrite,
+			measuredCalls,
+			unmeasuredCalls,
+			cacheHitRate: cacheHitRate(tokenTotals),
+			models: [...tokenModels.values()].sort(
+				(left, right) =>
+					right.tokens - left.tokens ||
+					`${left.provider ?? ""}/${left.model ?? ""}`.localeCompare(
+						`${right.provider ?? ""}/${right.model ?? ""}`,
+					),
+			),
+		},
 	};
+}
+
+function sessionStatistics(sessions: readonly SessionRecord[], range: TimeRange): SessionStats {
+	const days = new Map<string, ActivityDay>();
+	const projects = new Map<string, ProjectStats>();
+	let llmCalls = 0;
+	let totalDurationMs = 0;
+	let longestDurationMs = 0;
+
+	for (const session of sessions) {
+		const tokens =
+			session.usage.input +
+			session.usage.output +
+			session.usage.cacheRead +
+			session.usage.cacheWrite;
+		llmCalls += session.llmCalls;
+		const durationMs = Math.max(0, session.endedAtMs - session.startedAtMs);
+		totalDurationMs += durationMs;
+		longestDurationMs = Math.max(longestDurationMs, durationMs);
+
+		const date = localDate(session.startedAtMs);
+		const day = days.get(date) ?? { date, sessions: 0, llmCalls: 0, tokens: 0, cost: 0 };
+		day.sessions += 1;
+		day.llmCalls += session.llmCalls;
+		day.tokens += tokens;
+		day.cost += session.usage.cost;
+		days.set(date, day);
+
+		const project = projects.get(session.project) ?? {
+			project: session.project,
+			sessions: 0,
+			llmCalls: 0,
+			tokens: 0,
+			cost: 0,
+		};
+		project.sessions += 1;
+		project.llmCalls += session.llmCalls;
+		project.tokens += tokens;
+		project.cost += session.usage.cost;
+		projects.set(session.project, project);
+	}
+
+	const ordered = [...days.values()].sort((left, right) => left.date.localeCompare(right.date));
+	const streaks = streakLengths(
+		ordered.map(({ date }) => date),
+		localDate(range.toMs - 1),
+	);
+	return {
+		count: sessions.length,
+		llmCalls,
+		activeDays: ordered.length,
+		totalDays: spannedDays(ordered, range),
+		longestStreak: streaks.longest,
+		currentStreak: streaks.current,
+		tokens: ordered.reduce((total, day) => total + day.tokens, 0),
+		cost: ordered.reduce((total, day) => total + day.cost, 0),
+		averageDurationMs: sessions.length > 0 ? totalDurationMs / sessions.length : 0,
+		longestDurationMs,
+		projects: [...projects.values()].sort(
+			(left, right) => right.sessions - left.sessions || left.project.localeCompare(right.project),
+		),
+		days: ordered,
+	};
+}
+
+/**
+ * Counts consecutive active days. The current streak is anchored to the range's last day so a
+ * range that ends in the past still reports the streak as it stood then, and a gap of one day
+ * (yesterday active, today not) keeps the streak alive.
+ */
+function streakLengths(
+	dates: readonly string[],
+	lastDate: string,
+): { longest: number; current: number } {
+	let longest = 0;
+	let running = 0;
+	let previous: string | undefined;
+	let trailing = 0;
+	for (const date of dates) {
+		running = previous !== undefined && date === nextDate(previous) ? running + 1 : 1;
+		longest = Math.max(longest, running);
+		previous = date;
+		trailing = running;
+	}
+	if (previous === undefined) return { longest: 0, current: 0 };
+	const current = previous === lastDate || nextDate(previous) === lastDate ? trailing : 0;
+	return { longest, current };
+}
+
+function spannedDays(days: readonly ActivityDay[], range: TimeRange): number {
+	const first = days[0];
+	if (!first) return 0;
+	const fromMs = Math.max(range.fromMs, startOfLocalDay(first.date));
+	const dayCount = Math.ceil((range.toMs - fromMs) / DAY_MS);
+	return Math.max(days.length, dayCount);
+}
+
+function localDate(value: number): string {
+	const date = new Date(value);
+	const month = String(date.getMonth() + 1).padStart(2, "0");
+	const day = String(date.getDate()).padStart(2, "0");
+	return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function startOfLocalDay(date: string): number {
+	const [year, month, day] = date.split("-").map(Number);
+	return new Date(year ?? 1970, (month ?? 1) - 1, day ?? 1).getTime();
+}
+
+function nextDate(date: string): string {
+	return localDate(startOfLocalDay(date) + DAY_MS + DAY_MS / 2);
+}
+
+// Share of prompt tokens served from cache; cache writes count as prompt tokens that missed.
+function cacheHitRate(totals: TokenTotals): number {
+	const prompt = totals.input + totals.cacheRead + totals.cacheWrite;
+	return prompt > 0 ? (totals.cacheRead / prompt) * 100 : 0;
 }
 
 function responseStatistics(generationCounts: number[]): ResponseStats {

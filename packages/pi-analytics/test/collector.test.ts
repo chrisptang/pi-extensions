@@ -119,3 +119,40 @@ test("provider errors are classified without preserving their messages", () => {
 	assert.equal(classifyProviderError("fetch failed"), "network_other");
 	assert.equal(classifyProviderError("invalid API response"), "provider_other");
 });
+
+test("usage counters attach to their generation and roll up into the run total", () => {
+	const collector = new ResponseCollector();
+	collector.begin({ id: "run-6", now: 1, triggerSource: "interactive", model });
+	collector.beginGeneration({ id: "g1", now: 2, model });
+	collector.finishGeneration({
+		now: 3,
+		stopReason: "toolUse",
+		usage: { input: 100, output: 20, cacheRead: 400, cacheWrite: 50, cost: 0.5 },
+	});
+	collector.beginGeneration({ id: "g2", now: 4, model });
+	collector.finishGeneration({
+		now: 5,
+		stopReason: "stop",
+		usage: { input: 30, output: 10, cacheRead: 600, cacheWrite: 0, cost: 0.25 },
+	});
+	// A generation that reports no usage leaves its counters absent rather than zeroed.
+	collector.beginGeneration({ id: "g3", now: 6, model });
+	collector.finishGeneration({ now: 7, stopReason: "stop" });
+
+	const run = collector.settle(8);
+	assert.deepEqual(run?.generations[0]?.usage, {
+		input: 100,
+		output: 20,
+		cacheRead: 400,
+		cacheWrite: 50,
+		cost: 0.5,
+	});
+	assert.equal(run?.generations[2]?.usage, undefined);
+	assert.deepEqual(run?.usage, {
+		input: 130,
+		output: 30,
+		cacheRead: 1_000,
+		cacheWrite: 50,
+		cost: 0.75,
+	});
+});

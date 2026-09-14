@@ -10,6 +10,7 @@ import type {
 	SkillActivationRecord,
 	ToolCallRecord,
 	TriggerSource,
+	UsageRecord,
 } from "./types.js";
 
 interface ActiveRun {
@@ -92,10 +93,16 @@ export class ResponseCollector {
 		});
 	}
 
-	finishGeneration(input: { now: number; stopReason: string; errorMessage?: string }): void {
+	finishGeneration(input: {
+		now: number;
+		stopReason: string;
+		errorMessage?: string;
+		usage?: UsageRecord;
+	}): void {
 		const active = this.active;
 		const generation = this.latestGeneration();
 		if (!active || !generation || generation.outcome !== "pending") return;
+		generation.usage = input.usage;
 		generation.finishedAtMs = input.now;
 		generation.durationMs = elapsed(generation.startedAtMs, input.now);
 		generation.stopReason = input.stopReason;
@@ -250,8 +257,22 @@ export class ResponseCollector {
 			toolErrorCount: active.tools.filter(({ isError }) => isError).length,
 			providerErrorCount,
 			recoveredErrorCount,
+			usage: totalUsage(active.generations),
 		};
 	}
+}
+
+function totalUsage(generations: readonly GenerationRecord[]): UsageRecord {
+	const total: UsageRecord = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+	for (const { usage } of generations) {
+		if (!usage) continue;
+		total.input += usage.input;
+		total.output += usage.output;
+		total.cacheRead += usage.cacheRead;
+		total.cacheWrite += usage.cacheWrite;
+		total.cost += usage.cost;
+	}
+	return total;
 }
 
 function elapsed(start: number, end: number): number {
