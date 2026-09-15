@@ -93,7 +93,9 @@ function renderJob(job: ActiveJobDisplay, theme: Theme): string[] {
 	const summary = jobSummary(job);
 	const tools = job.tools.length > 0 ? job.tools.map(sanitizeLabel).join(", ") : "none";
 	const timeout = job.timeout === undefined ? "no timeout" : formatSeconds(job.timeout);
-	const detail = ` · ${formatSeconds(Math.floor(job.elapsedMs / 1_000))} / ${timeout} · tools: ${tools}`;
+	const turns =
+		job.maxTurns === undefined ? `${job.turns} turns` : `${job.turns}/${job.maxTurns} turns`;
+	const detail = ` · ${formatSeconds(Math.floor(job.elapsedMs / 1_000))} / ${timeout} · ${turns} · tools: ${tools}`;
 	const summaryPart = summary ? theme.fg("muted", ` · ${summary}`) : "";
 	const header = `${symbol}${title}${summaryPart} · ${state}${theme.fg("muted", detail)}`;
 	// The activity line is already sanitized and redacted by the runtime's log.
@@ -115,7 +117,7 @@ function widgetValue(jobs: readonly ActiveJobDisplay[]): string {
 	return jobs
 		.map(
 			(job) =>
-				`${job.jobId}\0${job.agent ?? ""}\0${job.description ?? ""}\0${job.state}\0${Math.floor(job.elapsedMs / 1_000)}\0${job.timeout ?? ""}\0${job.tools.join(",")}\0${job.latestActivity ?? ""}`,
+				`${job.jobId}\0${job.agent ?? ""}\0${job.description ?? ""}\0${job.state}\0${Math.floor(job.elapsedMs / 1_000)}\0${job.timeout ?? ""}\0${job.turns}\0${job.maxTurns ?? ""}\0${job.tools.join(",")}\0${job.latestActivity ?? ""}`,
 		)
 		.join("\n");
 }

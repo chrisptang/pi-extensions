@@ -262,7 +262,7 @@ function renderJobRow(job: PanelJob, selected: boolean, theme: Theme): string {
 	const description = sanitizeLabel(job.description ?? "")
 		.padEnd(26)
 		.slice(0, 26);
-	const state = job.state.padEnd(9);
+	const state = job.state.padEnd(16);
 	const elapsed = formatDuration(job.elapsedMs);
 	return (
 		`${cursor}${symbol}${theme.fg(selected ? "text" : "muted", title)} ` +
@@ -274,7 +274,9 @@ function renderJobRow(job: PanelJob, selected: boolean, theme: Theme): string {
 function detailTitle(job: PanelJob): string {
 	const tools = job.tools.length > 0 ? job.tools.join(",") : "none";
 	const timeout = job.timeout === undefined ? "no timeout" : `${job.timeout}s timeout`;
-	return `${jobTitle(job)} · ${job.jobId} · tools: ${tools} · ${timeout}`;
+	const turns =
+		job.maxTurns === undefined ? `${job.turns} turns` : `${job.turns}/${job.maxTurns} turns`;
+	return `${jobTitle(job)} · ${job.jobId} · tools: ${tools} · ${timeout} · ${turns}`;
 }
 
 /**

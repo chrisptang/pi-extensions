@@ -13,11 +13,28 @@ const MAX_ERROR_BYTES = 8 * 1024;
 const MAX_EVENT_LINE_BYTES = 256 * 1024;
 const RPC_RESPONSE_TIMEOUT_MS = 30_000;
 const KILL_GRACE_MS = 1_000;
+/**
+ * Turns the child may still take after its budget is reached. The wrap-up steer
+ * lands only before the next model call, so one turn may already be in flight
+ * when it is sent; the rest cover a short closing exchange.
+ */
+const BUDGET_GRACE_TURNS = 3;
+/**
+ * Share of the budget after which the child is reminded how many turns remain.
+ * The model cannot count its own turns, so the reminder carries real numbers.
+ * It is skipped when fewer than BUDGET_HINT_MIN_REMAINING turns would separate
+ * it from the wrap-up request, where it would only add noise.
+ */
+const BUDGET_HINT_RATIO = 0.9;
+const BUDGET_HINT_MIN_REMAINING = 3;
+const WRAP_UP_MESSAGE =
+	"Your turn budget is exhausted. Stop calling tools and report your findings now: what you established, what remains unverified, and where you stopped.";
 
 interface ProcessSettlement {
 	code: number;
 	cancelled: boolean;
 	timedOut: boolean;
+	budgetExhausted: boolean;
 	completed: boolean;
 	launchError?: string;
 }
@@ -32,6 +49,7 @@ interface AssistantEvent {
 	args?: unknown;
 	result?: unknown;
 	isError?: boolean;
+	toolResults?: unknown[];
 	message?: {
 		role?: string;
 		content?: Array<{ type?: string; text?: string }>;
@@ -60,6 +78,23 @@ export function resolveTimeoutMs(timeout: number | undefined): number | undefine
 		throw new Error(`Invalid timeout: maximum is ${MAX_TIMEOUT_SECONDS} seconds`);
 	}
 	return timeoutMs;
+}
+
+/** Turn after which the remaining-budget reminder is sent, or undefined for none. */
+export function budgetHintTurn(maxTurns: number): number | undefined {
+	const hintAt = Math.min(
+		Math.floor(maxTurns * BUDGET_HINT_RATIO),
+		maxTurns - BUDGET_HINT_MIN_REMAINING,
+	);
+	return hintAt >= 1 ? hintAt : undefined;
+}
+
+export function resolveMaxTurns(maxTurns: number | undefined): number | undefined {
+	if (maxTurns === undefined) return undefined;
+	if (!Number.isInteger(maxTurns) || maxTurns <= 0) {
+		throw new Error("Invalid maxTurns: must be a positive integer");
+	}
+	return maxTurns;
 }
 
 export async function runChild(request: ChildRequest): Promise<ChildResult> {
@@ -99,8 +134,18 @@ export function buildPiArgs(request: ChildRequest): string[] {
 	args.push("--tools", [...new Set(request.tools)].join(","));
 	// The agent definition specializes the child through its system prompt rather
 	// than the task, so the task text stays free for the caller's own instructions.
-	if (request.systemPrompt) args.push("--append-system-prompt", request.systemPrompt);
+	// The budget goes there too: a child that knows it from the start can pace
+	// its exploration instead of learning about it only when it is asked to stop.
+	const appended = [request.systemPrompt, budgetInstruction(request.maxTurns)]
+		.filter((part): part is string => Boolean(part))
+		.join("\n\n");
+	if (appended) args.push("--append-system-prompt", appended);
 	return args;
+}
+
+function budgetInstruction(maxTurns: number | undefined): string | undefined {
+	if (maxTurns === undefined) return undefined;
+	return `You have a budget of ${maxTurns} turns for this task, where one turn is one of your responses, with or without tool calls. Pace your exploration so you finish and report well within it. When the budget is reached you will be asked to stop using tools and report what you have; a few turns after that you are stopped.`;
 }
 
 async function executeProcess(
@@ -108,6 +153,10 @@ async function executeProcess(
 	request: ChildRequest,
 ): Promise<ChildResult> {
 	const timeoutMs = resolveTimeoutMs(request.timeout);
+	const maxTurns = resolveMaxTurns(request.maxTurns);
+	const hintTurn = maxTurns === undefined ? undefined : budgetHintTurn(maxTurns);
+	let turns = 0;
+	let budgetReached = false;
 	let latestOutput = "";
 	let terminalOutput: string | undefined;
 	let terminalStopReason: "stop" | "length" | undefined;
@@ -120,11 +169,12 @@ async function executeProcess(
 	const pendingCommands = new Map<string, PendingRpcCommand>();
 	let rpcInputError: Error | undefined;
 	let sendCommand: (
-		command: { type: "prompt"; message: string },
+		command: { type: "prompt" | "steer"; message: string },
 		onAccepted?: () => void,
 		signal?: AbortSignal,
 	) => Promise<void> = () => Promise.reject(new Error("Subagent RPC process is unavailable."));
 	let onAgentSettled: () => void = () => undefined;
+	let onBudgetExhausted: () => void = () => undefined;
 
 	const takePendingCommand = (id: string): PendingRpcCommand | undefined => {
 		const pending = pendingCommands.get(id);
@@ -187,6 +237,39 @@ async function executeProcess(
 			}
 			if (event.type === "agent_settled") {
 				onAgentSettled();
+				return;
+			}
+			// A turn is one model response. Reaching the budget asks the child to
+			// wrap up rather than killing it, so the knowledge it gathered comes back
+			// as a report; only a child that keeps going past the grace is stopped.
+			if (event.type === "turn_end") {
+				turns++;
+				reportActivity({ type: "turn", turns });
+				// A turn without tool calls is the child's final report: it settles on
+				// its own, so neither a wrap-up request nor a stop applies.
+				const finishing = Array.isArray(event.toolResults) && event.toolResults.length === 0;
+				if (maxTurns === undefined || finishing) return;
+				if (turns === hintTurn) {
+					const remaining = maxTurns - turns;
+					reportActivity({
+						type: "notice",
+						text: `${turns}/${maxTurns} turns used; reminded the child that ${remaining} remain.`,
+					});
+					void sendCommand({
+						type: "steer",
+						message: `You have used ${turns} of your ${maxTurns} turns; ${remaining} remain. Finish the thread you are on and start converging on your report.`,
+					}).catch(() => undefined);
+				} else if (turns === maxTurns) {
+					budgetReached = true;
+					reportActivity({
+						type: "notice",
+						text: `Turn budget of ${maxTurns} reached; asked the child to wrap up.`,
+					});
+					// Best effort: a failed steer still leaves the grace-turn stop in place.
+					void sendCommand({ type: "steer", message: WRAP_UP_MESSAGE }).catch(() => undefined);
+				} else if (turns >= maxTurns + BUDGET_GRACE_TURNS) {
+					onBudgetExhausted();
+				}
 				return;
 			}
 			// Tool activity is forwarded for inspection only and never affects the
@@ -255,6 +338,7 @@ async function executeProcess(
 		let terminating = false;
 		let cancelled = false;
 		let timedOut = false;
+		let budgetExhausted = false;
 		let completed = false;
 		let ready = false;
 		let deadline: NodeJS.Timeout | undefined;
@@ -273,7 +357,7 @@ async function executeProcess(
 				if (escalation) clearTimeout(escalation);
 				request.signal.removeEventListener("abort", onAbort);
 				rejectPendingCommands(new Error("Subagent RPC process closed."));
-				resolve({ code, cancelled, timedOut, completed, launchError });
+				resolve({ code, cancelled, timedOut, budgetExhausted, completed, launchError });
 			};
 			if (termination) void termination.then(complete, complete);
 			else complete();
@@ -312,6 +396,11 @@ async function executeProcess(
 			terminate(0);
 		};
 		onAgentSettled = completeNormally;
+		onBudgetExhausted = () => {
+			if (settled || terminating) return;
+			budgetExhausted = true;
+			terminate(124);
+		};
 
 		try {
 			process = spawn(invocation.command, invocation.args, {
@@ -425,7 +514,7 @@ async function executeProcess(
 		});
 		process.once("close", (code) => {
 			decoder.finish();
-			finish(cancelled ? 130 : timedOut ? 124 : completed ? 0 : (code ?? 1));
+			finish(cancelled ? 130 : timedOut || budgetExhausted ? 124 : completed ? 0 : (code ?? 1));
 		});
 		process.once("error", (error) => {
 			const limited = truncateText(error.message, MAX_ERROR_BYTES);
@@ -445,7 +534,21 @@ async function executeProcess(
 	if (terminalStopReason === "length") {
 		limitations.push("Child output ended at the model output limit and may be incomplete.");
 	}
+	if (budgetReached && !settlement.budgetExhausted) {
+		limitations.push(
+			`Child reached its turn budget of ${maxTurns} and was asked to wrap up; the result may be incomplete.`,
+		);
+	}
 	if (settlement.cancelled) return cancelledResult(output, limitations, truncated);
+	if (settlement.budgetExhausted) {
+		return {
+			state: "budget_exhausted",
+			...(output ? { result: output } : {}),
+			error: `Subagent exhausted its turn budget of ${maxTurns} without wrapping up.`,
+			limitations,
+			truncated,
+		};
+	}
 	if (settlement.timedOut) {
 		return {
 			state: "timed_out",

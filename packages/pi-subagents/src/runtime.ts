@@ -32,6 +32,7 @@ interface InternalJob extends JobSummary {
 	result?: string;
 	error?: string;
 	limitations: string[];
+	turns: number;
 	deliverySent: boolean;
 	generation: number;
 	/** Human-facing progress record. Never read by the model. */
@@ -59,6 +60,8 @@ export interface PanelJob {
 	finishedAt?: number;
 	elapsedMs: number;
 	timeout?: number;
+	maxTurns?: number;
+	turns: number;
 	tools: string[];
 	error?: string;
 	limitations: string[];
@@ -76,6 +79,8 @@ export interface ActiveJobDisplay {
 	state: Extract<SubagentJobState, "queued" | "running">;
 	elapsedMs: number;
 	timeout?: number;
+	maxTurns?: number;
+	turns: number;
 	tools: string[];
 	/** The child's most recent activity line, so the widget says what it is doing now. */
 	latestActivity?: string;
@@ -88,6 +93,8 @@ export interface StartJobInput {
 	thinkingLevel: SubagentThinkingLevel;
 	cwd: string;
 	timeout?: number;
+	/** Turn budget after which the child is asked to wrap up. */
+	maxTurns?: number;
 	projectTrusted: boolean;
 	/** Agent definition body appended to the child's system prompt. */
 	systemPrompt?: string;
@@ -155,6 +162,8 @@ export class SubagentRuntime {
 				state: job.state,
 				elapsedMs: Math.max(0, now - (job.startedAt ?? job.createdAt)),
 				...(job.timeout !== undefined ? { timeout: job.timeout } : {}),
+				...(job.maxTurns !== undefined ? { maxTurns: job.maxTurns } : {}),
+				turns: job.turns,
 				tools: [...job.tools],
 				...latestActivityOf(job),
 			}));
@@ -181,6 +190,8 @@ export class SubagentRuntime {
 				...(job.finishedAt !== undefined ? { finishedAt: job.finishedAt } : {}),
 				elapsedMs: Math.max(0, (job.finishedAt ?? now) - (job.startedAt ?? job.createdAt)),
 				...(job.timeout !== undefined ? { timeout: job.timeout } : {}),
+				...(job.maxTurns !== undefined ? { maxTurns: job.maxTurns } : {}),
+				turns: job.turns,
 				tools: [...job.tools],
 				...(job.error ? { error: job.error } : {}),
 				limitations: [...job.limitations],
@@ -189,7 +200,12 @@ export class SubagentRuntime {
 			}));
 	}
 
-	start(input: StartJobInput): { jobId: string; state: "queued"; timeout?: number } {
+	start(input: StartJobInput): {
+		jobId: string;
+		state: "queued";
+		timeout?: number;
+		maxTurns?: number;
+	} {
 		if (!this.sessionActive) {
 			throw new Error("Subagent runtime is unavailable because the session is not active.");
 		}
@@ -211,6 +227,7 @@ export class SubagentRuntime {
 			state: "queued",
 			createdAt: this.now(),
 			...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
+			...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
 			controller,
 			tools: [...input.tools],
 			notifyOnCompletion: input.notifyOnCompletion ?? false,
@@ -219,6 +236,7 @@ export class SubagentRuntime {
 			// Setup limitations, such as an unresolved model alias, are reported even
 			// when the child itself runs cleanly.
 			limitations: [...(input.limitations ?? [])],
+			turns: 0,
 			deliverySent: false,
 			generation: this.generation,
 			activity: new ActivityLog(),
@@ -244,6 +262,7 @@ export class SubagentRuntime {
 					thinkingLevel: input.thinkingLevel,
 					cwd: input.cwd,
 					timeout: input.timeout,
+					maxTurns: input.maxTurns,
 					projectTrusted: input.projectTrusted,
 					signal: controller.signal,
 					onActivity: (activity) => this.recordActivity(job, activity),
@@ -264,6 +283,7 @@ export class SubagentRuntime {
 			jobId,
 			state: "queued",
 			...(job.timeout !== undefined ? { timeout: job.timeout } : {}),
+			...(job.maxTurns !== undefined ? { maxTurns: job.maxTurns } : {}),
 		};
 	}
 
@@ -302,6 +322,12 @@ export class SubagentRuntime {
 				break;
 			case "output":
 				job.activity.output(activity.text, at);
+				break;
+			case "turn":
+				job.turns = activity.turns;
+				break;
+			case "notice":
+				job.activity.notice(activity.text, at);
 				break;
 		}
 		this.notifyJobsChanged();
@@ -486,6 +512,8 @@ export class SubagentRuntime {
 			...(job.startedAt !== undefined ? { startedAt: job.startedAt } : {}),
 			...(job.finishedAt !== undefined ? { finishedAt: job.finishedAt } : {}),
 			...(job.timeout !== undefined ? { timeout: job.timeout } : {}),
+			...(job.maxTurns !== undefined ? { maxTurns: job.maxTurns } : {}),
+			turns: job.turns,
 			...(job.resultSummary !== undefined ? { resultSummary: job.resultSummary } : {}),
 			...(job.errorSummary !== undefined ? { errorSummary: job.errorSummary } : {}),
 		};

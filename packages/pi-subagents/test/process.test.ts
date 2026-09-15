@@ -6,7 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import {
+	budgetHintTurn,
 	buildPiArgs,
+	resolveMaxTurns,
 	resolveTimeoutMs,
 	runChild,
 	terminateWindowsProcessTree,
@@ -69,6 +71,18 @@ test("buildPiArgs isolates the RPC child and grants only its selected work tools
 	// An empty selection stays empty: nothing is added on the child's behalf.
 	const noWorkTools = buildPiArgs(childRequest({ tools: [] }));
 	assert.equal(noWorkTools[noWorkTools.indexOf("--tools") + 1], "");
+});
+
+test("buildPiArgs tells the child its turn budget through the system prompt", () => {
+	const budgeted = buildPiArgs(childRequest({ maxTurns: 40 }));
+	const appended = budgeted[budgeted.indexOf("--append-system-prompt") + 1] ?? "";
+	assert.match(appended, /budget of 40 turns/u);
+
+	// The agent definition comes first; the budget is appended after it.
+	const withAgent = buildPiArgs(childRequest({ systemPrompt: "You review diffs.", maxTurns: 40 }));
+	const combined = withAgent[withAgent.indexOf("--append-system-prompt") + 1] ?? "";
+	assert.match(combined, /^You review diffs\.\n\nYou have a budget of 40 turns/u);
+	assert.equal(withAgent.filter((arg) => arg === "--append-system-prompt").length, 1);
 });
 
 test("a child is launched without any way to spawn a grandchild", () => {
@@ -219,6 +233,128 @@ test("resolves optional execution timeouts with Pi bash semantics", () => {
 	assert.throws(() => resolveTimeoutMs(0), /finite number of seconds/);
 	assert.throws(() => resolveTimeoutMs(Number.POSITIVE_INFINITY), /finite number of seconds/);
 	assert.throws(() => resolveTimeoutMs(2_147_483.648), /maximum is 2147483\.647 seconds/);
+});
+
+test("resolves turn budgets as positive integers", () => {
+	assert.equal(resolveMaxTurns(undefined), undefined);
+	assert.equal(resolveMaxTurns(100), 100);
+	for (const invalid of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+		assert.throws(() => resolveMaxTurns(invalid), /positive integer/);
+	}
+});
+
+test("places the remaining-budget reminder at 90% with at least three turns to spare", () => {
+	assert.equal(budgetHintTurn(100), 90);
+	assert.equal(budgetHintTurn(50), 45);
+	assert.equal(budgetHintTurn(10), 7);
+	assert.equal(budgetHintTurn(4), 1);
+	// Too small for a reminder to precede the wrap-up request by a useful margin.
+	assert.equal(budgetHintTurn(3), undefined);
+});
+
+test("runChild reminds a child of its remaining turns before the budget is reached", async () => {
+	installFakePi(`
+const toolTurn = () => event({ type: "turn_end", message: {}, toolResults: [{}] });
+async function handle(command) {
+  respond(command);
+  if (command.type === "prompt") {
+    for (let i = 0; i < 7; i++) toolTurn();
+    return;
+  }
+  if (command.type === "steer") {
+    event(message("Reminded: " + command.message));
+    event({ type: "turn_end", message: {}, toolResults: [] });
+    event({ type: "agent_settled" });
+  }
+}
+`);
+	const activity: ChildActivity[] = [];
+	const result = await runChild(
+		childRequest({ maxTurns: 10, onActivity: (entry) => activity.push(entry) }),
+	);
+	assert.equal(result.state, "completed");
+	assert.match(result.result ?? "", /^Reminded: You have used 7 of your 10 turns; 3 remain\./u);
+	// The budget itself was never reached, so the result carries no limitation.
+	assert.deepEqual(result.limitations, []);
+	assert.ok(
+		activity.some(
+			(entry) =>
+				entry.type === "notice" &&
+				/7\/10 turns used; reminded the child that 3 remain/u.test(entry.text),
+		),
+	);
+});
+
+test("runChild asks a child at its turn budget to wrap up and keeps its report", async () => {
+	installFakePi(`
+const toolTurn = () => event({ type: "turn_end", message: {}, toolResults: [{}] });
+async function handle(command) {
+  respond(command);
+  if (command.type === "prompt") {
+    toolTurn();
+    toolTurn();
+    toolTurn();
+    return;
+  }
+  if (command.type === "steer") {
+    event(message("Wrapped up: " + command.message));
+    event({ type: "turn_end", message: {}, toolResults: [] });
+    event({ type: "agent_settled" });
+  }
+}
+`);
+	const activity: ChildActivity[] = [];
+	const result = await runChild(
+		childRequest({ maxTurns: 3, onActivity: (entry) => activity.push(entry) }),
+	);
+	assert.equal(result.state, "completed");
+	assert.match(result.result ?? "", /^Wrapped up: Your turn budget is exhausted\./u);
+	assert.match(result.limitations.join("\n"), /turn budget of 3.*may be incomplete/u);
+	assert.deepEqual(
+		activity.filter((entry) => entry.type === "turn").map((entry) => entry.turns),
+		[1, 2, 3, 4],
+	);
+	assert.ok(
+		activity.some(
+			(entry) => entry.type === "notice" && /Turn budget of 3 reached/u.test(entry.text),
+		),
+	);
+});
+
+test("runChild lets a report that lands on the budget turn complete untouched", async () => {
+	installFakePi(`
+async function handle(command) {
+  respond(command);
+  if (command.type === "steer") {
+    event(message("steered"));
+    return;
+  }
+  event({ type: "turn_end", message: {}, toolResults: [{}] });
+  event(message("done"));
+  event({ type: "turn_end", message: {}, toolResults: [] });
+  event({ type: "agent_settled" });
+}
+`);
+	const result = await runChild(childRequest({ maxTurns: 2 }));
+	assert.equal(result.state, "completed");
+	assert.equal(result.result, "done");
+	assert.deepEqual(result.limitations, []);
+});
+
+test("runChild stops a child that keeps working past its turn budget", async () => {
+	installFakePi(`
+async function handle(command) {
+  respond(command);
+  if (command.type !== "prompt") return;
+  event(message("still looking", "toolUse"));
+  setInterval(() => event({ type: "turn_end", message: {}, toolResults: [{}] }), 5);
+}
+`);
+	const result = await runChild(childRequest({ maxTurns: 2 }));
+	assert.equal(result.state, "budget_exhausted");
+	assert.equal(result.result, "still looking");
+	assert.match(result.error ?? "", /turn budget of 2 without wrapping up/u);
+	assert.doesNotMatch(result.limitations.join("\n"), /may be incomplete/u);
 });
 
 test("runChild starts its deadline after RPC readiness and honors cancellation", async () => {

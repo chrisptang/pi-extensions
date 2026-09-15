@@ -1,6 +1,6 @@
 ---
 name: using-pi-subagents
-description: Operate pi-subagents jobs safely, including direct-work decisions, agent-definition selection, blocking versus background execution, least-privilege tool selection, thinking-level selection, delegation, parallel starts, timeout selection, waiting, cancellation, result handling, verification, and writer isolation.
+description: Operate pi-subagents jobs safely, including direct-work decisions, agent-definition selection, blocking versus background execution, least-privilege tool selection, thinking-level selection, delegation, parallel starts, timeout and turn-budget selection, waiting, cancellation, result handling, verification, and writer isolation.
 license: MIT
 ---
 
@@ -130,6 +130,18 @@ Split an oversized task instead of extending its deadline to compensate for uncl
 
 The execution timeout, when set, belongs to the job and terminates its child when exceeded.
 
+## Choose turn budgets
+
+Every job has a `maxTurns` budget of model responses, defaulting to 100, that bounds exploration independently of model speed. The child is told its budget in its system prompt, so it can pace the work from the start, and reminded of how many turns remain once 90% of the budget is used.
+
+At the budget the child is asked to stop using tools and report; its report returns as a normal result carrying a limitation that names the budget.
+
+A child that keeps working three turns past the budget is stopped with the `budget_exhausted` state and its last visible output.
+
+Lower `maxTurns` for a focused lookup that should not wander, and raise it only when a survey genuinely needs many tool rounds.
+
+Split an oversized task instead of raising its budget to compensate for unclear scope.
+
 ## Start independent jobs in parallel
 
 Start multiple jobs in one Pi parallel tool batch only when they are independent.
@@ -217,6 +229,8 @@ Treat `partial` as incomplete evidence, identify what remains unverified, and co
 Treat `failed` as no reliable completion and inspect the available error before choosing a direct fallback.
 
 Treat `timed_out` as terminal for that job, preserve any available partial evidence, and do not assume work continued after the deadline.
+
+Treat `budget_exhausted` as a child that did not converge: keep any available output as partial evidence, and narrow the task before starting a new job rather than raising `maxTurns`.
 
 Treat `cancelled` as terminal and never wait for a later result from that attempt.
 

@@ -51,6 +51,8 @@ test("panel lists active and terminal jobs with the selected job's activity", ()
 			startedAt: 0,
 			elapsedMs: 42_000,
 			timeout: 120,
+			maxTurns: 100,
+			turns: 7,
 			tools: ["read", "grep"],
 			limitations: [],
 			droppedEvents: 0,
@@ -81,6 +83,7 @@ test("panel lists active and terminal jobs with the selected job's activity", ()
 			startedAt: 1,
 			finishedAt: 62_001,
 			elapsedMs: 62_000,
+			turns: 0,
 			tools: ["read", "edit"],
 			error: "Subagent execution was cancelled by the user.",
 			limitations: [],
@@ -96,7 +99,10 @@ test("panel lists active and terminal jobs with the selected job's activity", ()
 	assert.match(lines[2] ?? "", /^ {2}✗ builder/u);
 	assert.match(lines[2] ?? "", /cancelled\s+1m2s/u);
 	// The detail heading names the job and what it was allowed to do.
-	assert.match(lines[3] ?? "", /explorer · job_a · tools: read,grep · 120s timeout/u);
+	assert.match(
+		lines[3] ?? "",
+		/explorer · job_a · tools: read,grep · 120s timeout · 7\/100 turns/u,
+	);
 	assert.match(lines[4] ?? "", /12:04:31 read\s+✓ src\/auth\/mw\.ts → 80 lines/u);
 	assert.match(lines[5] ?? "", /12:04:35 say\s+The middleware verifies exp before refresh\./u);
 	assert.match(lines.at(-1) ?? "", /↑↓ select\s+k terminate\s+esc close/u);
@@ -110,6 +116,7 @@ test("panel reports a terminal selection as not terminable", () => {
 				state: "completed",
 				createdAt: 0,
 				elapsedMs: 1_000,
+				turns: 0,
 				tools: [],
 				limitations: [],
 				droppedEvents: 0,
@@ -132,6 +139,7 @@ test("panel reports dropped events and a job's own limitations", () => {
 				state: "running",
 				createdAt: 0,
 				elapsedMs: 0,
+				turns: 0,
 				tools: ["read"],
 				limitations: ["Agent model was unavailable; inherited the main model."],
 				droppedEvents: 37,
@@ -166,6 +174,7 @@ test("every panel line stays within the render width", () => {
 				state: "running",
 				createdAt: 0,
 				elapsedMs: 0,
+				turns: 0,
 				tools: ["read", "grep", "find", "ls", "bash"],
 				limitations: [],
 				droppedEvents: 0,

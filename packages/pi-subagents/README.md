@@ -91,7 +91,7 @@ While a job runs you can watch it and stop it, but you cannot talk to it. If a c
 
 Completion messages follow Pi's global tool-output expansion state and the `app.tools.expand` binding (`Ctrl+O` by default).
 
-In TUI mode, the above-editor widget shows each queued or running job's ID, state, elapsed time, timeout, selected work tools, and its most recent activity line.
+In TUI mode, the above-editor widget shows each queued or running job's ID, state, elapsed time, timeout, turns used against its budget, selected work tools, and its most recent activity line.
 The widget disappears when no jobs remain active, and clears when the session ends.
 
 Run `/subagents` for the full inspection panel. See [Inspecting and terminating jobs](#-inspecting-and-terminating-jobs).
@@ -102,8 +102,8 @@ The main Pi session exposes five fixed tools and the `/agents`, `/skills`, and `
 
 | Tool | Parameters | Purpose |
 | --- | --- | --- |
-| `subagent_spawn` | `task`, `description`, optional `agent`, `background`, `tools`, `thinkingLevel`, `timeout` | Start one subagent job and return its `jobId`. |
-| `skill_run` | `name`, `description`, optional `args`, `background`, `tools`, `thinkingLevel`, `timeout` | Run one skill inside a subagent and return its `jobId`. |
+| `subagent_spawn` | `task`, `description`, optional `agent`, `background`, `tools`, `thinkingLevel`, `timeout`, `maxTurns` | Start one subagent job and return its `jobId`. |
+| `skill_run` | `name`, `description`, optional `args`, `background`, `tools`, `thinkingLevel`, `timeout`, `maxTurns` | Run one skill inside a subagent and return its `jobId`. |
 | `subagent_inspect` | none | List privacy-filtered retained-job metadata. |
 | `subagent_cancel` | `jobId` | Idempotently cancel one queued or running job. |
 | `subagent_wait` | `jobId`, optional `timeout` | Wait for one job to reach a terminal state. |
@@ -114,8 +114,10 @@ Execution and wait timeouts use seconds, accept finite numbers greater than zero
 Omitting a job execution timeout lets the child run until it exits, is cancelled, the session shuts down, or the Pi process exits.
 A wait timeout or caller cancellation stops only that wait and does not cancel its job.
 
+Every job also has a turn budget, `maxTurns`, which defaults to 100 model responses. Unlike a timeout it does not depend on how fast the model answers, so it is the bound that keeps an exploration from running forever. The child is told its budget in its system prompt, so it can pace the work from the start, and reminded of how many turns remain once 90% of the budget is used. When the budget is reached the child is asked to stop using tools and report what it found; that report comes back as a normal result with a limitation noting the budget. A child that keeps working three turns past the budget is stopped with the `budget_exhausted` state and whatever it last said.
+
 Tasks are limited to 50 KiB of UTF-8 text.
-The terminal states are `completed`, `partial`, `failed`, `timed_out`, and `cancelled`.
+The terminal states are `completed`, `partial`, `failed`, `timed_out`, `budget_exhausted`, and `cancelled`.
 `subagent_inspect` never returns complete task text, child output, prompts, selected tools, context, credentials, environment variables, or secrets.
 
 See [`docs/tools.md`](./docs/tools.md) for the concise schema reference.
@@ -153,6 +155,9 @@ The optional `tools` list limits what the child can do:
 
 Adding `edit` or `write` lets the child modify files.
 Adding `bash` or `powershell` grants unrestricted command execution and can also modify the workspace.
+
+The optional `maxTurns` is a positive integer and defaults to 100.
+Lower it for a focused lookup that should not wander, and raise it only for a survey that genuinely needs many tool rounds; splitting the task is usually the better fix.
 
 The optional `thinkingLevel` accepts `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
 Omitting `thinkingLevel` captures the main agent's effective level when `subagent_spawn` executes.
@@ -360,14 +365,14 @@ Like `/agents`, it never lists the fallback directories.
 Run `/subagents` in TUI mode to open the inspection panel.
 
 The panel lists every retained job, active and terminal, with its agent, description, state, and elapsed time.
-Selecting a job shows its `jobId`, selected work tools, timeout, and its activity as the child produces it:
+Selecting a job shows its `jobId`, selected work tools, timeout, turns used against its budget, and its activity as the child produces it:
 
 ```
 ── Subagents · 2 active · 3 retained ───────────────────────────────
 ❯ ▶ explorer      review auth middleware    running    42s
   ○ builder       add cooldown tests        queued      0s
   ✓ skill:xmind   parse the test cases      completed  3m1s
-── explorer · job_m2x1_3 · tools: read,grep · 120s timeout ─────────
+── explorer · job_m2x1_3 · tools: read,grep · 120s timeout · 7/100 turns ──
   12:04:31 read  ✓ src/auth/middleware.ts → 80 lines
   12:04:33 grep  ✓ "verifyToken" src/ → 7 matches
   12:04:35 say     The middleware verifies exp before refresh.

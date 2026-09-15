@@ -210,6 +210,7 @@ test("spawns jobs with default and explicit tools and thinking levels", async ()
 			task: "Implement one thing",
 			tools: ["read", "edit", "read", "write"],
 			thinkingLevel: "low",
+			maxTurns: 20,
 		},
 		undefined,
 		undefined,
@@ -219,17 +220,24 @@ test("spawns jobs with default and explicit tools and thinking levels", async ()
 	assert.equal(explicit.details.state, "queued");
 	await Promise.resolve();
 	assert.deepEqual(
-		requests.map(({ tools, model, thinkingLevel }) => ({ tools, model, thinkingLevel })),
+		requests.map(({ tools, model, thinkingLevel, maxTurns }) => ({
+			tools,
+			model,
+			thinkingLevel,
+			maxTurns,
+		})),
 		[
 			{
 				tools: ["read", "grep", "find", "ls"],
 				model: "test-provider/test-model",
 				thinkingLevel: "high",
+				maxTurns: 100,
 			},
 			{
 				tools: ["read", "edit", "write"],
 				model: "test-provider/test-model",
 				thinkingLevel: "low",
+				maxTurns: 20,
 			},
 		],
 	);
@@ -267,7 +275,11 @@ test("labels active jobs with their agent and description above the editor", asy
 	const { mock, context } = await setup(
 		{
 			now: () => now,
-			runChild: waitForCancellation,
+			runChild: async (request) => {
+				// Only the explorer job reports progress, so the other shows a zero count.
+				if (request.tools.includes("edit")) request.onActivity?.({ type: "turn", turns: 7 });
+				return waitForCancellation(request);
+			},
 			agents: agentRegistry([agentDefinition({ name: "explorer" })]),
 		},
 		{},
@@ -281,6 +293,7 @@ test("labels active jobs with their agent and description above the editor", asy
 			agent: "explorer",
 			tools: ["read", "edit"],
 			timeout: 120,
+			maxTurns: 50,
 		},
 		undefined,
 		undefined,
@@ -299,12 +312,12 @@ test("labels active jobs with their agent and description above the editor", asy
 	assert.equal(lines[1], "Subagents · 2 active · /subagents to inspect or terminate");
 	assert.equal(
 		lines[2],
-		"▶ explorer · review auth middleware · running · 1m 5s / 2m · tools: read, edit",
+		"▶ explorer · review auth middleware · running · 1m 5s / 2m · 7/50 turns · tools: read, edit",
 	);
 	// A job spawned without an agent has only its id to identify it.
 	assert.equal(
 		lines[3],
-		`▶ ${String(second.details.jobId)} · test job · running · 0s / no timeout · tools: read, grep, find, ls`,
+		`▶ ${String(second.details.jobId)} · test job · running · 0s / no timeout · 0/100 turns · tools: read, grep, find, ls`,
 	);
 	now = 66_000;
 	assert.ok(refreshWidget);
@@ -374,6 +387,8 @@ test("rejects invalid spawn arguments and nesting before child launch", async ()
 		{ description: "test job", task: "extension tool", tools: ["subagent_spawn"] },
 		{ description: "test job", task: "bad thinking", thinkingLevel: "turbo" },
 		{ description: "test job", task: "bad timeout", timeout: 0 },
+		{ description: "test job", task: "bad turns", maxTurns: 0 },
+		{ description: "test job", task: "fractional turns", maxTurns: 1.5 },
 	]) {
 		await assert.rejects(() => spawn.execute("invalid", params, undefined, undefined, context.ctx));
 	}

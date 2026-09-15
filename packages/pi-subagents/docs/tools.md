@@ -21,6 +21,7 @@ Planning, the critical path, integration, deterministic checks, authorization de
 | `tools` | `string[]` | No | Up to 64 names from `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`; defaults to the agent definition's tools, otherwise `read`, `grep`, `find`, and `ls`. |
 | `thinkingLevel` | `string` | No | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; defaults to the agent definition's level, otherwise the main agent's effective thinking level. |
 | `timeout` | `number` | No | Seconds; `> 0` through `2,147,483.647`; no default timeout. |
+| `maxTurns` | `integer` | No | Turn budget, `>= 1`; defaults to `100`. The child is told the budget in its system prompt and reminded of the remaining turns at 90%. At the budget the child is asked to stop using tools and report; three turns later it is stopped as `budget_exhausted`. |
 
 Starts one task-specialized subagent job with the selected tool capabilities and returns its job ID immediately.
 
@@ -67,6 +68,7 @@ It also reports whether `~/.pi/agent/subagent_instruction.md` replaced any tool 
 | `tools` | `string[]` | No | Up to 64 names from `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`; defaults to the skill's translated `allowed-tools`, otherwise `read`, `grep`, `find`, and `ls`. |
 | `thinkingLevel` | `string` | No | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; defaults to the skill's level, otherwise the main agent's effective level. |
 | `timeout` | `number` | No | Seconds; `> 0` through `2,147,483.647`; no default timeout. |
+| `maxTurns` | `integer` | No | Turn budget, `>= 1`; defaults to `100`; same semantics as `subagent_spawn`. |
 
 Runs one skill inside a subagent and returns its job ID immediately, so the skill's instructions and intermediate work never enter the main session.
 
@@ -125,7 +127,7 @@ Subagents do not have this tool, or any other `subagent_*` tool.
 
 Opens the inspection panel in TUI mode. Other modes report that the panel is unavailable and do nothing.
 
-The panel lists every retained job with its agent, description, state, and elapsed time, and shows the selected job's `jobId`, work tools, timeout, and live activity. `↑↓` selects, `k` terminates after a confirmation, and `esc` closes.
+The panel lists every retained job with its agent, description, state, and elapsed time, and shows the selected job's `jobId`, work tools, timeout, turns used against its budget, and live activity. `↑↓` selects, `k` terminates after a confirmation, and `esc` closes.
 
 The activity record holds tool calls with summarized arguments, their outcome and result summary, the child's visible assistant text, and lifecycle notices. It never holds the child's thinking, which is not forwarded out of the child process at all.
 

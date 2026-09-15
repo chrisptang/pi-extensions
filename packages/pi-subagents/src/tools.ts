@@ -10,13 +10,14 @@ import {
 	loadInstructionOverrides,
 } from "./instruction-overrides.js";
 import { modelVisibleJson } from "./model-output.js";
-import { resolveTimeoutMs } from "./process.js";
+import { resolveMaxTurns, resolveTimeoutMs } from "./process.js";
 import { type RuntimeDependencies, SubagentRuntime } from "./runtime.js";
 import type { SkillDefinition } from "./skill-definitions.js";
 import { SkillRegistry } from "./skill-registry.js";
 import { MAX_IDENTIFIER_LENGTH, sanitizeTerminalText } from "./text.js";
 import {
 	CHILD_CORE_TOOL_NAMES,
+	DEFAULT_MAX_TURNS,
 	DEFAULT_SUBAGENT_TOOLS,
 	SUBAGENT_THINKING_LEVELS,
 	type SubagentThinkingLevel,
@@ -70,6 +71,14 @@ const MAX_TOOLS = 64;
 const CHILD_CORE_TOOL_SET = new Set<string>(CHILD_CORE_TOOL_NAMES);
 const THINKING_LEVEL_SET = new Set<string>(SUBAGENT_THINKING_LEVELS);
 
+/** Shared by spawn and skill_run: the budget means the same thing for both. */
+const MaxTurnsParameter = Type.Optional(
+	Type.Integer({
+		minimum: 1,
+		description: `Turn budget: model responses the child may take before it is asked to stop exploring and report. Defaults to ${DEFAULT_MAX_TURNS}. Raise it for a genuinely wide survey, lower it for a focused lookup.`,
+	}),
+);
+
 /**
  * Spawn's schema is built per registration so the `agent` parameter can carry the
  * roster of available agent names. That roster is the only agent information the
@@ -120,6 +129,7 @@ function buildSpawnParameters(agents: AgentRegistry) {
 			timeout: Type.Optional(
 				Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }),
 			),
+			maxTurns: MaxTurnsParameter,
 		},
 		{ additionalProperties: false },
 	);
@@ -222,6 +232,7 @@ export function registerSubagentTools(
 				params.thinkingLevel ?? agent?.thinkingLevel ?? ctx.thinkingLevel ?? pi.getThinkingLevel(),
 			);
 			resolveTimeoutMs(params.timeout);
+			const maxTurns = resolveMaxTurns(params.maxTurns ?? DEFAULT_MAX_TURNS);
 			return toolResult(
 				runtime.start({
 					task,
@@ -233,6 +244,7 @@ export function registerSubagentTools(
 					thinkingLevel,
 					cwd: ctx.cwd,
 					timeout: params.timeout,
+					maxTurns,
 					projectTrusted: ctx.isProjectTrusted(),
 					notifyOnCompletion: params.background === true,
 				}),
@@ -261,6 +273,7 @@ export function registerSubagentTools(
 				params.thinkingLevel ?? skill.thinkingLevel ?? ctx.thinkingLevel ?? pi.getThinkingLevel(),
 			);
 			resolveTimeoutMs(params.timeout);
+			const maxTurns = resolveMaxTurns(params.maxTurns ?? DEFAULT_MAX_TURNS);
 			const limitations = [
 				...(selected.limitation ? [selected.limitation] : []),
 				...skillToolLimitations(skill, params.tools !== undefined),
@@ -277,6 +290,7 @@ export function registerSubagentTools(
 					thinkingLevel,
 					cwd: ctx.cwd,
 					timeout: params.timeout,
+					maxTurns,
 					projectTrusted: ctx.isProjectTrusted(),
 					notifyOnCompletion: params.background === true,
 				}),
@@ -490,6 +504,7 @@ function buildSkillRunParameters(skills: SkillRegistry) {
 			timeout: Type.Optional(
 				Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }),
 			),
+			maxTurns: MaxTurnsParameter,
 		},
 		{ additionalProperties: false },
 	);

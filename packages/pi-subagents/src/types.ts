@@ -7,6 +7,7 @@ export const JOB_STATES = [
 	"partial",
 	"failed",
 	"timed_out",
+	"budget_exhausted",
 	"cancelled",
 ] as const;
 
@@ -17,6 +18,7 @@ export const TERMINAL_JOB_STATES = new Set<SubagentJobState>([
 	"partial",
 	"failed",
 	"timed_out",
+	"budget_exhausted",
 	"cancelled",
 ]);
 
@@ -41,9 +43,17 @@ export const SUBAGENT_THINKING_LEVELS = [
 	"max",
 ] as const satisfies readonly ModelThinkingLevel[];
 export type SubagentThinkingLevel = (typeof SUBAGENT_THINKING_LEVELS)[number];
+/**
+ * Turns a child may take before it is asked to wrap up. A turn is one model
+ * response, so this bounds exploration regardless of how fast the model answers.
+ */
+export const DEFAULT_MAX_TURNS = 100;
 
 export interface ChildResult {
-	state: Extract<SubagentJobState, "completed" | "partial" | "failed" | "timed_out" | "cancelled">;
+	state: Extract<
+		SubagentJobState,
+		"completed" | "partial" | "failed" | "timed_out" | "budget_exhausted" | "cancelled"
+	>;
 	result?: string;
 	error?: string;
 	limitations: string[];
@@ -60,7 +70,9 @@ export interface ChildResult {
 export type ChildActivity =
 	| { type: "tool_start"; toolCallId: string; tool: string; args: unknown }
 	| { type: "tool_end"; toolCallId: string; tool: string; result: unknown; isError: boolean }
-	| { type: "output"; text: string };
+	| { type: "output"; text: string }
+	| { type: "turn"; turns: number }
+	| { type: "notice"; text: string };
 
 export interface ChildRequest {
 	task: string;
@@ -71,6 +83,8 @@ export interface ChildRequest {
 	thinkingLevel: SubagentThinkingLevel;
 	cwd: string;
 	timeout?: number;
+	/** Turn budget; the child is steered to wrap up when it is reached. Omit for no budget. */
+	maxTurns?: number;
 	projectTrusted: boolean;
 	signal: AbortSignal;
 	/**
@@ -93,6 +107,9 @@ export interface JobSummary {
 	startedAt?: number;
 	finishedAt?: number;
 	timeout?: number;
+	maxTurns?: number;
+	/** Model responses the child has produced so far. */
+	turns?: number;
 	resultSummary?: string;
 	errorSummary?: string;
 }
