@@ -539,3 +539,135 @@ test("reloading the configuration releases held models", async () => {
 	}
 	assert.deepEqual([...seen].sort(), ["a", "b"]);
 });
+
+/** Run the extension's startup handler with a synthesized `pi --model <value>` argv. */
+async function startupWithCliModel(
+	harness: ReturnType<typeof createMockPi>,
+	ctx: unknown,
+	args: string[],
+) {
+	const previous = process.argv;
+	process.argv = ["/usr/bin/node", "/usr/bin/pi", ...args];
+	try {
+		await harness.events.get("session_start")?.[0]?.({ reason: "startup" }, ctx);
+	} finally {
+		process.argv = previous;
+	}
+}
+
+test("pi --model <alias> starts the session on the aliased model", async () => {
+	useAgentDir({ aliases: { sonnet: "local/terra" } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx, notifications } = createMockContext({
+		modelRegistry: registryFor([
+			{ provider: "local", id: "terra" },
+			{ provider: "bedrock", id: "claude-sonnet" },
+		]),
+	});
+	// Pi's own fuzzy match landed on an unrelated model that merely contains the name.
+	ctx.model = model("bedrock", "claude-sonnet");
+
+	await startupWithCliModel(harness, ctx, ["--model", "sonnet"]);
+
+	assert.deepEqual(harness.setModels, [{ provider: "local", id: "terra" }]);
+	assert.match(notifications.at(-1)?.message ?? "", /local\/terra/u);
+});
+
+test("pi --model <alias> applies the alias thinking level", async () => {
+	useAgentDir({ aliases: { deep: "local/a:high" } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([{ provider: "local", id: "a" }]),
+	});
+	ctx.model = model("local", "other");
+
+	await startupWithCliModel(harness, ctx, ["--model", "deep"]);
+
+	assert.deepEqual(harness.setModels, [{ provider: "local", id: "a" }]);
+	assert.deepEqual(harness.thinkingLevels, ["high"]);
+});
+
+test("pi --model <alias> holds its pick so a later /ma stays on it", async () => {
+	useAgentDir({ aliases: { pool: ["local/a", "local/b"] } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([
+			{ provider: "local", id: "a" },
+			{ provider: "local", id: "b" },
+		]),
+	});
+	ctx.model = model("local", "other");
+
+	await startupWithCliModel(harness, ctx, ["--model", "pool"]);
+	const startupPick = harness.setModels.at(-1);
+	for (let index = 0; index < 50; index += 1) {
+		await harness.commands.get("ma")?.handler("pool", ctx);
+		assert.deepEqual(harness.setModels.at(-1), startupPick);
+	}
+});
+
+test("pi --model <model-id> leaves a non-alias value to Pi", async () => {
+	useAgentDir({ aliases: { sonnet: "local/terra" } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([{ provider: "local", id: "a" }]),
+	});
+	ctx.model = model("local", "a");
+
+	await startupWithCliModel(harness, ctx, ["--model", "local/a"]);
+
+	assert.deepEqual(harness.setModels, []);
+});
+
+test("pi --model <alias> does not re-switch when Pi already picked the same model", async () => {
+	useAgentDir({ aliases: { sonnet: "local/terra" } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([{ provider: "local", id: "terra" }]),
+	});
+	ctx.model = model("local", "terra");
+
+	await startupWithCliModel(harness, ctx, ["--model", "sonnet"]);
+
+	assert.deepEqual(harness.setModels, []);
+});
+
+test("pi --model <alias> keeps the current model when no candidate is usable", async () => {
+	useAgentDir({ aliases: { sonnet: "local/terra" } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx, notifications } = createMockContext({
+		modelRegistry: registryFor([{ provider: "local", id: "terra" }], ["local"]),
+	});
+	ctx.model = model("other", "fallback");
+
+	await startupWithCliModel(harness, ctx, ["--model", "sonnet"]);
+
+	assert.deepEqual(harness.setModels, []);
+	assert.equal(notifications.at(-1)?.level, "warning");
+});
+
+test("a session replacement does not re-apply the startup --model flag", async () => {
+	useAgentDir({ aliases: { sonnet: "local/terra" } });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		modelRegistry: registryFor([{ provider: "local", id: "terra" }]),
+	});
+	ctx.model = model("local", "chosen-later");
+
+	const previous = process.argv;
+	process.argv = ["/usr/bin/node", "/usr/bin/pi", "--model", "sonnet"];
+	try {
+		await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
+	} finally {
+		process.argv = previous;
+	}
+
+	assert.deepEqual(harness.setModels, []);
+});

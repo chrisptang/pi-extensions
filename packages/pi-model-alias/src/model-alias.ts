@@ -7,6 +7,7 @@ import {
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
 import { type AliasDefinition, type LoadedAliases, loadAliases, resolveAlias } from "./aliases.js";
+import { readCliModelArgument } from "./cli-model.js";
 import { CooldownRegistry } from "./cooldown.js";
 
 interface RestorePoint {
@@ -263,10 +264,52 @@ export default function modelAlias(pi: ExtensionAPI): void {
 
 	// A replaced session invalidates the restore point, the held picks, and the
 	// cooldowns, all of which are scoped to one session by design.
-	pi.on("session_start", async () => {
+	pi.on("session_start", async (event, ctx) => {
 		pendingRestore = undefined;
 		sticky.clear();
 		cooldowns.clear();
 		inFlight = undefined;
+
+		// -----------------------------------------------------------------------
+		// Feature 4: `pi --model <alias>` starts the session on the alias.
+		//
+		// Pi resolves `--model` against its own catalog before any session exists,
+		// so an alias name gets fuzzy-matched to an unrelated model. Only "startup"
+		// carries a CLI argument; a later session replacement inherits its model
+		// from the session itself, so re-applying the flag there would override a
+		// model the user has since chosen.
+		// -----------------------------------------------------------------------
+		if (event.reason !== "startup") return;
+
+		const requested = readCliModelArgument(process.argv);
+		if (!requested) return;
+
+		const definition = aliases().aliases.get(requested);
+		if (!definition) return;
+
+		const resolved = resolveAlias(definition, registryLookup(ctx, requested));
+		if (!resolved) {
+			ctx.ui.notify(
+				`Alias "${requested}" has no registered candidate with usable credentials; keeping ${
+					ctx.model ? describe(ctx.model) : "the current model"
+				}.`,
+				"warning",
+			);
+			return;
+		}
+
+		// Pi already selected a model for the flag; only report a switch when the
+		// alias actually lands somewhere else.
+		if (ctx.model && describe(ctx.model) === describe(resolved.model)) {
+			sticky.set(requested, resolved.model);
+			inFlight = { alias: requested, model: resolved.model };
+			return;
+		}
+
+		if (!(await applyModel(ctx, resolved))) return;
+		sticky.set(requested, resolved.model);
+		inFlight = { alias: requested, model: resolved.model };
+		const suffix = resolved.candidateCount > 1 ? ` (1 of ${resolved.candidateCount})` : "";
+		ctx.ui.notify(`Model: ${describe(resolved.model)}${suffix} (alias "${requested}")`, "info");
 	});
 }

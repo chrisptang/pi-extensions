@@ -7,6 +7,7 @@ Give your models short names, switch with `/ma sonnet` instead of a full `provid
 ## ✨ Features
 
 - Maps short aliases onto `provider/model-id` references and switches the session model with `/ma <alias>`.
+- Starts a session on an alias with `pi --model <alias>`, which Pi alone would fuzzy-match to an unrelated model.
 - Lets one alias hold several candidates, picks one at random, and then keeps using it for the rest of the session.
 - Sidelines a candidate the provider rate-limits and rotates the alias onto another, honoring `retry-after`.
 - Runs a skill on its own model: `/skill:<name>` switches before expansion and restores the previous model once the agent settles.
@@ -57,6 +58,20 @@ Then switch models by name:
 ```
 
 Run `/ma` with no argument to list what is configured, and `/model-alias-reload` after editing the file.
+
+An alias also works as the startup model:
+
+```bash
+pi --model fast
+```
+
+## 🎬 Starting on an alias
+
+`pi --model <alias>` starts the session on that alias, applying the same candidate pick and thinking level as `/ma <alias>`.
+
+Pi resolves `--model` against its own catalog before any session exists, and that path takes no extension hook, so an alias name first fuzzy-matches whatever catalog model happens to look similar. The extension re-resolves the flag once the session starts and switches to the alias target, which is why startup may briefly report the model Pi matched before the alias takes over.
+
+A value that is not a configured alias is left to Pi untouched, so ordinary `--model` patterns and `provider/model-id` references keep working. An explicit `--provider` also defers to Pi, since that pairing addresses the catalog directly. When an alias has no candidate with usable credentials, the model Pi chose is kept and the reason is reported. Only the initial startup uses the flag; a later `/new`, `/resume`, or fork keeps whatever model the session is on.
 
 ## ⚙️ Settings
 
@@ -152,6 +167,7 @@ An alias name is accepted only as a lone target — mixing an alias name into a 
 - The previous model is restored at `agent_settled`, the idle boundary. A skill that leaves the agent busy holds the override until the run truly settles.
 - Restoring only re-applies a thinking level that was active beforehand; if none was set, the level a skill applied stays in effect.
 - A new or replaced session discards a pending restore.
+- `pi --model <alias>` corrects the model after Pi has already selected one, so the startup header can show Pi's own match for a moment, and an alias name that collides with a real model still resolves to the alias.
 
 ## 🗂️ Package layout
 
@@ -161,6 +177,7 @@ packages/pi-model-alias/
 │   ├── index.ts                       # Thin Pi entrypoint
 │   ├── model-alias.ts                 # Commands, skill interception, and restore
 │   ├── aliases.ts                     # Config loading, parsing, and resolution
+│   ├── cli-model.ts                   # Reads the startup `--model` value from argv
 │   └── cooldown.ts                    # Rate-limit cooldowns and retry-after parsing
 ├── dist/                              # Generated Jiti runtime
 ├── scripts/build-runtime.mjs          # Runtime builder
