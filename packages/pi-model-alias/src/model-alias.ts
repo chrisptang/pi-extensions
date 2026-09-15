@@ -44,6 +44,12 @@ export default function modelAlias(pi: ExtensionAPI): void {
 	 * a status but not a model, so this is what a rate limit gets attributed to.
 	 */
 	let inFlight: { alias: string; model: Model<Api> } | undefined;
+	/**
+	 * The model in use when `/new` was issued. Pi starts a fresh session on the
+	 * settings default rather than the outgoing session's model, so this is
+	 * re-applied once the replacement session is up.
+	 */
+	let carryOver: RestorePoint | undefined;
 
 	const aliases = (warn?: (message: string) => void): LoadedAliases => {
 		loaded ??= loadAliases(getAgentDir(), warn);
@@ -262,6 +268,19 @@ export default function modelAlias(pi: ExtensionAPI): void {
 		}
 	});
 
+	// ---------------------------------------------------------------------------
+	// Feature 5: `/new` keeps the current model.
+	//
+	// A new session has no transcript to restore a model from, so Pi falls back to
+	// the settings default. Capture the outgoing model here and re-apply it once
+	// the replacement session has started. "resume" restores from the target
+	// session's own transcript and needs nothing.
+	// ---------------------------------------------------------------------------
+	pi.on("session_before_switch", async (event, ctx) => {
+		if (event.reason !== "new" || !ctx.model) return;
+		carryOver = { model: ctx.model, thinkingLevel: ctx.thinkingLevel };
+	});
+
 	// A replaced session invalidates the restore point, the held picks, and the
 	// cooldowns, all of which are scoped to one session by design.
 	pi.on("session_start", async (event, ctx) => {
@@ -270,14 +289,25 @@ export default function modelAlias(pi: ExtensionAPI): void {
 		cooldowns.clear();
 		inFlight = undefined;
 
+		const carried = carryOver;
+		carryOver = undefined;
+		if (event.reason === "new" && carried) {
+			if (!ctx.model || describe(ctx.model) !== describe(carried.model)) {
+				await applyModel(ctx, carried);
+			} else if (carried.thinkingLevel) {
+				pi.setThinkingLevel(carried.thinkingLevel);
+			}
+			return;
+		}
+
 		// -----------------------------------------------------------------------
 		// Feature 4: `pi --model <alias>` starts the session on the alias.
 		//
 		// Pi resolves `--model` against its own catalog before any session exists,
 		// so an alias name gets fuzzy-matched to an unrelated model. Only "startup"
-		// carries a CLI argument; a later session replacement inherits its model
-		// from the session itself, so re-applying the flag there would override a
-		// model the user has since chosen.
+		// carries a CLI argument; "resume" and "fork" restore the model from the
+		// session transcript and "new" is handled above, so re-applying the flag
+		// there would override a model the user has since chosen.
 		// -----------------------------------------------------------------------
 		if (event.reason !== "startup") return;
 

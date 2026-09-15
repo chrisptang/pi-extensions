@@ -671,3 +671,72 @@ test("a session replacement does not re-apply the startup --model flag", async (
 
 	assert.deepEqual(harness.setModels, []);
 });
+
+test("/new re-applies the model of the outgoing session", async () => {
+	useAgentDir({ aliases: {} });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx, notifications } = createMockContext({
+		model: model("local", "chosen"),
+		thinkingLevel: "high",
+		modelRegistry: registryFor([{ provider: "local", id: "chosen" }]),
+	});
+
+	await harness.events.get("session_before_switch")?.[0]?.({ reason: "new" }, ctx);
+	// The replacement session comes up on the settings default.
+	ctx.model = model("local", "default");
+	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
+
+	assert.deepEqual(harness.setModels, [{ provider: "local", id: "chosen" }]);
+	assert.deepEqual(harness.thinkingLevels, ["high"]);
+	assert.equal(notifications.length, 0);
+});
+
+test("/new leaves the model alone when the new session already matches", async () => {
+	useAgentDir({ aliases: {} });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		model: model("local", "chosen"),
+		modelRegistry: registryFor([{ provider: "local", id: "chosen" }]),
+	});
+
+	await harness.events.get("session_before_switch")?.[0]?.({ reason: "new" }, ctx);
+	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
+
+	assert.deepEqual(harness.setModels, []);
+});
+
+test("the carried model is consumed by a single session start", async () => {
+	useAgentDir({ aliases: {} });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		model: model("local", "chosen"),
+		modelRegistry: registryFor([{ provider: "local", id: "chosen" }]),
+	});
+
+	await harness.events.get("session_before_switch")?.[0]?.({ reason: "new" }, ctx);
+	ctx.model = model("local", "default");
+	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
+	ctx.model = model("local", "default");
+	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
+
+	assert.deepEqual(harness.setModels, [{ provider: "local", id: "chosen" }]);
+});
+
+test("resuming a session does not carry the model over", async () => {
+	useAgentDir({ aliases: {} });
+	const harness = createMockPi();
+	modelAlias(harness.pi);
+	const { ctx } = createMockContext({
+		model: model("local", "chosen"),
+		modelRegistry: registryFor([{ provider: "local", id: "chosen" }]),
+	});
+
+	await harness.events.get("session_before_switch")?.[0]?.({ reason: "resume" }, ctx);
+	ctx.model = model("local", "restored");
+	await harness.events.get("session_start")?.[0]?.({ reason: "resume" }, ctx);
+
+	assert.deepEqual(harness.setModels, []);
+});

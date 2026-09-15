@@ -12,6 +12,7 @@ Give your models short names, switch with `/ma sonnet` instead of a full `provid
 - Sidelines a candidate the provider rate-limits and rotates the alias onto another, honoring `retry-after`.
 - Runs a skill on its own model: `/skill:<name>` switches before expansion and restores the previous model once the agent settles.
 - Attaches an optional thinking level to an alias, either as a field or as a `:high` suffix.
+- Keeps the current model and thinking level across `/new`, where Pi alone would fall back to the settings default.
 - Reloads definitions from disk with `/model-alias-reload`, no restart required.
 - Warns and keeps going on a malformed config rather than failing the session.
 
@@ -71,7 +72,11 @@ pi --model fast
 
 Pi resolves `--model` against its own catalog before any session exists, and that path takes no extension hook, so an alias name first fuzzy-matches whatever catalog model happens to look similar. The extension re-resolves the flag once the session starts and switches to the alias target, which is why startup may briefly report the model Pi matched before the alias takes over.
 
-A value that is not a configured alias is left to Pi untouched, so ordinary `--model` patterns and `provider/model-id` references keep working. An explicit `--provider` also defers to Pi, since that pairing addresses the catalog directly. When an alias has no candidate with usable credentials, the model Pi chose is kept and the reason is reported. Only the initial startup uses the flag; a later `/new`, `/resume`, or fork keeps whatever model the session is on.
+A value that is not a configured alias is left to Pi untouched, so ordinary `--model` patterns and `provider/model-id` references keep working. An explicit `--provider` also defers to Pi, since that pairing addresses the catalog directly. When an alias has no candidate with usable credentials, the model Pi chose is kept and the reason is reported. Only the initial startup uses the flag; `/resume` and fork restore the model from the session transcript, and `/new` carries over the model of the session it replaces (see below).
+
+## 🔁 Keeping the model across `/new`
+
+A fresh session has no transcript to restore a model from, so Pi starts it on the `defaultProvider`/`defaultModel` from settings, discarding whatever `/model` or `/ma` had selected. The extension captures the outgoing model and thinking level when `/new` is issued and re-applies them once the new session is up. Held alias picks and cooldowns are still session-scoped and start clean.
 
 ## ⚙️ Settings
 
