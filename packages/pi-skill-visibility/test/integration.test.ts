@@ -175,9 +175,17 @@ test("installed extension filters actual Pi prompt/completion, keeps files reada
 			assert.ok(markdown.includes("| unused | 0 | 0 | 0 | — | 当前可发现 |"));
 			const sections = markdown.split("## 窗口内未观察到使用，可考虑排除");
 			assert.equal(sections.length, 2);
-			assert.ok(!sections[0]!.includes("| unused |"));
-			assert.ok(sections[1]!.includes("| unused |"));
-			assert.deepEqual(JSON.parse(/```json\n([\s\S]*?)\n```/.exec(markdown)![1]!), ["unused"]);
+			const observedSection = sections[0];
+			const unusedSection = sections[1];
+			assert.ok(observedSection);
+			assert.ok(unusedSection);
+			assert.ok(!observedSection.includes("| unused |"));
+			assert.ok(unusedSection.includes("| unused |"));
+			const reportMatch = /```json\n([\s\S]*?)\n```/.exec(markdown);
+			assert.ok(reportMatch);
+			const suggestedSkills = reportMatch[1];
+			assert.ok(suggestedSkills);
+			assert.deepEqual(JSON.parse(suggestedSkills), ["unused"]);
 			assert.equal(session.messages.length, 0, "report must not enter LLM context");
 		}
 		await session.prompt("/skills-analysis -1");

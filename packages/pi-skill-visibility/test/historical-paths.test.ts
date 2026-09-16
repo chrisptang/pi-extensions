@@ -88,9 +88,11 @@ test("Pi session header and Claude message cwd attribute reads correctly; uncert
 			false,
 		);
 		assert.ok(result.sources.every((source) => source.warnings.length === 0));
-		assert.deepEqual(JSON.parse(/```json\n([\s\S]*?)\n```/.exec(formatReport(result))![1]!), [
-			"unused",
-		]);
+		const reportMatch = /```json\n([\s\S]*?)\n```/.exec(formatReport(result));
+		assert.ok(reportMatch);
+		const suggestedSkills = reportMatch[1];
+		assert.ok(suggestedSkills);
+		assert.deepEqual(JSON.parse(suggestedSkills), ["unused"]);
 		await writeFile(
 			join(pi, "unknown.jsonl"),
 			JSON.stringify({
@@ -100,8 +102,14 @@ test("Pi session header and Claude message cwd attribute reads correctly; uncert
 			}),
 		);
 		const uncertain = await analyzeSessions(options);
-		assert.ok(uncertain.sources[0]!.warnings.some((w) => w.includes("缺少可靠工作目录")));
-		assert.deepEqual(JSON.parse(/```json\n([\s\S]*?)\n```/.exec(formatReport(uncertain))![1]!), []);
+		const firstUncertainSource = uncertain.sources[0];
+		assert.ok(firstUncertainSource);
+		assert.ok(firstUncertainSource.warnings.some((w) => w.includes("缺少可靠工作目录")));
+		const uncertainReportMatch = /```json\n([\s\S]*?)\n```/.exec(formatReport(uncertain));
+		assert.ok(uncertainReportMatch);
+		const uncertainSuggestedSkills = uncertainReportMatch[1];
+		assert.ok(uncertainSuggestedSkills);
+		assert.deepEqual(JSON.parse(uncertainSuggestedSkills), []);
 	} finally {
 		await rm(dir, { recursive: true, force: true });
 	}

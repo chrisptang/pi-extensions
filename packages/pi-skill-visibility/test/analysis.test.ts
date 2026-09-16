@@ -38,7 +38,9 @@ test("three evidence kinds, exact names, duplicate mentions, tool outputs ignore
 		skills,
 		skills.map((s) => s.name),
 	);
-	assert.deepEqual([...evidence.get("review")!].sort(), ["invocation", "load", "mention"]);
+	const reviewEvidence = evidence.get("review");
+	assert.ok(reviewEvidence);
+	assert.deepEqual([...reviewEvidence].sort(), ["invocation", "load", "mention"]);
 	assert.ok(evidence.get("historic")?.has("invocation"));
 	assert.ok(evidence.get("claude-only")?.has("invocation"));
 	assert.ok(evidence.get("legacy")?.has("load"));
@@ -56,7 +58,9 @@ test("skip injected lists/reminders; expanded invocation does not count referenc
 		skills,
 		new Map([["review", 1]]).keys(),
 	);
-	assert.deepEqual([...claude.get("review")!].sort(), ["invocation", "mention"]);
+	const reviewEvidence = claude.get("review");
+	assert.ok(reviewEvidence);
+	assert.deepEqual([...reviewEvidence].sort(), ["invocation", "mention"]);
 });
 
 test("shell reads recognized, writes not counted as loads", () => {
@@ -143,13 +147,18 @@ test("JSONL scanning, window boundaries, duplicate replay, source quality and re
 			],
 		};
 		const result = await analyzeSessions(options);
-		const review = result.usage.find((row) => row.name === "review")!;
+		const review = result.usage.find((row) => row.name === "review");
+		assert.ok(review);
 		assert.equal(review.mention, 1);
 		assert.equal(review.invocation, 1);
 		assert.equal(review.lastUsed, new Date(now).toISOString());
-		assert.equal(result.sources[0]!.messages, 1);
+		const firstSource = result.sources[0];
+		assert.ok(firstSource);
+		assert.equal(firstSource.messages, 1);
 		assert.match(formatReport(result), /"unused"/);
-		assert.equal(result.usage.find((row) => row.name === "unused")!.lastUsed, undefined);
+		const unused = result.usage.find((row) => row.name === "unused");
+		assert.ok(unused);
+		assert.equal(unused.lastUsed, undefined);
 		await writeFile(
 			join(pi, "broken.jsonl"),
 			'broken\n{"type":"message","message":{"role":"user","content":"unused"}}\n',
@@ -158,8 +167,12 @@ test("JSONL scanning, window boundaries, duplicate replay, source quality and re
 			...options,
 			roots: [...options.roots, { source: "pi", root: join(dir, "missing") }],
 		});
-		assert.equal(bad.sources[0]!.invalid, 2);
-		assert.ok(bad.sources[2]!.warnings.length);
+		const firstBadSource = bad.sources[0];
+		const missingRootSource = bad.sources[2];
+		assert.ok(firstBadSource);
+		assert.ok(missingRootSource);
+		assert.equal(firstBadSource.invalid, 2);
+		assert.ok(missingRootSource.warnings.length);
 		assert.match(formatReport(bad), /本次不自动推荐/);
 		assert.match(formatReport(bad), /```json\n\[\]\n```/);
 	} finally {
