@@ -60,6 +60,20 @@ const emptySnapshot: AnalyticsSnapshot = {
 		cacheHitRate: 0,
 		models: [],
 	},
+	sessions: {
+		count: 0,
+		llmCalls: 0,
+		activeDays: 0,
+		totalDays: 0,
+		longestStreak: 0,
+		currentStreak: 0,
+		tokens: 0,
+		cost: 0,
+		averageDurationMs: 0,
+		longestDurationMs: 0,
+		projects: [],
+		days: [],
+	},
 };
 
 class FakeStore implements AnalyticsStorePort {

@@ -33,6 +33,10 @@ function useAgentDir(contents: object): string {
 
 const model = (provider: string, id: string) => ({ provider, id }) as never;
 
+function setContextModel(ctx: unknown, value: unknown): void {
+	(ctx as { model?: unknown }).model = value;
+}
+
 function registryFor(available: Array<{ provider: string; id: string }>, unauthed: string[] = []) {
 	return {
 		find: (provider: string, modelId: string) =>
@@ -328,7 +332,7 @@ test("a rate limit sidelines the candidate and switches to another", async () =>
 	await harness.commands.get("ma")?.handler("pool", ctx);
 	const first = harness.setModels.at(-1) as { id: string };
 	// The session is on the model the alias just picked, as it would be in a real run.
-	ctx.model = first as never;
+	setContextModel(ctx, first);
 
 	await harness.events.get("after_provider_response")?.[0]?.(
 		{ type: "after_provider_response", status: 429, headers: { "retry-after": "30" } },
@@ -353,7 +357,7 @@ test("the sidelined candidate is not drawn again while it cools down", async () 
 
 	await harness.commands.get("ma")?.handler("pool", ctx);
 	const first = harness.setModels.at(-1) as { id: string };
-	ctx.model = first as never;
+	setContextModel(ctx, first);
 	await harness.events.get("after_provider_response")?.[0]?.(
 		{ type: "after_provider_response", status: 429, headers: { "retry-after": "300" } },
 		ctx,
@@ -378,7 +382,7 @@ test("a successful response leaves the model alone", async () => {
 	});
 
 	await harness.commands.get("ma")?.handler("pool", ctx);
-	ctx.model = harness.setModels.at(-1) as never;
+	setContextModel(ctx, harness.setModels.at(-1));
 	await harness.events.get("after_provider_response")?.[0]?.(
 		{ type: "after_provider_response", status: 200, headers: {} },
 		ctx,
@@ -396,7 +400,7 @@ test("a rate limit on a single-candidate alias warns without switching", async (
 	});
 
 	await harness.commands.get("ma")?.handler("only", ctx);
-	ctx.model = harness.setModels.at(-1) as never;
+	setContextModel(ctx, harness.setModels.at(-1));
 	await harness.events.get("after_provider_response")?.[0]?.(
 		{ type: "after_provider_response", status: 429, headers: {} },
 		ctx,
@@ -419,7 +423,7 @@ test("a rate limit on a model the alias did not select is ignored", async () => 
 	});
 
 	await harness.commands.get("ma")?.handler("pool", ctx);
-	ctx.model = { provider: "other", id: "z" } as never;
+	setContextModel(ctx, { provider: "other", id: "z" });
 	await harness.events.get("after_provider_response")?.[0]?.(
 		{ type: "after_provider_response", status: 429, headers: {} },
 		ctx,
@@ -498,7 +502,7 @@ test("a new session releases held models and cooldowns", async () => {
 	});
 
 	await harness.commands.get("ma")?.handler("pool", ctx);
-	ctx.model = harness.setModels.at(-1) as never;
+	setContextModel(ctx, harness.setModels.at(-1));
 	await harness.events.get("after_provider_response")?.[0]?.(
 		{ type: "after_provider_response", status: 429, headers: { "retry-after": "600" } },
 		ctx,
@@ -566,7 +570,7 @@ test("pi --model <alias> starts the session on the aliased model", async () => {
 		]),
 	});
 	// Pi's own fuzzy match landed on an unrelated model that merely contains the name.
-	ctx.model = model("bedrock", "claude-sonnet");
+	setContextModel(ctx, model("bedrock", "claude-sonnet"));
 
 	await startupWithCliModel(harness, ctx, ["--model", "sonnet"]);
 
@@ -581,7 +585,7 @@ test("pi --model <alias> applies the alias thinking level", async () => {
 	const { ctx } = createMockContext({
 		modelRegistry: registryFor([{ provider: "local", id: "a" }]),
 	});
-	ctx.model = model("local", "other");
+	setContextModel(ctx, model("local", "other"));
 
 	await startupWithCliModel(harness, ctx, ["--model", "deep"]);
 
@@ -599,7 +603,7 @@ test("pi --model <alias> holds its pick so a later /ma stays on it", async () =>
 			{ provider: "local", id: "b" },
 		]),
 	});
-	ctx.model = model("local", "other");
+	setContextModel(ctx, model("local", "other"));
 
 	await startupWithCliModel(harness, ctx, ["--model", "pool"]);
 	const startupPick = harness.setModels.at(-1);
@@ -616,7 +620,7 @@ test("pi --model <model-id> leaves a non-alias value to Pi", async () => {
 	const { ctx } = createMockContext({
 		modelRegistry: registryFor([{ provider: "local", id: "a" }]),
 	});
-	ctx.model = model("local", "a");
+	setContextModel(ctx, model("local", "a"));
 
 	await startupWithCliModel(harness, ctx, ["--model", "local/a"]);
 
@@ -630,7 +634,7 @@ test("pi --model <alias> does not re-switch when Pi already picked the same mode
 	const { ctx } = createMockContext({
 		modelRegistry: registryFor([{ provider: "local", id: "terra" }]),
 	});
-	ctx.model = model("local", "terra");
+	setContextModel(ctx, model("local", "terra"));
 
 	await startupWithCliModel(harness, ctx, ["--model", "sonnet"]);
 
@@ -644,7 +648,7 @@ test("pi --model <alias> keeps the current model when no candidate is usable", a
 	const { ctx, notifications } = createMockContext({
 		modelRegistry: registryFor([{ provider: "local", id: "terra" }], ["local"]),
 	});
-	ctx.model = model("other", "fallback");
+	setContextModel(ctx, model("other", "fallback"));
 
 	await startupWithCliModel(harness, ctx, ["--model", "sonnet"]);
 
@@ -659,7 +663,7 @@ test("a session replacement does not re-apply the startup --model flag", async (
 	const { ctx } = createMockContext({
 		modelRegistry: registryFor([{ provider: "local", id: "terra" }]),
 	});
-	ctx.model = model("local", "chosen-later");
+	setContextModel(ctx, model("local", "chosen-later"));
 
 	const previous = process.argv;
 	process.argv = ["/usr/bin/node", "/usr/bin/pi", "--model", "sonnet"];
@@ -684,7 +688,7 @@ test("/new re-applies the model of the outgoing session", async () => {
 
 	await harness.events.get("session_before_switch")?.[0]?.({ reason: "new" }, ctx);
 	// The replacement session comes up on the settings default.
-	ctx.model = model("local", "default");
+	setContextModel(ctx, model("local", "default"));
 	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
 
 	assert.deepEqual(harness.setModels, [{ provider: "local", id: "chosen" }]);
@@ -717,9 +721,9 @@ test("the carried model is consumed by a single session start", async () => {
 	});
 
 	await harness.events.get("session_before_switch")?.[0]?.({ reason: "new" }, ctx);
-	ctx.model = model("local", "default");
+	setContextModel(ctx, model("local", "default"));
 	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
-	ctx.model = model("local", "default");
+	setContextModel(ctx, model("local", "default"));
 	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
 
 	assert.deepEqual(harness.setModels, [{ provider: "local", id: "chosen" }]);
@@ -735,7 +739,7 @@ test("resuming a session does not carry the model over", async () => {
 	});
 
 	await harness.events.get("session_before_switch")?.[0]?.({ reason: "resume" }, ctx);
-	ctx.model = model("local", "restored");
+	setContextModel(ctx, model("local", "restored"));
 	await harness.events.get("session_start")?.[0]?.({ reason: "resume" }, ctx);
 
 	assert.deepEqual(harness.setModels, []);
