@@ -6,6 +6,7 @@ import {
 	type InstructionOverrides,
 	instructionFilePath,
 } from "./instruction-overrides.js";
+import type { MainAgentController } from "./main-agent.js";
 import { sanitizeTerminalText } from "./text.js";
 
 /**
@@ -23,11 +24,12 @@ export function registerAgentsCommand(
 	pi: ExtensionAPI,
 	agents: AgentRegistry,
 	instructions: InstructionOverrides = emptyOverrides(),
+	mainAgent?: MainAgentController,
 ): void {
 	pi.registerCommand("agents", {
-		description: "List the subagent definitions in ~/.pi/agent/agents/",
+		description: "List the agent definitions in ~/.pi/agent/agents/ and the active main agent",
 		handler: async (_args, ctx) => {
-			ctx.ui.notify(sanitizeTerminalText(renderAgentList(agents, instructions)));
+			ctx.ui.notify(sanitizeTerminalText(renderAgentList(agents, instructions, mainAgent)));
 		},
 	});
 }
@@ -35,6 +37,7 @@ export function registerAgentsCommand(
 export function renderAgentList(
 	agents: AgentRegistry,
 	instructions: InstructionOverrides = emptyOverrides(),
+	mainAgent?: MainAgentController,
 ): string {
 	const directory = agentDirectories()[0].directory;
 	const definitions = agents.listPrimary();
@@ -45,11 +48,17 @@ export function renderAgentList(
 		lines.push(`Agents in ${directory}:`, "");
 		const width = Math.max(...definitions.map((definition) => definition.name.length));
 		for (const definition of definitions) {
-			lines.push(`  ${definition.name.padEnd(width)}  ${definition.description}`);
+			const role = definition.role === "main" ? " [main]" : "";
+			lines.push(`  ${definition.name.padEnd(width)}  ${definition.description}${role}`);
 		}
 	}
+	if (mainAgent) lines.push("", ...mainAgent.statusLines());
 	lines.push("", ...renderInstructionStatus(instructions));
-	const diagnostics = [...agents.primaryDiagnostics(), ...instructions.diagnostics];
+	const diagnostics = [
+		...agents.primaryDiagnostics(),
+		...instructions.diagnostics,
+		...(mainAgent?.diagnostics() ?? []),
+	];
 	if (diagnostics.length > 0) {
 		lines.push("", "Diagnostics:", ...diagnostics.map((line) => `  ${line}`));
 	}

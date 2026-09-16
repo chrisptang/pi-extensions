@@ -4,6 +4,7 @@ import { registerAgentsCommand } from "./agents-command.js";
 import { type SeedResult, seedBuiltinAgents } from "./builtin-agents.js";
 import { registerCompletionRenderer } from "./completion-renderer.js";
 import { loadInstructionOverrides } from "./instruction-overrides.js";
+import { type MainAgentDependencies, registerMainAgent } from "./main-agent.js";
 import { registerSubagentsPanelCommand } from "./panel.js";
 import type { SubagentRuntime } from "./runtime.js";
 import { registerSkillsCommand } from "./skills-command.js";
@@ -13,6 +14,7 @@ import { createSubagentWidgetController } from "./widget.js";
 export interface SubagentsDependencies extends SubagentToolsDependencies {
 	/** Injectable for tests; defaults to writing the built-ins into the Pi agent directory. */
 	seedAgents?: () => SeedResult | undefined;
+	mainAgent?: MainAgentDependencies;
 	/** Observer for the constructed runtime, so a test can drive it directly. */
 	onRuntime?: (runtime: SubagentRuntime) => void;
 }
@@ -32,7 +34,6 @@ export default function subagents(
 	const instructions = dependencies.instructions ?? loadInstructionOverrides();
 	const tools = registerSubagentTools(pi, { ...dependencies, agents, instructions });
 	dependencies.onRuntime?.(tools.runtime);
-	registerAgentsCommand(pi, agents, instructions);
 	registerSkillsCommand(pi, tools.skills);
 	const panel = registerSubagentsPanelCommand(tools.runtime);
 	pi.registerCommand(panel.name, panel.options);
@@ -51,6 +52,11 @@ export default function subagents(
 		if (generation !== sessionGeneration) return;
 		widget.start(ctx);
 	});
+
+	// Handlers run in registration order: the main agent must resolve after the
+	// `agents.reset()` above, so it reads the definitions on disk for this session.
+	const mainAgent = registerMainAgent(pi, agents, dependencies.mainAgent);
+	registerAgentsCommand(pi, agents, instructions, mainAgent);
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		if (ctx.sessionManager !== activeSession) return;

@@ -23,10 +23,18 @@ const THINKING_LEVEL_SET = new Set<string>(SUBAGENT_THINKING_LEVELS);
 export const AGENT_DIRECTORY_KINDS = ["pi", "claude", "agents"] as const;
 export type AgentDirectoryKind = (typeof AGENT_DIRECTORY_KINDS)[number];
 
+/**
+ * `main` marks a definition that describes the main session rather than a
+ * child: its body is appended to this session's system prompt through
+ * `--agent` or `mainAgent`, and `subagent_spawn` refuses to run it as a child.
+ */
+export type AgentRole = "subagent" | "main";
+
 export interface AgentDefinition {
 	/** Lower-cased lookup name, always matching the `name` frontmatter or filename. */
 	name: string;
 	description: string;
+	role: AgentRole;
 	/** Markdown body appended to the child's system prompt. */
 	body: string;
 	/** Alias or `provider/modelId`; resolved against the parent's registry at spawn time. */
@@ -151,10 +159,12 @@ function readAgentFile(
 	const tools = readTools(frontmatter?.tools, file, diagnostics);
 	const thinkingLevel = readThinkingLevel(frontmatter?.thinkingLevel, file, diagnostics);
 	const model = readString(frontmatter?.model);
+	const role = readRole(frontmatter?.role, file, diagnostics);
 
 	return {
 		name,
 		description: readDescription(frontmatter?.description, name),
+		role,
 		body,
 		...(model ? { model } : {}),
 		...(thinkingLevel ? { thinkingLevel } : {}),
@@ -216,6 +226,14 @@ function readThinkingLevel(
 		return undefined;
 	}
 	return level as SubagentThinkingLevel;
+}
+
+function readRole(value: unknown, file: string, diagnostics: string[]): AgentRole {
+	const role = readString(value)?.toLowerCase();
+	if (!role) return "subagent";
+	if (role === "main" || role === "subagent") return role;
+	diagnostics.push(`Agent ${file} has an invalid role ${role}; expected main or subagent.`);
+	return "subagent";
 }
 
 function readString(value: unknown): string | undefined {

@@ -135,10 +135,14 @@ function buildSpawnParameters(agents: AgentRegistry) {
 	);
 }
 
-/** Describe the loaded agents inline, so selecting one needs no extra tool call. */
+/**
+ * Describe the loaded agents inline, so selecting one needs no extra tool call.
+ * A `role: main` definition describes this session and is not offered as a child.
+ */
 function agentParameterDescription(agents: AgentRegistry): string {
 	const roster = agents
 		.listPrimary()
+		.filter((definition) => definition.role !== "main")
 		.map((definition) => `${definition.name} (${definition.description})`)
 		.join("; ");
 	const base =
@@ -447,6 +451,11 @@ function modelLookup(ctx: ExtensionContext): ModelCandidateLookup {
 
 function requireAgent(agents: AgentRegistry, requested: string): AgentDefinition {
 	const agent = agents.find(requested);
+	if (agent?.role === "main") {
+		throw new Error(
+			`Agent ${agent.name} has role: main; it describes the main session and cannot run as a child.`,
+		);
+	}
 	if (agent) return agent;
 	const known = agents.knownNames();
 	const available = known.length > 0 ? known.join(", ") : "none";

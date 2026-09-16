@@ -24,13 +24,13 @@ test("seeds the built-in definitions and parses them back", () => {
 	assert.deepEqual(result.backups, []);
 	assert.deepEqual(
 		result.created.map((file) => path.basename(file)),
-		["explorer.md", "builder.md"],
+		["explorer.md", "builder.md", "architect.md"],
 	);
 
 	process.env.PI_CODING_AGENT_DIR = directory;
 	const { agents, diagnostics } = discoverPrimaryAgents();
 	assert.deepEqual(diagnostics, []);
-	assert.deepEqual([...agents.keys()].sort(), ["builder", "explorer"]);
+	assert.deepEqual([...agents.keys()].sort(), ["architect", "builder", "explorer"]);
 	const explorer = agents.get("explorer");
 	assert.equal(explorer?.model, "haiku");
 	assert.deepEqual(explorer?.tools, ["read", "grep", "find", "ls", "bash"]);
@@ -39,6 +39,13 @@ test("seeds the built-in definitions and parses them back", () => {
 	const builder = agents.get("builder");
 	assert.equal(builder?.model, "sonnet");
 	assert.ok(builder?.tools.includes("edit"));
+	// The architect describes the main session: no child model, no child tools.
+	const architect = agents.get("architect");
+	assert.equal(architect?.role, "main");
+	assert.equal(architect?.model, undefined);
+	assert.equal(architect?.thinkingLevel, undefined);
+	assert.ok(architect?.body.includes("`explorer`") && architect.body.includes("`builder`"));
+	assert.equal(explorer?.role, "subagent");
 });
 
 test("replaces a stale definition so an upgrade always lands", () => {
@@ -91,7 +98,7 @@ test("a backup is never loaded as a definition", () => {
 	process.env.PI_CODING_AGENT_DIR = directory;
 	const { agents, diagnostics } = discoverPrimaryAgents();
 	assert.deepEqual(diagnostics, []);
-	assert.deepEqual([...agents.keys()].sort(), ["builder", "explorer"]);
+	assert.deepEqual([...agents.keys()].sort(), ["architect", "builder", "explorer"]);
 });
 
 test("leaves the user file in place when the backup cannot be written", () => {

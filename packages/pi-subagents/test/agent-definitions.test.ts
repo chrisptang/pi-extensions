@@ -80,6 +80,18 @@ test("unavailable tools are dropped with a diagnostic", () => {
 	assert.ok(diagnostics.some((line) => line.includes("teleport")));
 });
 
+test("role defaults to subagent, accepts main, and rejects anything else", () => {
+	const directory = path.join(root, "agents");
+	writeAgent(directory, "plain.md", "---\nname: plain\n---\n\nBody.\n");
+	writeAgent(directory, "lead.md", "---\nname: lead\nrole: Main\n---\n\nBody.\n");
+	writeAgent(directory, "odd.md", "---\nname: odd\nrole: sidekick\n---\n\nBody.\n");
+	const { agents, diagnostics } = discoverPrimaryAgents();
+	assert.equal(agents.get("plain")?.role, "subagent");
+	assert.equal(agents.get("lead")?.role, "main");
+	assert.equal(agents.get("odd")?.role, "subagent");
+	assert.ok(diagnostics.some((line) => line.includes("invalid role sidekick")));
+});
+
 test("an empty body is rejected", () => {
 	writeAgent(path.join(root, "agents"), "hollow.md", "---\nname: hollow\n---\n\n\n");
 	const { agents, diagnostics } = discoverPrimaryAgents();
@@ -92,10 +104,11 @@ test("primary discovery ignores the optional lookup directories", () => {
 	assert.deepEqual([...discoverPrimaryAgents().agents.keys()], []);
 });
 
-test("seeding writes both built-ins and restores a replaced one", () => {
+test("seeding writes the built-ins and restores a replaced one", () => {
 	const directory = path.join(root, "agents");
 	const first = seedBuiltinAgents(directory);
 	assert.deepEqual(first.created.map((file) => path.basename(file)).sort(), [
+		"architect.md",
 		"builder.md",
 		"explorer.md",
 	]);

@@ -25,7 +25,8 @@ This shapes the design rather than just the documentation. Jobs are one-way so t
 - Runs each job in an isolated Pi child process and returns its job ID immediately.
 - Tells the model to do the work itself by default, and names the three cases where a job is worth its cost.
 - Uses the task to define the child's specialization and the tool list to limit its capabilities.
-- Ships two built-in agent definitions, `explorer` and `builder`, seeded into `~/.pi/agent/agents/` and kept current on every load.
+- Ships three built-in agent definitions — `explorer`, `builder`, and the main-session `architect` — seeded into `~/.pi/agent/agents/` and kept current on every load.
+- Runs the main session as a `role: main` definition through `--agent <name>` or `mainAgent` in `~/.pi/agent/subagents.json`, so the session itself gets a persona, model, and thinking level.
 - Runs a skill inside a subagent through `skill_run`, keeping its instructions and intermediate work out of the main session.
 - Advertises only that directory's definitions, and resolves any other name on demand from `~/.claude/agents/` and `~/.agents/agents/`.
 - Runs a job blocking or in the background, where a background completion interrupts the main agent with the result.
@@ -198,6 +199,7 @@ You are a read-only codebase explorer.
 | `model` | No | Alias or `provider/modelId`, resolved by the parent at spawn time. |
 | `tools` | No | Default work tools for this agent. |
 | `thinkingLevel` | No | Default thinking level for this agent. |
+| `role` | No | `subagent` (default) or `main`. A `main` definition describes this session, not a child; see [Running the main session as an agent](#-running-the-main-session-as-an-agent). |
 
 The body, up to 50 KiB, becomes the child's system prompt, so `task` stays free for the caller's own instructions.
 
@@ -218,12 +220,15 @@ So a skill can name an agent the session never advertised, without every definit
 
 ### Built-in agents
 
-The extension writes `explorer.md` and `builder.md` into `~/.pi/agent/agents/`, keeping them current on every load.
+The extension writes `explorer.md`, `builder.md`, and `architect.md` into `~/.pi/agent/agents/`, keeping them current on every load.
 
-| Agent | Model | Tools | Purpose |
-| --- | --- | --- | --- |
-| `explorer` | `haiku` | `read`, `grep`, `find`, `ls`, `bash` | Read-only exploration that reports findings with `path:line` citations. |
-| `builder` | `sonnet` | `read`, `grep`, `find`, `ls`, `edit`, `write`, `bash` | Implements one specified change and verifies it before reporting. |
+| Agent | Role | Model | Tools | Purpose |
+| --- | --- | --- | --- | --- |
+| `explorer` | subagent | `haiku` | `read`, `grep`, `find`, `ls`, `bash` | Read-only exploration that reports findings with `path:line` citations. |
+| `builder` | subagent | `sonnet` | `read`, `grep`, `find`, `ls`, `edit`, `write`, `bash` | Implements one specified change and verifies it before reporting. |
+| `architect` | main | inherits | n/a | Runs the main session: answers the user, designs concrete architecture, writes `docs/specs/<feature>.md`, and sends `explorer` and `builder` the wide or heavy work. |
+
+`architect` is the one that pairs the other two. It is not a child — a child cannot spawn anything — but the persona the main session runs under when you start with `--agent architect` or set it as `mainAgent`. Its body tells the session to answer small requests directly, to design down to signatures and file boundaries before delegating, to keep a spec file per feature, and to verify every subagent report against the diff and a real check before ticking a task.
 
 `explorer` holds `bash` so the full read-only shell toolbox — `rg`, `sed -n`, `tree`, `git log` — is available to it; its body, not the tool list, is what keeps it read-only.
 
@@ -235,7 +240,7 @@ The replacement is not silent: the previous contents are copied to `explorer.md.
 The backup is a single stable path holding the most recently displaced version, so it does not accumulate a file per load, and a `.bak` is never loaded as a definition.
 If the backup cannot be written, the file is left untouched rather than clobbered.
 
-To customize, copy one to a new name — `my-explorer.md` — and spawn that instead; seeding only ever touches its own two filenames.
+To customize, copy one to a new name — `my-explorer.md` — and spawn that instead; seeding only ever touches its own three filenames.
 
 The `model` field is resolved against `~/.pi/agent/model-alias.json` when present, and otherwise treated as `provider/modelId`.
 An alias that does not resolve to a usable model falls back to the main agent's model and is reported as a job limitation rather than failing the spawn.
@@ -243,9 +248,35 @@ An alias that does not resolve to a usable model falls back to the main agent's 
 
 ### `/agents`
 
-`/agents` lists the definitions in `~/.pi/agent/agents/` with their descriptions and any parse diagnostics.
+`/agents` lists the definitions in `~/.pi/agent/agents/` with their descriptions and any parse diagnostics, marking a `role: main` definition with `[main]`.
 It never lists the fallback directories, so it reflects exactly what the session advertises.
-It also reports whether `~/.pi/agent/subagent_instruction.md` replaced any tool instructions, along with any diagnostics from parsing it.
+It also reports which main agent this session runs as, and whether `~/.pi/agent/subagent_instruction.md` replaced any tool instructions, along with any diagnostics from parsing either.
+
+## 🧑‍💻 Running the main session as an agent
+
+An agent definition normally describes a child. With `role: main` in its frontmatter it describes this session instead: its body is appended to the system prompt on every turn, and its `model` and `thinkingLevel`, when set, are applied when a fresh session starts.
+
+Pick the definition in one of two places:
+
+```bash
+pi --agent architect          # this session only
+pi --agent none               # ignore the configured default for this session
+```
+
+```json
+// ~/.pi/agent/subagents.json — the default for every session
+{ "mainAgent": "architect" }
+```
+
+`--agent` wins over the file. The name is resolved like a spawn's `agent` argument, so a definition that only exists in `~/.claude/agents/` or `~/.agents/agents/` works too.
+
+A `role: main` definition is left out of the `agent` parameter's roster, and `subagent_spawn` refuses it by name: a main-session persona that tells the model to delegate would be meaningless in a child, which cannot delegate at all. Its `tools` field is likewise ignored — the main session keeps every tool it has.
+
+The body is appended every turn rather than once, so it survives compaction and any other extension that rewrites the prompt. Because it is read from disk at session start, an edit to the definition applies to the next `/new` or restart.
+
+The `model` is applied on startup and `/new` only; a resumed or forked session keeps the model recorded in its transcript. An alias resolves through `~/.pi/agent/model-alias.json` exactly as it does for a child, and an unavailable model leaves the session's own model in place with a warning. The built-in `architect` sets no model, so it follows whatever the session would have used anyway.
+
+A name that no directory defines, or that names a subagent-role definition, is reported at session start and in `/agents`, and the session runs plain. A `subagents.json` that fails to parse is reported the same way.
 
 ## 📝 Customizing the tool instructions
 

@@ -119,7 +119,7 @@ test("registers five fixed main-agent tools with stable schemas and explicit lim
 		tools[0]?.parameters.properties?.background?.description?.includes("blocking"),
 		true,
 	);
-	assert.deepEqual([...mock.commands.keys()], ["agents", "skills", "subagents"]);
+	assert.deepEqual([...mock.commands.keys()], ["skills", "subagents", "agents"]);
 	const definitions = JSON.stringify(
 		tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
 	);
@@ -1048,6 +1048,7 @@ function skillDefinition(overrides: Partial<SkillDefinition> & { name: string })
 function agentDefinition(overrides: Partial<AgentDefinition> & { name: string }): AgentDefinition {
 	return {
 		description: `${overrides.name} description`,
+		role: "subagent",
 		body: `You are ${overrides.name}.`,
 		tools: ["read", "grep"],
 		source: `/agents/${overrides.name}.md`,
