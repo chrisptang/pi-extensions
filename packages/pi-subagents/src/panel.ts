@@ -13,8 +13,11 @@ import { TERMINAL_JOB_STATES } from "./types.js";
 
 /** Panel repaint cadence, matching the active-jobs widget. */
 export const PANEL_REFRESH_INTERVAL_MS = 1_000;
-/** Share of the terminal the overlay may occupy; mirrors `overlayOptions.maxHeight`. */
-const OVERLAY_HEIGHT_RATIO = 0.8;
+/**
+ * Share of the terminal the panel may occupy. It renders in the editor's slot,
+ * so the rest stays with the conversation above it.
+ */
+const PANEL_HEIGHT_RATIO = 0.4;
 /** Rows the panel never shrinks below, so a tiny terminal still shows something. */
 const MIN_BODY_ROWS = 3;
 /** Widest the agent-name column grows before it is truncated. */
@@ -40,8 +43,10 @@ export interface PanelTui {
  *
  * The command is the only entry point, so the panel is discoverable through the
  * command list and takes no keybinding the user may already have bound. It opens
- * an overlay that holds focus: the panel is a read-and-act surface, and typing
- * into the editor underneath while reading a live log would serve nobody.
+ * in the editor's slot and holds focus: the panel is a read-and-act surface,
+ * and typing into the editor while reading a live log would serve nobody.
+ * Rendering in place of the editor rather than as an overlay keeps the
+ * conversation above it visible, which is where the child's output lands.
  */
 export function registerSubagentsPanelCommand(runtime: SubagentRuntime): {
 	name: string;
@@ -64,7 +69,7 @@ export function registerSubagentsPanelCommand(runtime: SubagentRuntime): {
 /**
  * Show the panel, then act on what the human chose.
  *
- * Termination is confirmed outside the overlay rather than inside it, because a
+ * Termination is confirmed outside the panel rather than inside it, because a
  * confirmation rendered by the panel it is about would have to re-implement
  * focus and dismissal that `ctx.ui.confirm` already gets right.
  */
@@ -78,15 +83,7 @@ export async function openSubagentsPanel(
 	}
 	const exit = await ctx.ui.custom<PanelExit>(
 		(tui, theme, keybindings, done) => createPanelComponent(runtime, tui, theme, keybindings, done),
-		{
-			overlay: true,
-			overlayOptions: {
-				width: "80%",
-				minWidth: 48,
-				maxHeight: `${OVERLAY_HEIGHT_RATIO * 100}%`,
-				anchor: "center",
-			},
-		},
+		{ overlay: false },
 	);
 	const jobId = exit.kill;
 	if (jobId === undefined) return;
@@ -126,7 +123,7 @@ export interface PanelComponent {
 }
 
 /**
- * Build the overlay component.
+ * Build the panel component.
  *
  * The panel has two views: a job list, and the selected job's activity log
  * opened with Enter. Selection follows a job id rather than a list index, so a
@@ -153,7 +150,7 @@ export function createPanelComponent(
 	let unsubscribe: () => void = () => undefined;
 	let timer: ReturnType<typeof setInterval> | undefined;
 	// `dispose` runs only when the panel closes itself, so a session torn down
-	// underneath an open overlay would otherwise leave the timer and the
+	// underneath an open panel would otherwise leave the timer and the
 	// subscription behind. Teardown is therefore idempotent and also reachable
 	// from the refresh itself, which notices the session is gone.
 	const teardown = () => {
@@ -264,9 +261,9 @@ export function createPanelComponent(
 	};
 }
 
-/** Rows available inside the frame: the overlay's share of the terminal minus the two border rows. */
+/** Rows available inside the frame: the panel's share of the terminal minus the two border rows. */
 export function panelBodyRows(terminalRows: number): number {
-	return Math.max(MIN_BODY_ROWS, Math.floor(terminalRows * OVERLAY_HEIGHT_RATIO) - 2);
+	return Math.max(MIN_BODY_ROWS, Math.floor(terminalRows * PANEL_HEIGHT_RATIO) - 2);
 }
 
 /** Rows the detail log gets once the job's own lines and the rule are placed. */

@@ -394,6 +394,7 @@ Like `/agents`, it never lists the fallback directories.
 ## 👁️ Inspecting and terminating jobs
 
 Run `/subagents` in TUI mode to open the inspection panel.
+It takes the editor's place below the conversation rather than floating over it, so the output it describes stays readable while it is open.
 
 The panel opens on a list of every retained job, active and terminal, with its agent, description, state, and elapsed time.
 The key hints sit in the bottom border, and a list longer than the panel says how many jobs are above and below the window:

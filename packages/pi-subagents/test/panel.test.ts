@@ -206,7 +206,7 @@ test("every panel line stays within the render width", () => {
 		activity: [{ seq: 1, at: at(1, 2, 3), kind: "output", detail: "x".repeat(400) }],
 	};
 	// The bound is on rendered columns, not code units: the panel's own glyphs are
-	// multi-byte and a long detail line is truncated to fit the overlay.
+	// multi-byte and a long detail line is truncated to fit the panel.
 	for (const lines of [
 		renderListView([job], "job_a", identityTheme(), 48, 10),
 		renderDetailView(job, identityTheme(), 48, 10, undefined),
@@ -513,7 +513,7 @@ test("the panel stops refreshing once its session ends", async () => {
 	const component = panel(runtime, () => undefined, { requestRender: () => renders++ });
 	component.render(100);
 
-	// A shutdown while the overlay is open never calls dispose, so the panel has
+	// A shutdown while the panel is open never calls dispose, so the panel has
 	// to notice the session is gone and release its own timer and subscription.
 	await emit(mock, "session_shutdown", { reason: "quit" }, context.ctx);
 	activeSessions.length = 0;
