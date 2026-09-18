@@ -6,6 +6,14 @@
  * schemas need them whether or not children can send messages.
  */
 
+const ESC = "\u001b";
+const BEL = "\u0007";
+/** CSI (`ESC [ … m`) and OSC (`ESC ] … BEL` / `ESC ] … ESC \\`) sequences. */
+const TERMINAL_SEQUENCE = new RegExp(
+	`${ESC}\\[[0-?]*[ -/]*[@-~]|${ESC}\\][^${BEL}${ESC}]*(?:${BEL}|${ESC}\\\\)`,
+	"gu",
+);
+
 /** Bound on a job identifier, applied wherever one enters a tool schema. */
 export const MAX_IDENTIFIER_LENGTH = 128;
 
@@ -16,7 +24,9 @@ export const MAX_IDENTIFIER_LENGTH = 128;
  * layout the reader expects.
  */
 export function sanitizeTerminalText(value: string): string {
-	return [...value]
+	// Drop whole CSI and OSC sequences first: stripping only the escape byte would
+	// leave their parameters (`[1;32m`) behind as visible text.
+	return [...value.replace(TERMINAL_SEQUENCE, "")]
 		.filter((character) => {
 			const codePoint = character.codePointAt(0) ?? 0;
 			if (character === "\n" || character === "\t") return true;
@@ -27,4 +37,18 @@ export function sanitizeTerminalText(value: string): string {
 			);
 		})
 		.join("");
+}
+
+/**
+ * Format a duration for the panel and the widget: `42s`, `4m1s`, `5m`, `1h2m`.
+ * Both surfaces show the same job, so they must agree on the notation.
+ */
+export function formatDuration(seconds: number): string {
+	const whole = Math.max(0, Math.floor(seconds));
+	if (whole < 60) return `${whole}s`;
+	const hours = Math.floor(whole / 3_600);
+	const minutes = Math.floor((whole % 3_600) / 60);
+	const rest = whole % 60;
+	if (hours > 0) return `${hours}h${minutes > 0 ? `${minutes}m` : ""}`;
+	return `${minutes}m${rest > 0 ? `${rest}s` : ""}`;
 }

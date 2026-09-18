@@ -308,17 +308,12 @@ test("labels active jobs with their agent and description above the editor", asy
 		| undefined;
 	assert.equal(typeof factory, "function");
 	const lines = factory?.({}, identityTheme()).render(120) ?? [];
-	assert.equal(lines[0], "─".repeat(120));
-	assert.equal(lines[1], "Subagents · 2 active · /subagents to inspect or terminate");
-	assert.equal(
-		lines[2],
-		"▶ explorer · review auth middleware · running · 1m 5s / 2m · 7/50 turns · tools: read, edit",
-	);
+	// One compact line per job; no rules, so the widget costs as few rows as possible.
+	assert.equal(lines[0], "Subagents · 2 active · /subagents to inspect or terminate");
+	assert.equal(lines[1], "▶ explorer  review auth middleware  1m5s / 2m · 7/50 turns");
 	// A job spawned without an agent has only its id to identify it.
-	assert.equal(
-		lines[3],
-		`▶ ${String(second.details.jobId)} · test job · running · 0s / no timeout · 0/100 turns · tools: read, grep, find, ls`,
-	);
+	assert.equal(lines[2], `▶ ${String(second.details.jobId)}  test job  0s · 0/100 turns`);
+	assert.equal(lines.length, 3);
 	now = 66_000;
 	assert.ok(refreshWidget);
 	refreshWidget();
@@ -326,8 +321,8 @@ test("labels active jobs with their agent and description above the editor", asy
 		| ((_tui: unknown, theme: Theme) => Component)
 		| undefined;
 	const refreshedLines = refreshedFactory?.({}, identityTheme()).render(80) ?? [];
-	assert.match(refreshedLines[2] ?? "", /running · 1m 6s \/ 2m/u);
-	assert.match(refreshedLines[3] ?? "", /running · 1s \/ no timeout/u);
+	assert.match(refreshedLines[1] ?? "", / {2}1m6s \/ 2m · 7\/50 turns$/u);
+	assert.match(refreshedLines[2] ?? "", / {2}1s · 0\/100 turns$/u);
 	for (const line of refreshedFactory?.({}, identityTheme()).render(24) ?? []) {
 		assert.ok(visibleWidth(line) <= 24);
 	}

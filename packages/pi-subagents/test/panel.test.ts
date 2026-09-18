@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { KeybindingsManager, TUI_KEYBINDINGS, visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, test, vi } from "vitest";
 import { createMockContext, createMockPi } from "../../../test/support.js";
 import { AgentRegistry } from "../src/agent-registry.js";
-import { createPanelComponent, renderPanel } from "../src/panel.js";
+import { createPanelComponent, renderDetailView, renderListView } from "../src/panel.js";
 import type { PanelJob, SubagentRuntime } from "../src/runtime.js";
 import { SkillRegistry } from "../src/skill-registry.js";
 import subagents, { type SubagentsDependencies } from "../src/subagents.js";
@@ -40,155 +40,180 @@ test("registers /subagents alongside the existing commands", async () => {
 	assert.equal(command?.description, "Inspect running subagent jobs and terminate one");
 });
 
-test("panel lists active and terminal jobs with the selected job's activity", () => {
-	const jobs: PanelJob[] = [
-		{
-			jobId: "job_a",
-			agent: "explorer",
-			description: "review auth middleware",
-			state: "running",
-			createdAt: 0,
-			startedAt: 0,
-			elapsedMs: 42_000,
-			timeout: 120,
-			maxTurns: 100,
-			turns: 7,
-			tools: ["read", "grep"],
-			limitations: [],
-			droppedEvents: 0,
-			activity: [
-				{
-					seq: 1,
-					at: at(12, 4, 31),
-					kind: "tool",
-					tool: "read",
-					detail: "src/auth/mw.ts",
-					outcome: "ok",
-					result: "80 lines",
-				},
-				{
-					seq: 2,
-					at: at(12, 4, 35),
-					kind: "output",
-					detail: "The middleware verifies exp before refresh.",
-				},
-			],
-		},
-		{
-			jobId: "job_b",
-			agent: "builder",
-			description: "add cooldown tests",
-			state: "cancelled",
-			createdAt: 1,
-			startedAt: 1,
-			finishedAt: 62_001,
-			elapsedMs: 62_000,
-			turns: 0,
-			tools: ["read", "edit"],
-			error: "Subagent execution was cancelled by the user.",
-			limitations: [],
-			droppedEvents: 0,
-			activity: [],
-		},
-	];
-	const lines = renderPanel(jobs, "job_a", identityTheme(), 120);
-	assert.match(lines[0] ?? "", /Subagents · 1 active · 2 retained/u);
-	// The selected job carries the cursor; the other does not.
-	assert.match(lines[1] ?? "", /^❯ ▶ explorer/u);
-	assert.match(lines[1] ?? "", /review auth middleware\s+running\s+42s/u);
-	assert.match(lines[2] ?? "", /^ {2}✗ builder/u);
-	assert.match(lines[2] ?? "", /cancelled\s+1m2s/u);
-	// The detail heading names the job and what it was allowed to do.
+test("list view frames every retained job and marks the selection", () => {
+	const lines = renderListView(sampleJobs(), "job_a", identityTheme(), 100, 10);
+	assert.match(lines[0] ?? "", /^╭─ Subagents · 1 active · 2 total ─+╮$/u);
+	// The selected job carries the cursor and the other does not; both keep
+	// their description, state, and elapsed time.
+	assert.match(lines[1] ?? "", /^│ ❯ ▶ explorer {2}review auth middleware\s+running\s+42s │$/u);
+	assert.match(lines[2] ?? "", /^│ {3}✗ builder {3}add cooldown tests\s+cancelled\s+1m2s │$/u);
+	// The key hints live in the bottom border rather than costing a content row.
+	assert.equal(lines.length, 4);
+	assert.match(lines.at(-1) ?? "", /^╰─ ↑↓ select {2}⏎ open {2}k terminate {2}esc close ─+╯$/u);
+});
+
+test("list view keeps the selection visible and counts the jobs outside the window", () => {
+	const jobs: PanelJob[] = Array.from({ length: 12 }, (_, index) => ({
+		jobId: `job_${index}`,
+		agent: "explorer",
+		description: `task ${index}`,
+		state: index === 11 ? "running" : "completed",
+		createdAt: index,
+		elapsedMs: 0,
+		turns: 0,
+		tools: [],
+		limitations: [],
+		droppedEvents: 0,
+		activity: [],
+	}));
+	const theme = identityTheme();
+	// Selecting the last job used to let the `… more` marker overwrite its row.
+	const last = renderListView(jobs, "job_11", theme, 60, 6);
+	assert.equal(last.length, 8);
+	assert.match(last[1] ?? "", /^│ … 7 above/u);
+	assert.match(last[6] ?? "", /^│ ❯ ▶ explorer {2}task 11 /u);
+	const first = renderListView(jobs, "job_0", theme, 60, 6);
+	assert.match(first[1] ?? "", /^│ ❯ ✓ explorer {2}task 0 /u);
+	assert.match(first[6] ?? "", /^│ … 7 below/u);
+	// A selection in the middle gives up one row to each marker and keeps its height.
+	const middle = renderListView(jobs, "job_6", theme, 60, 6);
+	assert.equal(middle.length, 8);
+	assert.match(middle[1] ?? "", /^│ … \d+ above/u);
+	assert.ok(middle.some((line) => /^│ ❯ ✓ explorer {2}task 6 /u.test(line)));
+	assert.match(middle[6] ?? "", /^│ … \d+ below/u);
+});
+
+test("detail view shows the job's budget, meta line, and activity", () => {
+	const job = sampleJobs()[0] as PanelJob;
+	const lines = renderDetailView(job, identityTheme(), 100, 10, undefined);
+	assert.match(lines[0] ?? "", /^╭─ explorer · running · 42s \/ 2m · 7\/100 turns ─+╮$/u);
+	// The description leads the meta line; the id and tools follow it.
+	assert.match(lines[1] ?? "", /^│ review auth middleware {2}job_a · tools: read, grep\s+│$/u);
+	assert.match(lines[3] ?? "", /^│ 12:04:31 read {3}✓ src\/auth\/mw\.ts → 80 lines/u);
+	assert.match(lines[4] ?? "", /^│ 12:04:35 say {6}The middleware verifies exp before refresh\./u);
 	assert.match(
-		lines[3] ?? "",
-		/explorer · job_a · tools: read,grep · 120s timeout · 7\/100 turns/u,
+		lines.at(-1) ?? "",
+		/^╰─ ↑↓ scroll {2}PgUp\/PgDn page {2}←→ job {2}k terminate {2}esc back ─+╯$/u,
 	);
-	assert.match(lines[4] ?? "", /12:04:31 read\s+✓ src\/auth\/mw\.ts → 80 lines/u);
-	assert.match(lines[5] ?? "", /12:04:35 say\s+The middleware verifies exp before refresh\./u);
-	assert.match(lines.at(-1) ?? "", /↑↓ select\s+k terminate\s+esc close/u);
+});
+
+test("detail view keeps the tool column aligned across tool-name lengths", () => {
+	const job: PanelJob = {
+		...(sampleJobs()[0] as PanelJob),
+		activity: [
+			{ seq: 1, at: at(1, 0, 0), kind: "tool", tool: "read", detail: "a.ts", outcome: "ok" },
+			{ seq: 2, at: at(1, 0, 1), kind: "tool", tool: "write", detail: "b.ts", outcome: "error" },
+			{ seq: 3, at: at(1, 0, 2), kind: "tool", tool: "list_directory", detail: "src" },
+			{ seq: 4, at: at(1, 0, 3), kind: "output", detail: "done" },
+		],
+	};
+	const lines = renderDetailView(job, identityTheme(), 80, 10, undefined);
+	// Clock, a six-column label, a two-column outcome mark, then the detail.
+	assert.match(lines[3] ?? "", /^│ 01:00:00 read {3}✓ a\.ts/u);
+	assert.match(lines[4] ?? "", /^│ 01:00:01 write {2}✗ b\.ts/u);
+	// Truncating the name adds pi-tui's own style resets around the ellipsis.
+	assert.match((lines[5] ?? "").split("\u001b[0m").join(""), /^│ 01:00:02 list_… … src/u);
+	assert.match(lines[6] ?? "", /^│ 01:00:03 say {6}done/u);
+});
+
+test("detail view follows the newest event and scrolls to an explicit offset", () => {
+	const job: PanelJob = {
+		...(sampleJobs()[0] as PanelJob),
+		activity: Array.from({ length: 30 }, (_, index) => ({
+			seq: index + 1,
+			at: at(1, 0, index),
+			kind: "output" as const,
+			detail: `line ${index + 1}`,
+		})),
+	};
+	// 10 body rows leave 8 for the log: the meta line and the rule take the rest.
+	const tail = renderDetailView(job, identityTheme(), 80, 10, undefined);
+	assert.equal(tail.length, 12);
+	assert.ok(tail.some((line) => line.includes("line 30")));
+	assert.ok(!tail.some((line) => line.includes("line 22 ")));
+	// The scroll position sits at the right end of the bottom border.
+	assert.match(tail.at(-1) ?? "", /─ 23–30\/30 ─╯$/u);
+	const head = renderDetailView(job, identityTheme(), 80, 10, 0);
+	assert.ok(head.some((line) => line.includes("line 1 ")));
+	assert.ok(!head.some((line) => line.includes("line 9 ")));
+	assert.match(head.at(-1) ?? "", /─ 1–8\/30 ─╯$/u);
 });
 
 test("panel reports a terminal selection as not terminable", () => {
-	const lines = renderPanel(
-		[
-			{
-				jobId: "job_b",
-				state: "completed",
-				createdAt: 0,
-				elapsedMs: 1_000,
-				turns: 0,
-				tools: [],
-				limitations: [],
-				droppedEvents: 0,
-				activity: [],
-			},
-		],
-		"job_b",
-		identityTheme(),
-		80,
+	const job: PanelJob = {
+		jobId: "job_b",
+		state: "completed",
+		createdAt: 0,
+		elapsedMs: 1_000,
+		turns: 0,
+		tools: [],
+		limitations: [],
+		droppedEvents: 0,
+		activity: [],
+	};
+	assert.match(
+		renderListView([job], "job_b", identityTheme(), 80, 10).at(-1) ?? "",
+		/k terminate \(inactive\)/u,
 	);
-	assert.match(lines.at(-1) ?? "", /k terminate \(inactive\)/u);
-	assert.ok(lines.some((line) => line.includes("No activity recorded.")));
+	const detail = renderDetailView(job, identityTheme(), 80, 10, undefined);
+	assert.match(detail.at(-1) ?? "", /k terminate \(inactive\)/u);
+	assert.ok(detail.some((line) => line.includes("No activity recorded.")));
 });
 
-test("panel reports dropped events and a job's own limitations", () => {
-	const lines = renderPanel(
-		[
-			{
-				jobId: "job_a",
-				state: "running",
-				createdAt: 0,
-				elapsedMs: 0,
-				turns: 0,
-				tools: ["read"],
-				limitations: ["Agent model was unavailable; inherited the main model."],
-				droppedEvents: 37,
-				activity: [{ seq: 38, at: at(1, 2, 3), kind: "notice", detail: "Job started." }],
-			},
-		],
-		"job_a",
+test("detail view reports dropped events and a job's own limitations", () => {
+	const lines = renderDetailView(
+		{
+			jobId: "job_a",
+			state: "running",
+			createdAt: 0,
+			elapsedMs: 0,
+			turns: 0,
+			tools: ["read"],
+			limitations: ["Agent model was unavailable; inherited the main model."],
+			droppedEvents: 37,
+			activity: [{ seq: 38, at: at(1, 2, 3), kind: "notice", detail: "Job started." }],
+		},
 		identityTheme(),
 		100,
+		10,
+		undefined,
 	);
-	assert.ok(lines.some((line) => line.includes("… 37 earlier event(s) dropped")));
-	assert.ok(
-		lines.some((line) =>
-			line.includes("note: Agent model was unavailable; inherited the main model."),
-		),
-	);
+	// The limitation is a fact about the job, so it sits above the rule with the
+	// meta line rather than being appended to the chronological log.
+	assert.match(lines[2] ?? "", /^│ note: Agent model was unavailable; inherited the main model\./u);
+	assert.match(lines[3] ?? "", /^│ ─+ │$/u);
+	assert.match(lines[4] ?? "", /^│ … 37 earlier event\(s\) dropped/u);
 });
 
-test("panel renders an empty session without a detail section", () => {
-	const lines = renderPanel([], undefined, identityTheme(), 60);
+test("list view renders an empty session", () => {
+	const lines = renderListView([], undefined, identityTheme(), 60, 10);
 	assert.ok(lines.some((line) => line.includes("No subagent jobs in this session.")));
 	assert.match(lines.at(-1) ?? "", /k terminate \(inactive\)/u);
 });
 
 test("every panel line stays within the render width", () => {
-	const lines = renderPanel(
-		[
-			{
-				jobId: "job_a",
-				agent: "a".repeat(40),
-				description: "d".repeat(90),
-				state: "running",
-				createdAt: 0,
-				elapsedMs: 0,
-				turns: 0,
-				tools: ["read", "grep", "find", "ls", "bash"],
-				limitations: [],
-				droppedEvents: 0,
-				activity: [{ seq: 1, at: at(1, 2, 3), kind: "output", detail: "x".repeat(400) }],
-			},
-		],
-		"job_a",
-		identityTheme(),
-		48,
-	);
+	const job: PanelJob = {
+		jobId: "job_a",
+		agent: "a".repeat(40),
+		description: "d".repeat(90),
+		state: "running",
+		createdAt: 0,
+		elapsedMs: 0,
+		turns: 0,
+		tools: ["read", "grep", "find", "ls", "bash"],
+		limitations: [],
+		droppedEvents: 0,
+		activity: [{ seq: 1, at: at(1, 2, 3), kind: "output", detail: "x".repeat(400) }],
+	};
 	// The bound is on rendered columns, not code units: the panel's own glyphs are
 	// multi-byte and a long detail line is truncated to fit the overlay.
-	for (const line of lines) {
-		assert.ok(visibleWidth(line) <= 48, `line too wide: ${visibleWidth(line)}`);
+	for (const lines of [
+		renderListView([job], "job_a", identityTheme(), 48, 10),
+		renderDetailView(job, identityTheme(), 48, 10, undefined),
+	]) {
+		for (const line of lines) {
+			assert.equal(visibleWidth(line), 48, `line width ${visibleWidth(line)}: ${line}`);
+		}
 	}
 });
 
@@ -356,23 +381,46 @@ test("the panel selects the first active job and moves with the arrow keys", asy
 	const first = await spawnJob(mock, context, "alpha");
 	const second = await spawnJob(mock, context, "beta");
 	await Promise.resolve();
-	const tui = { requestRender: () => renders++ };
 	let renders = 0;
-	const component = createPanelComponent(runtimeOf(mock), tui, identityTheme(), () => undefined);
+	const component = panel(runtimeOf(mock), () => undefined, { requestRender: () => renders++ });
 	try {
 		// The first render lands on the oldest active job.
-		assert.match(component.render(100)[1] ?? "", /^❯ /u);
-		assert.ok(component.render(100).some((line) => line.includes(String(first.details.jobId))));
-		component.handleInput("\u001b[B");
-		assert.ok(component.render(100).some((line) => line.includes(String(second.details.jobId))));
+		assert.match(component.render(100)[1] ?? "", /^│ ❯ /u);
+		assert.ok(component.render(100)[1]?.includes(String(first.details.jobId)));
+		component.handleInput(KEYS.down);
+		assert.ok(component.render(100)[2]?.includes(String(second.details.jobId)));
+		assert.match(component.render(100)[2] ?? "", /^│ ❯ /u);
 		assert.ok(renders > 0, "expected the selection change to request a render");
 		// Moving past the end stays on the last job rather than wrapping or crashing.
-		component.handleInput("\u001b[B");
-		component.handleInput("\u001b[B");
-		assert.ok(component.render(100).some((line) => line.includes(String(second.details.jobId))));
+		component.handleInput(KEYS.down);
+		component.handleInput(KEYS.down);
+		assert.match(component.render(100)[2] ?? "", /^│ ❯ /u);
 	} finally {
 		component.dispose();
 	}
+});
+
+test("keys are recognised under the Kitty keyboard protocol", async () => {
+	const { mock, context } = await setup({ runChild: neverSettles });
+	await spawnJob(mock, context, "alpha");
+	const second = await spawnJob(mock, context, "beta");
+	await Promise.resolve();
+	const runtime = runtimeOf(mock);
+
+	const closed: Array<{ kill?: string }> = [];
+	const moving = panel(runtime, (result) => closed.push(result));
+	moving.render(100);
+	moving.handleInput(KITTY.down);
+	assert.match(moving.render(100)[2] ?? "", /^│ ❯ /u);
+	moving.handleInput(KITTY.escape);
+	assert.deepEqual(closed, [{}]);
+
+	const killed: Array<{ kill?: string }> = [];
+	const killing = panel(runtime, (result) => killed.push(result));
+	killing.render(100);
+	killing.handleInput(KITTY.down);
+	killing.handleInput(KITTY.k);
+	assert.deepEqual(killed, [{ kill: String(second.details.jobId) }]);
 });
 
 test("escape closes the panel and k reports the job to terminate", async () => {
@@ -382,23 +430,50 @@ test("escape closes the panel and k reports the job to terminate", async () => {
 	const runtime = runtimeOf(mock);
 
 	const closed: Array<{ kill?: string }> = [];
-	const closing = createPanelComponent(runtime, noopTui(), identityTheme(), (result) =>
-		closed.push(result),
-	);
+	const closing = panel(runtime, (result) => closed.push(result));
 	closing.render(100);
-	closing.handleInput("\u001b");
+	closing.handleInput(KEYS.escape);
 	assert.deepEqual(closed, [{}]);
 	// A closed panel ignores further input rather than reporting twice.
 	closing.handleInput("k");
 	assert.equal(closed.length, 1);
 
 	const killed: Array<{ kill?: string }> = [];
-	const killing = createPanelComponent(runtime, noopTui(), identityTheme(), (result) =>
-		killed.push(result),
-	);
+	const killing = panel(runtime, (result) => killed.push(result));
 	killing.render(100);
 	killing.handleInput("k");
 	assert.deepEqual(killed, [{ kill: String(spawned.details.jobId) }]);
+});
+
+test("enter opens the detail view, arrows switch jobs there, and escape returns to the list", async () => {
+	const { mock, context } = await setup({ runChild: neverSettles });
+	const first = await spawnJob(mock, context, "alpha");
+	const second = await spawnJob(mock, context, "beta");
+	await Promise.resolve();
+	const closed: Array<{ kill?: string }> = [];
+	const component = panel(runtimeOf(mock), (result) => closed.push(result));
+	try {
+		component.render(100);
+		component.handleInput(KEYS.enter);
+		let lines = component.render(100);
+		assert.match(lines[0] ?? "", /^╭─ .* · running · /u);
+		assert.ok(lines[1]?.includes(String(first.details.jobId)));
+		component.handleInput(KEYS.right);
+		lines = component.render(100);
+		assert.ok(lines[1]?.includes(String(second.details.jobId)));
+		// Escape goes back to the list rather than closing the panel outright.
+		component.handleInput(KEYS.escape);
+		assert.deepEqual(closed, []);
+		lines = component.render(100);
+		assert.match(lines[0] ?? "", /^╭─ Subagents · 2 active/u);
+		assert.match(lines[2] ?? "", /^│ ❯ /u);
+		// Ctrl+C closes from anywhere.
+		component.handleInput(KEYS.enter);
+		component.handleInput("\u0003");
+		assert.deepEqual(closed, [{}]);
+	} finally {
+		component.dispose();
+	}
 });
 
 test("k does nothing when the selected job is already terminal", async () => {
@@ -419,9 +494,7 @@ test("k does nothing when the selected job is already terminal", async () => {
 		context.ctx,
 	);
 	const results: Array<{ kill?: string }> = [];
-	const component = createPanelComponent(runtimeOf(mock), noopTui(), identityTheme(), (result) =>
-		results.push(result),
-	);
+	const component = panel(runtimeOf(mock), (result) => results.push(result));
 	try {
 		component.render(100);
 		component.handleInput("k");
@@ -437,12 +510,7 @@ test("the panel stops refreshing once its session ends", async () => {
 	await Promise.resolve();
 	const runtime = runtimeOf(mock);
 	let renders = 0;
-	const component = createPanelComponent(
-		runtime,
-		{ requestRender: () => renders++ },
-		identityTheme(),
-		() => undefined,
-	);
+	const component = panel(runtime, () => undefined, { requestRender: () => renders++ });
 	component.render(100);
 
 	// A shutdown while the overlay is open never calls dispose, so the panel has
@@ -464,8 +532,86 @@ function at(hours: number, minutes: number, seconds: number): number {
 	return date.getTime();
 }
 
-function noopTui() {
-	return { requestRender: () => undefined };
+/** Legacy terminal encodings, which `matchesKey` also accepts. */
+const KEYS = {
+	down: "\u001b[B",
+	right: "\u001b[C",
+	enter: "\r",
+	escape: "\u001b",
+};
+
+/** Kitty keyboard protocol encodings, which the old raw comparisons never matched. */
+const KITTY = {
+	down: "\u001b[B",
+	escape: "\u001b[27u",
+	k: "\u001b[107u",
+};
+
+function panel(
+	runtime: SubagentRuntime,
+	done: (result: { kill?: string }) => void,
+	tui: { requestRender: () => void } = { requestRender: () => undefined },
+) {
+	return createPanelComponent(
+		runtime,
+		{ ...tui, terminal: { rows: 30 } },
+		identityTheme(),
+		new KeybindingsManager(TUI_KEYBINDINGS),
+		done,
+	);
+}
+
+function sampleJobs(): PanelJob[] {
+	return [
+		{
+			jobId: "job_a",
+			agent: "explorer",
+			description: "review auth middleware",
+			state: "running",
+			createdAt: 0,
+			startedAt: 0,
+			elapsedMs: 42_000,
+			timeout: 120,
+			maxTurns: 100,
+			turns: 7,
+			tools: ["read", "grep"],
+			limitations: [],
+			droppedEvents: 0,
+			activity: [
+				{
+					seq: 1,
+					at: at(12, 4, 31),
+					kind: "tool",
+					tool: "read",
+					detail: "src/auth/mw.ts",
+					outcome: "ok",
+					result: "80 lines",
+				},
+				{
+					seq: 2,
+					at: at(12, 4, 35),
+					kind: "output",
+					detail: "The middleware verifies exp before refresh.",
+				},
+			],
+		},
+		{
+			jobId: "job_b",
+			agent: "builder",
+			description: "add cooldown tests",
+			state: "cancelled",
+			createdAt: 1,
+			startedAt: 1,
+			finishedAt: 62_001,
+			elapsedMs: 62_000,
+			turns: 0,
+			tools: ["read", "edit"],
+			error: "Subagent execution was cancelled by the user.",
+			limitations: [],
+			droppedEvents: 0,
+			activity: [],
+		},
+	];
 }
 
 const neverSettles = (request: ChildRequest): Promise<ChildResult> =>
@@ -481,7 +627,11 @@ const neverSettles = (request: ChildRequest): Promise<ChildResult> =>
 	});
 
 function identityTheme(): Theme {
-	return { fg: (_role: string, text: string) => text } as Theme;
+	return {
+		fg: (_role: string, text: string) => text,
+		bg: (_role: string, text: string) => text,
+		bold: (text: string) => text,
+	} as Theme;
 }
 
 function tool(mock: Mock, name: string): RegisteredTool {

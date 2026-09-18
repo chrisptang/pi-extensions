@@ -1,23 +1,39 @@
 import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import {
+	Key,
+	type KeybindingsManager,
+	matchesKey,
+	truncateToWidth,
+	visibleWidth,
+} from "@earendil-works/pi-tui";
 import type { ActivityEvent } from "./activity.js";
 import type { PanelJob, SubagentRuntime } from "./runtime.js";
-import { sanitizeTerminalText } from "./text.js";
+import { formatDuration, sanitizeTerminalText } from "./text.js";
 import { TERMINAL_JOB_STATES } from "./types.js";
 
 /** Panel repaint cadence, matching the active-jobs widget. */
 export const PANEL_REFRESH_INTERVAL_MS = 1_000;
-/** Rows the job list may occupy before it scrolls. */
-const MAX_LIST_ROWS = 8;
-const MIN_ACTIVITY_ROWS = 3;
-
-/** Keys the panel handles. Everything else is ignored so it cannot be typed into. */
-const KEY_UP = "\u001b[A";
-const KEY_DOWN = "\u001b[B";
-const KEY_ESCAPE = "\u001b";
-const KEY_CTRL_C = "\u0003";
+/** Share of the terminal the overlay may occupy; mirrors `overlayOptions.maxHeight`. */
+const OVERLAY_HEIGHT_RATIO = 0.8;
+/** Rows the panel never shrinks below, so a tiny terminal still shows something. */
+const MIN_BODY_ROWS = 3;
+/** Widest the agent-name column grows before it is truncated. */
+const MAX_NAME_COLUMNS = 16;
+/** Frame glyphs: `│ ` on the left and ` │` on the right. */
+const FRAME_COLUMNS = 4;
+/** Width of the tool-name column in the activity log; longer names are truncated. */
+const TOOL_COLUMNS = 6;
 
 type PanelExit = { kill?: string };
+type PanelView = "list" | "detail";
+/** A footer hint: the key, then what it does. */
+type Hint = readonly [key: string, description: string];
+
+/** The slice of the TUI the panel needs: repaints and the terminal height. */
+export interface PanelTui {
+	requestRender(): void;
+	terminal: { rows: number };
+}
 
 /**
  * Register `/subagents`.
@@ -61,10 +77,15 @@ export async function openSubagentsPanel(
 		return;
 	}
 	const exit = await ctx.ui.custom<PanelExit>(
-		(tui, theme, _keybindings, done) => createPanelComponent(runtime, tui, theme, done),
+		(tui, theme, keybindings, done) => createPanelComponent(runtime, tui, theme, keybindings, done),
 		{
 			overlay: true,
-			overlayOptions: { width: "80%", minWidth: 48, maxHeight: "80%", anchor: "center" },
+			overlayOptions: {
+				width: "80%",
+				minWidth: 48,
+				maxHeight: `${OVERLAY_HEIGHT_RATIO * 100}%`,
+				anchor: "center",
+			},
 		},
 	);
 	const jobId = exit.kill;
@@ -107,17 +128,27 @@ export interface PanelComponent {
 /**
  * Build the overlay component.
  *
- * Selection follows a job id rather than a list index, so a job finishing or
- * being pruned while the panel is open cannot silently move the cursor onto a
- * different job than the one the reader was looking at.
+ * The panel has two views: a job list, and the selected job's activity log
+ * opened with Enter. Selection follows a job id rather than a list index, so a
+ * job finishing or being pruned while the panel is open cannot silently move
+ * the cursor onto a different job than the one the reader was looking at.
+ *
+ * Keys are matched through Pi's keybindings and `matchesKey` rather than raw
+ * escape sequences, so they work under the Kitty keyboard protocol too.
  */
 export function createPanelComponent(
 	runtime: SubagentRuntime,
-	tui: { requestRender(): void },
+	tui: PanelTui,
 	theme: Theme,
+	keybindings: KeybindingsManager,
 	done: (result: PanelExit) => void,
 ): PanelComponent {
+	let view: PanelView = "list";
 	let selectedJobId: string | undefined;
+	// Detail scroll position. `undefined` follows the newest event, which is
+	// what a reader opening a live log wants; scrolling up pins the offset until
+	// the reader scrolls back to the end.
+	let scrollTop: number | undefined;
 	let finished = false;
 	let unsubscribe: () => void = () => undefined;
 	let timer: ReturnType<typeof setInterval> | undefined;
@@ -148,6 +179,24 @@ export function createPanelComponent(
 		teardown();
 		done(result);
 	};
+	const bodyRows = () => panelBodyRows(tui.terminal.rows);
+	const selectJob = (jobs: readonly PanelJob[], index: number) => {
+		selectedJobId = jobs[Math.min(jobs.length - 1, Math.max(0, index))]?.jobId;
+		scrollTop = undefined;
+	};
+	const terminateSelected = (jobs: readonly PanelJob[]) => {
+		const job = jobs.find((candidate) => candidate.jobId === selectedJobId);
+		// Only an active job is offered for termination; a terminal one has
+		// nothing left to release.
+		if (job && !TERMINAL_JOB_STATES.has(job.state)) finish({ kill: job.jobId });
+	};
+	const scrollDetail = (job: PanelJob, delta: number) => {
+		const total = detailLogLines(job, theme).length;
+		const maxTop = Math.max(0, total - detailLogRows(bodyRows(), job));
+		const current = scrollTop ?? maxTop;
+		const next = Math.min(maxTop, Math.max(0, current + delta));
+		scrollTop = next >= maxTop ? undefined : next;
+	};
 
 	return {
 		invalidate() {},
@@ -158,31 +207,56 @@ export function createPanelComponent(
 				selectedJobId =
 					jobs.find((job) => !TERMINAL_JOB_STATES.has(job.state))?.jobId ?? jobs.at(-1)?.jobId;
 			}
-			return renderPanel(jobs, selectedJobId, theme, width);
+			const selected = jobs.find((job) => job.jobId === selectedJobId);
+			if (view === "detail" && selected) {
+				return renderDetailView(selected, theme, width, bodyRows(), scrollTop);
+			}
+			view = "list";
+			return renderListView(jobs, selectedJobId, theme, width, bodyRows());
 		},
 		handleInput(data) {
-			if (data === KEY_ESCAPE || data === KEY_CTRL_C) {
+			if (finished) return;
+			if (matchesKey(data, Key.ctrl("c"))) {
 				finish({});
 				return;
 			}
 			const jobs = runtime.panelJobs();
-			if (jobs.length === 0) return;
-			if (data === KEY_UP || data === KEY_DOWN) {
-				const index = jobs.findIndex((job) => job.jobId === selectedJobId);
-				const next = Math.min(
-					jobs.length - 1,
-					Math.max(0, (index < 0 ? 0 : index) + (data === KEY_DOWN ? 1 : -1)),
-				);
-				selectedJobId = jobs[next]?.jobId;
+			const index = jobs.findIndex((job) => job.jobId === selectedJobId);
+			const selected = jobs[index];
+			if (view === "detail" && selected) {
+				if (keybindings.matches(data, "tui.select.cancel")) {
+					view = "list";
+					scrollTop = undefined;
+				} else if (keybindings.matches(data, "tui.select.up")) scrollDetail(selected, -1);
+				else if (keybindings.matches(data, "tui.select.down")) scrollDetail(selected, 1);
+				else if (keybindings.matches(data, "tui.select.pageUp")) {
+					scrollDetail(selected, -detailLogRows(bodyRows(), selected));
+				} else if (keybindings.matches(data, "tui.select.pageDown")) {
+					scrollDetail(selected, detailLogRows(bodyRows(), selected));
+				} else if (matchesKey(data, Key.left)) selectJob(jobs, index - 1);
+				else if (matchesKey(data, Key.right)) selectJob(jobs, index + 1);
+				else if (matchesKey(data, "k") || matchesKey(data, "shift+k")) {
+					terminateSelected(jobs);
+					return;
+				} else return;
 				repaint();
 				return;
 			}
-			if (data === "k" || data === "K") {
-				const job = jobs.find((candidate) => candidate.jobId === selectedJobId);
-				// Only an active job is offered for termination; a terminal one has
-				// nothing left to release.
-				if (job && !TERMINAL_JOB_STATES.has(job.state)) finish({ kill: job.jobId });
+			if (keybindings.matches(data, "tui.select.cancel")) {
+				finish({});
+				return;
 			}
+			if (jobs.length === 0) return;
+			if (keybindings.matches(data, "tui.select.up")) selectJob(jobs, index - 1);
+			else if (keybindings.matches(data, "tui.select.down")) selectJob(jobs, index + 1);
+			else if (keybindings.matches(data, "tui.select.confirm")) {
+				view = "detail";
+				scrollTop = undefined;
+			} else if (matchesKey(data, "k") || matchesKey(data, "shift+k")) {
+				terminateSelected(jobs);
+				return;
+			} else return;
+			repaint();
 		},
 		dispose() {
 			teardown();
@@ -190,136 +264,220 @@ export function createPanelComponent(
 	};
 }
 
-export function renderPanel(
+/** Rows available inside the frame: the overlay's share of the terminal minus the two border rows. */
+export function panelBodyRows(terminalRows: number): number {
+	return Math.max(MIN_BODY_ROWS, Math.floor(terminalRows * OVERLAY_HEIGHT_RATIO) - 2);
+}
+
+/** Rows the detail log gets once the job's own lines and the rule are placed. */
+function detailLogRows(bodyRows: number, job: PanelJob): number {
+	return Math.max(1, bodyRows - jobLines(job).length - 1);
+}
+
+/**
+ * Render the job list inside a frame.
+ *
+ * The panel shows terminal jobs alongside active ones so a cancelled or failed
+ * child can still be reviewed, which is the reason the record is kept at all.
+ * The list scrolls to keep the selection visible, and says how many jobs sit
+ * above and below the window so the selection is never silently replaced.
+ */
+export function renderListView(
 	jobs: readonly PanelJob[],
 	selectedJobId: string | undefined,
 	theme: Theme,
 	width: number,
+	bodyRows: number,
 ): string[] {
-	const renderWidth = Math.max(24, width);
 	const active = jobs.filter((job) => !TERMINAL_JOB_STATES.has(job.state)).length;
-	const lines: string[] = [
-		heading(`Subagents · ${active} active · ${jobs.length} retained`, theme, renderWidth),
-	];
+	const inner = innerWidth(width);
+	const body: string[] = [];
 	if (jobs.length === 0) {
-		lines.push(theme.fg("muted", "  No subagent jobs in this session."));
+		body.push(theme.fg("muted", "No subagent jobs in this session."));
 	} else {
-		lines.push(...renderJobList(jobs, selectedJobId, theme));
+		const index = Math.max(
+			0,
+			jobs.findIndex((job) => job.jobId === selectedJobId),
+		);
+		const { start, end } = listWindow(jobs.length, index, bodyRows);
+		const visible = jobs.slice(start, end);
+		const nameWidth = Math.min(
+			MAX_NAME_COLUMNS,
+			Math.max(...visible.map((job) => visibleWidth(sanitizeLabel(jobTitle(job))))),
+		);
+		if (start > 0) body.push(theme.fg("dim", `… ${start} above`));
+		body.push(
+			...visible.map((job) =>
+				renderJobRow(job, job.jobId === selectedJobId, nameWidth, inner, theme),
+			),
+		);
+		if (end < jobs.length) body.push(theme.fg("dim", `… ${jobs.length - end} below`));
 	}
 	const selected = jobs.find((job) => job.jobId === selectedJobId);
-	if (selected) {
-		lines.push(heading(detailTitle(selected), theme, renderWidth));
-		lines.push(...renderActivity(selected, theme));
-	}
-	lines.push(
-		theme.fg("borderMuted", "─".repeat(renderWidth)),
-		theme.fg("muted", keyHint(selected)),
-	);
-	return lines.map((line) => truncateToWidth(line, renderWidth, "…"));
-}
-
-function keyHint(selected: PanelJob | undefined): string {
 	const killable = selected !== undefined && !TERMINAL_JOB_STATES.has(selected.state);
-	return `  ↑↓ select   ${killable ? "k terminate" : "k terminate (inactive)"}   esc close`;
-}
-
-function heading(title: string, theme: Theme, width: number): string {
-	const label = ` ${sanitizeLabel(title)} `;
-	const rule = Math.max(0, width - label.length - 2);
-	return `${theme.fg("borderMuted", "──")}${theme.fg("accent", label)}${theme.fg("borderMuted", "─".repeat(rule))}`;
+	const hints: Hint[] = [
+		["↑↓", "select"],
+		["⏎", "open"],
+		["k", killable ? "terminate" : "terminate (inactive)"],
+		["esc", "close"],
+	];
+	const title =
+		theme.fg("accent", theme.bold("Subagents")) +
+		theme.fg("muted", ` · ${active} active · ${jobs.length} total`);
+	return frame(title, body, renderHints(hints, theme), "", theme, width);
 }
 
 /**
- * Render the job list, scrolled to keep the selection visible.
- *
- * The panel shows terminal jobs alongside active ones so a cancelled or failed
- * child can still be reviewed, which is the reason the record is kept at all.
+ * The slice of jobs to show and keep the selection inside. A window that is not
+ * at either end gives up one row on each side to the `… N above/below` markers,
+ * so the frame keeps its height while the reader scrolls.
  */
-function renderJobList(
-	jobs: readonly PanelJob[],
-	selectedJobId: string | undefined,
+function listWindow(total: number, index: number, rows: number): { start: number; end: number } {
+	if (total <= rows) return { start: 0, end: total };
+	const edge = Math.max(1, rows - 1);
+	if (index < edge) return { start: 0, end: edge };
+	if (index >= total - edge) return { start: total - edge, end: total };
+	const middle = Math.max(1, rows - 2);
+	const start = Math.min(total - middle - 1, Math.max(1, index - Math.floor(middle / 2)));
+	return { start, end: start + middle };
+}
+
+function renderJobRow(
+	job: PanelJob,
+	selected: boolean,
+	nameWidth: number,
+	inner: number,
 	theme: Theme,
+): string {
+	const state = job.state.padEnd(9);
+	const elapsed = formatDuration(job.elapsedMs / 1_000).padStart(6);
+	// Fixed parts: cursor(2) symbol(2) name gap(2) description gap(2) state gap(2) elapsed.
+	const fixed = 2 + 2 + nameWidth + 2 + 2 + state.length + 2 + elapsed.length;
+	const descriptionWidth = Math.max(0, inner - fixed);
+	const name = fit(sanitizeLabel(jobTitle(job)), nameWidth);
+	const description = fit(sanitizeLabel(job.description ?? ""), descriptionWidth);
+	const cursor = selected ? theme.fg("accent", "❯ ") : "  ";
+	const symbol = theme.fg(stateColor(job.state), `${stateSymbol(job.state)} `);
+	// The description is what tells two jobs of the same agent apart, so it is
+	// the row's primary text and the agent name reads as its category.
+	const row =
+		`${cursor}${symbol}${theme.fg("muted", name)}  ${theme.fg("text", description)}  ` +
+		`${theme.fg(stateColor(job.state), state)}  ${theme.fg("dim", elapsed)}`;
+	return selected ? theme.bg("selectedBg", theme.bold(padToWidth(row, inner))) : row;
+}
+
+/**
+ * Render one job's activity log inside a frame.
+ *
+ * The job's own facts (description, id, tools, error, limitations) sit above the
+ * rule; below it is the chronological log, which follows the newest event unless
+ * the reader scrolled up. The eviction notice at its head makes the bounded
+ * retention explicit instead of letting the log look complete.
+ */
+export function renderDetailView(
+	job: PanelJob,
+	theme: Theme,
+	width: number,
+	bodyRows: number,
+	scrollTop: number | undefined,
 ): string[] {
-	const index = Math.max(
-		0,
-		jobs.findIndex((job) => job.jobId === selectedJobId),
+	const log = detailLogLines(job, theme);
+	const rows = detailLogRows(bodyRows, job);
+	const maxTop = Math.max(0, log.length - rows);
+	const top = Math.min(maxTop, scrollTop ?? maxTop);
+	const visible = log.slice(top, top + rows);
+	const body = [
+		...jobLines(job).map(([role, line]) => theme.fg(role, line)),
+		theme.fg("borderMuted", "─".repeat(innerWidth(width))),
+		...visible,
+	];
+	const killable = !TERMINAL_JOB_STATES.has(job.state);
+	const position =
+		log.length > rows ? `${top + 1}–${Math.min(log.length, top + rows)}/${log.length}` : "";
+	const hints: Hint[] = [
+		["↑↓", "scroll"],
+		["PgUp/PgDn", "page"],
+		["←→", "job"],
+		["k", killable ? "terminate" : "terminate (inactive)"],
+		["esc", "back"],
+	];
+	return frame(
+		detailTitle(job, theme),
+		body,
+		renderHints(hints, theme),
+		position ? theme.fg("dim", position) : "",
+		theme,
+		width,
 	);
-	const start = Math.min(
-		Math.max(0, index - Math.floor(MAX_LIST_ROWS / 2)),
-		Math.max(0, jobs.length - MAX_LIST_ROWS),
+}
+
+function detailTitle(job: PanelJob, theme: Theme): string {
+	const elapsed = formatDuration(job.elapsedMs / 1_000);
+	const budget =
+		job.timeout === undefined ? elapsed : `${elapsed} / ${formatDuration(job.timeout)}`;
+	const turns =
+		job.maxTurns === undefined ? `${job.turns} turns` : `${job.turns}/${job.maxTurns} turns`;
+	const separator = theme.fg("muted", " · ");
+	return (
+		theme.fg("accent", theme.bold(sanitizeLabel(jobTitle(job)))) +
+		separator +
+		theme.fg(stateColor(job.state), job.state) +
+		separator +
+		theme.fg("muted", `${budget} · ${turns}`)
 	);
-	const visible = jobs.slice(start, start + MAX_LIST_ROWS);
-	const lines = visible.map((job) => renderJobRow(job, job.jobId === selectedJobId, theme));
-	const hidden = jobs.length - visible.length;
-	if (hidden > 0) lines.push(theme.fg("dim", `  … ${hidden} more job(s)`));
+}
+
+type JobLine = readonly [role: "text" | "dim" | "error" | "warning", line: string];
+
+/** The job-level lines shown above the rule: what it is, then what went wrong. */
+function jobLines(job: PanelJob): JobLine[] {
+	const tools = job.tools.length > 0 ? job.tools.map(sanitizeLabel).join(", ") : "none";
+	const identity = `${job.jobId} · tools: ${tools}`;
+	const lines: JobLine[] = [
+		job.description
+			? ["text", `${sanitizeLabel(job.description)}  ${identity}`]
+			: ["dim", identity],
+	];
+	if (job.error) lines.push(["error", `error: ${sanitizeLabel(job.error)}`]);
+	for (const limitation of job.limitations) {
+		lines.push(["warning", `note: ${sanitizeLabel(limitation)}`]);
+	}
 	return lines;
 }
 
-function renderJobRow(job: PanelJob, selected: boolean, theme: Theme): string {
-	const cursor = selected ? theme.fg("accent", "❯ ") : "  ";
-	const symbol = theme.fg(stateColor(job.state), `${stateSymbol(job.state)} `);
-	const title = sanitizeLabel(jobTitle(job)).padEnd(14).slice(0, 14);
-	const description = sanitizeLabel(job.description ?? "")
-		.padEnd(26)
-		.slice(0, 26);
-	const state = job.state.padEnd(16);
-	const elapsed = formatDuration(job.elapsedMs);
-	return (
-		`${cursor}${symbol}${theme.fg(selected ? "text" : "muted", title)} ` +
-		`${theme.fg("muted", description)} ` +
-		`${theme.fg(stateColor(job.state), state)} ${theme.fg("dim", elapsed)}`
-	);
-}
-
-function detailTitle(job: PanelJob): string {
-	const tools = job.tools.length > 0 ? job.tools.join(",") : "none";
-	const timeout = job.timeout === undefined ? "no timeout" : `${job.timeout}s timeout`;
-	const turns =
-		job.maxTurns === undefined ? `${job.turns} turns` : `${job.turns}/${job.maxTurns} turns`;
-	return `${jobTitle(job)} · ${job.jobId} · tools: ${tools} · ${timeout} · ${turns}`;
-}
-
-/**
- * Render the selected job's activity, newest last.
- *
- * The tail is shown rather than the head: a reader opening the panel wants to
- * know what the child is doing now, and the eviction notice above it makes the
- * bounded retention explicit instead of letting the log look complete.
- */
-function renderActivity(job: PanelJob, theme: Theme): string[] {
+function detailLogLines(job: PanelJob, theme: Theme): string[] {
 	const lines: string[] = [];
 	if (job.droppedEvents > 0) {
-		lines.push(theme.fg("dim", `  … ${job.droppedEvents} earlier event(s) dropped`));
+		lines.push(theme.fg("dim", `… ${job.droppedEvents} earlier event(s) dropped`));
 	}
-	const visible = job.activity.slice(-Math.max(MIN_ACTIVITY_ROWS, 12));
-	if (visible.length === 0) {
+	if (job.activity.length === 0) {
 		lines.push(
 			theme.fg(
 				"muted",
 				TERMINAL_JOB_STATES.has(job.state)
-					? "  No activity recorded."
-					: "  Waiting for the child to start…",
+					? "No activity recorded."
+					: "Waiting for the child to start…",
 			),
 		);
 	} else {
-		lines.push(...visible.map((event) => renderActivityEvent(event, theme)));
-	}
-	if (job.error) lines.push(theme.fg("error", `  error: ${sanitizeLabel(job.error)}`));
-	for (const limitation of job.limitations) {
-		lines.push(theme.fg("warning", `  note: ${sanitizeLabel(limitation)}`));
+		lines.push(...job.activity.map((event) => renderActivityEvent(event, theme)));
 	}
 	return lines;
 }
 
+/**
+ * One log line: clock, a fixed-width label column, a two-column outcome mark,
+ * then the detail. The columns are fixed so `read`, `write`, and `say` line up.
+ */
 function renderActivityEvent(event: ActivityEvent, theme: Theme): string {
 	const at = theme.fg("dim", formatClock(event.at));
 	if (event.kind === "output") {
-		return `  ${at} ${theme.fg("accent", "say ")}   ${theme.fg("text", event.detail)}`;
+		return `${at} ${theme.fg("accent", fit("say", TOOL_COLUMNS))}   ${theme.fg("text", event.detail)}`;
 	}
 	if (event.kind === "notice") {
-		return `  ${at} ${theme.fg("muted", "note")}   ${theme.fg("muted", event.detail)}`;
+		return `${at} ${theme.fg("muted", fit("note", TOOL_COLUMNS))}   ${theme.fg("muted", event.detail)}`;
 	}
-	const tool = theme.fg("toolTitle", (event.tool ?? "tool").padEnd(4).slice(0, 8));
+	const tool = theme.fg("toolTitle", fit(event.tool ?? "tool", TOOL_COLUMNS));
 	const outcome =
 		event.outcome === undefined
 			? theme.fg("dim", " …")
@@ -327,7 +485,69 @@ function renderActivityEvent(event: ActivityEvent, theme: Theme): string {
 				? theme.fg("error", " ✗")
 				: theme.fg("success", " ✓");
 	const result = event.result ? theme.fg("toolOutput", ` → ${event.result}`) : "";
-	return `  ${at} ${tool}${outcome} ${theme.fg("muted", event.detail)}${result}`;
+	return `${at} ${tool}${outcome} ${theme.fg("muted", event.detail)}${result}`;
+}
+
+/**
+ * Wrap body lines in a rounded frame with the title in the top border and the
+ * key hints in the bottom one, so neither costs a content row. Every line is
+ * truncated to the frame, so a long detail can never break the border.
+ */
+function frame(
+	title: string,
+	body: readonly string[],
+	hints: string,
+	trailing: string,
+	theme: Theme,
+	width: number,
+): string[] {
+	const renderWidth = Math.max(24, width);
+	const inner = innerWidth(renderWidth);
+	const row = (line: string) =>
+		`${theme.fg("borderMuted", "│ ")}${padToWidth(truncateToWidth(line, inner, "…"), inner)}${theme.fg("borderMuted", " │")}`;
+	return [
+		border("╭", title, "", "╮", theme, renderWidth),
+		...body.map(row),
+		border("╰", hints, trailing, "╯", theme, renderWidth),
+	];
+}
+
+/** A border row: `╭─ label ───── trailing ─╮`, with the rule filling the gap. */
+function border(
+	left: string,
+	label: string,
+	trailing: string,
+	right: string,
+	theme: Theme,
+	width: number,
+): string {
+	const tail = trailing ? ` ${trailing} ─` : "";
+	const tailWidth = visibleWidth(tail);
+	// `╭─` and `╮` plus at least one rule glyph before the trailing text.
+	const labelWidth = Math.max(0, Math.min(visibleWidth(label) + 2, width - 3 - tailWidth - 1));
+	const text = labelWidth > 0 ? truncateToWidth(` ${label} `, labelWidth, "…") : "";
+	const rule = "─".repeat(Math.max(0, width - 3 - visibleWidth(text) - tailWidth));
+	return (
+		theme.fg("borderMuted", `${left}─`) + text + theme.fg("borderMuted", `${rule}${tail}${right}`)
+	);
+}
+
+function renderHints(hints: readonly Hint[], theme: Theme): string {
+	return hints
+		.map(([key, description]) => `${theme.fg("dim", key)} ${theme.fg("muted", description)}`)
+		.join("  ");
+}
+
+function innerWidth(width: number): number {
+	return Math.max(1, Math.max(24, width) - FRAME_COLUMNS);
+}
+
+function fit(value: string, columns: number): string {
+	return padToWidth(truncateToWidth(value, columns, "…"), columns);
+}
+
+function padToWidth(value: string, columns: number): string {
+	return value + " ".repeat(Math.max(0, columns - visibleWidth(value)));
 }
 
 function jobTitle(job: PanelJob): string {
@@ -379,12 +599,4 @@ function formatClock(at: number): string {
 	const date = new Date(at);
 	const pad = (value: number) => String(value).padStart(2, "0");
 	return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
-function formatDuration(elapsedMs: number): string {
-	const seconds = Math.max(0, Math.floor(elapsedMs / 1_000));
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m${seconds % 60}s`;
-	return `${Math.floor(minutes / 60)}h${minutes % 60}m`;
 }

@@ -127,7 +127,7 @@ Subagents do not have this tool, or any other `subagent_*` tool.
 
 Opens the inspection panel in TUI mode. Other modes report that the panel is unavailable and do nothing.
 
-The panel lists every retained job with its agent, description, state, and elapsed time, and shows the selected job's `jobId`, work tools, timeout, turns used against its budget, and live activity. `↑↓` selects, `k` terminates after a confirmation, and `esc` closes.
+The panel lists every retained job with its agent, description, state, and elapsed time, and says how many jobs sit outside the visible window. `↑↓` selects, `Enter` opens the selected job's description, `jobId`, work tools, errors and limitations, timeout, turns used against its budget, and scrollable live activity, `←→` switches jobs inside that view, `k` terminates after a confirmation, `esc` goes back or closes, and `Ctrl+C` closes from anywhere. Navigation follows Pi's `tui.select.*` keybindings.
 
 The activity record holds tool calls with summarized arguments, their outcome and result summary, the child's visible assistant text, and lifecycle notices. It never holds the child's thinking, which is not forwarded out of the child process at all.
 

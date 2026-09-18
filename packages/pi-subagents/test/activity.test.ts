@@ -52,8 +52,9 @@ test("collapses a display line to one row within the byte budget", () => {
 	const long = toDisplayLine("x".repeat(MAX_ACTIVITY_TEXT_BYTES * 2));
 	assert.ok(Buffer.byteLength(long, "utf8") <= MAX_ACTIVITY_TEXT_BYTES);
 	assert.ok(long.endsWith("… [truncated]"));
-	// Terminal control sequences never survive into a rendered line.
-	assert.equal(toDisplayLine("a[31mbc"), "a[31mbc");
+	// Terminal control sequences never survive into a rendered line, and a
+	// colour sequence goes whole rather than leaving its `[31m` behind.
+	assert.equal(toDisplayLine("a[31mbc"), "abc");
 });
 
 test("summarizes each known tool by what it acts on, never by file body", () => {

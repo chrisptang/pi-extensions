@@ -1,7 +1,7 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { ActiveJobDisplay, SubagentRuntime } from "./runtime.js";
-import { sanitizeTerminalText } from "./text.js";
+import { formatDuration, sanitizeTerminalText } from "./text.js";
 
 export const SUBAGENT_WIDGET_KEY = "subagents";
 export const SUBAGENT_WIDGET_REFRESH_INTERVAL_MS = 1_000;
@@ -78,29 +78,41 @@ export function renderSubagentWidget(
 ): string[] {
 	const renderWidth = Math.max(0, width);
 	const lines = [
-		theme.fg("borderMuted", "─".repeat(renderWidth)),
-		theme.fg("muted", `Subagents · ${jobs.length} active · /subagents to inspect or terminate`),
-		...jobs.flatMap((job) => renderJob(job, theme)),
+		`${theme.fg("muted", `Subagents · ${jobs.length} active`)}${theme.fg("dim", " · /subagents to inspect or terminate")}`,
+		...jobs.map((job) => renderJob(job, theme)),
 	];
-	return lines.map((line) => truncateToWidth(line, renderWidth, ""));
+	return lines.map((line) => truncateToWidth(line, renderWidth, "…"));
 }
 
-function renderJob(job: ActiveJobDisplay, theme: Theme): string[] {
+/**
+ * One line per job in three groups: what it is (state, name, description), how
+ * much of its budget it has used, and what it is doing now. Two spaces separate
+ * the groups and `›` marks the activity, so a glance can find each without
+ * reading the whole line. The activity comes last because it is the only part
+ * that changes every second, and a tail is what a glance reads.
+ */
+function renderJob(job: ActiveJobDisplay, theme: Theme): string {
 	const running = job.state === "running";
 	const symbol = theme.fg(running ? "accent" : "dim", running ? "▶ " : "○ ");
-	const state = theme.fg(running ? "accent" : "muted", job.state);
-	const title = theme.fg("text", jobTitle(job));
 	const summary = jobSummary(job);
-	const tools = job.tools.length > 0 ? job.tools.map(sanitizeLabel).join(", ") : "none";
-	const timeout = job.timeout === undefined ? "no timeout" : formatSeconds(job.timeout);
+	const elapsed = formatDuration(job.elapsedMs / 1_000);
+	const budget =
+		job.timeout === undefined ? elapsed : `${elapsed} / ${formatDuration(job.timeout)}`;
 	const turns =
 		job.maxTurns === undefined ? `${job.turns} turns` : `${job.turns}/${job.maxTurns} turns`;
-	const detail = ` · ${formatSeconds(Math.floor(job.elapsedMs / 1_000))} / ${timeout} · ${turns} · tools: ${tools}`;
-	const summaryPart = summary ? theme.fg("muted", ` · ${summary}`) : "";
-	const header = `${symbol}${title}${summaryPart} · ${state}${theme.fg("muted", detail)}`;
-	// The activity line is already sanitized and redacted by the runtime's log.
-	const activity = job.latestActivity === undefined ? undefined : sanitizeLabel(job.latestActivity);
-	return activity ? [header, `    ${theme.fg("dim", activity)}`] : [header];
+	const what = [
+		`${symbol}${theme.fg("muted", jobTitle(job))}`,
+		summary ? theme.fg("text", summary) : undefined,
+	];
+	const parts = [
+		...what,
+		running ? theme.fg("dim", `${budget} · ${turns}`) : theme.fg("muted", job.state),
+		// The activity line is already sanitized and redacted by the runtime's log.
+		job.latestActivity === undefined
+			? undefined
+			: theme.fg("dim", `› ${sanitizeLabel(job.latestActivity)}`),
+	];
+	return parts.filter((part) => part !== undefined).join("  ");
 }
 
 /** Prefer the agent name; a job without one is only identifiable by its id. */
@@ -128,20 +140,4 @@ function cloneDisplayJob(job: ActiveJobDisplay): ActiveJobDisplay {
 
 function sanitizeLabel(value: string): string {
 	return sanitizeTerminalText(value).replace(/\s+/gu, " ").trim();
-}
-
-function formatSeconds(value: number): string {
-	if (value < 60) return `${formatNumber(value)}s`;
-	const wholeSeconds = Math.floor(value);
-	const hours = Math.floor(wholeSeconds / 3_600);
-	const minutes = Math.floor((wholeSeconds % 3_600) / 60);
-	const seconds = wholeSeconds % 60;
-	if (hours > 0) return `${hours}h${minutes > 0 ? ` ${minutes}m` : ""}`;
-	return `${minutes}m${seconds > 0 ? ` ${seconds}s` : ""}`;
-}
-
-function formatNumber(value: number): string {
-	return Number.isInteger(value)
-		? String(value)
-		: value.toFixed(3).replace(/0+$/u, "").replace(/\.$/u, "");
 }

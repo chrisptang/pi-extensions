@@ -92,7 +92,7 @@ While a job runs you can watch it and stop it, but you cannot talk to it. If a c
 
 Completion messages follow Pi's global tool-output expansion state and the `app.tools.expand` binding (`Ctrl+O` by default).
 
-In TUI mode, the above-editor widget shows each queued or running job's ID, state, elapsed time, timeout, turns used against its budget, selected work tools, and its most recent activity line.
+In TUI mode, the above-editor widget shows one line per queued or running job: its agent or ID, description, elapsed time against its timeout, turns used against its budget, and its most recent activity line.
 The widget disappears when no jobs remain active, and clears when the session ends.
 
 Run `/subagents` for the full inspection panel. See [Inspecting and terminating jobs](#-inspecting-and-terminating-jobs).
@@ -395,23 +395,33 @@ Like `/agents`, it never lists the fallback directories.
 
 Run `/subagents` in TUI mode to open the inspection panel.
 
-The panel lists every retained job, active and terminal, with its agent, description, state, and elapsed time.
-Selecting a job shows its `jobId`, selected work tools, timeout, turns used against its budget, and its activity as the child produces it:
+The panel opens on a list of every retained job, active and terminal, with its agent, description, state, and elapsed time.
+The key hints sit in the bottom border, and a list longer than the panel says how many jobs are above and below the window:
 
 ```
-── Subagents · 2 active · 3 retained ───────────────────────────────
-❯ ▶ explorer      review auth middleware    running    42s
-  ○ builder       add cooldown tests        queued      0s
-  ✓ skill:xmind   parse the test cases      completed  3m1s
-── explorer · job_m2x1_3 · tools: read,grep · 120s timeout · 7/100 turns ──
-  12:04:31 read  ✓ src/auth/middleware.ts → 80 lines
-  12:04:33 grep  ✓ "verifyToken" src/ → 7 matches
-  12:04:35 say     The middleware verifies exp before refresh.
-───────────────────────────────────────────────────────────────────
-  ↑↓ select   k terminate   esc close
+╭─ Subagents · 2 active · 3 total ───────────────────────────────────╮
+│ ❯ ▶ explorer     review auth middleware          running      42s  │
+│   ○ builder      add cooldown tests              queued        0s  │
+│   ✓ skill:xmind  parse the test cases            completed   3m1s  │
+╰─ ↑↓ select  ⏎ open  k terminate  esc close ────────────────────────╯
 ```
 
-`↑↓` selects a job, `k` starts termination, and `esc` closes the panel.
+`Enter` opens the selected job: its description, `jobId`, and selected work tools above a rule, any error or limitation beside them, and below the rule its activity as the child produces it.
+The title carries its elapsed time against its timeout and turns used against its budget.
+The log follows the newest event until you scroll up, and `←→` moves to the neighbouring job without leaving the view:
+
+```
+╭─ explorer · running · 42s / 2m · 7/100 turns ──────────────────────╮
+│ review auth middleware  job_m2x1_3 · tools: read, grep             │
+│ ────────────────────────────────────────────────────────────────── │
+│ 12:04:31 read   ✓ src/auth/middleware.ts → 80 lines                │
+│ 12:04:33 grep   ✓ "verifyToken" src/ → 7 matches                   │
+│ 12:04:35 say      The middleware verifies exp before refresh.      │
+╰─ ↑↓ scroll  PgUp/PgDn page  ←→ job  k terminate  esc back ─────────╯
+```
+
+`k` starts termination from either view, `esc` returns to the list or closes it, and `Ctrl+C` closes the panel from anywhere.
+Navigation keys follow Pi's `tui.select.*` keybindings, so a rebinding in `~/.pi/agent/keybindings.json` applies here too.
 
 Terminating asks for confirmation first, then cancels the job through the same path as `subagent_cancel`:
 its child process and timer are released, and other jobs keep running.
