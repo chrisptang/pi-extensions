@@ -6,7 +6,6 @@ export const JOB_STATES = [
 	"completed",
 	"partial",
 	"failed",
-	"timed_out",
 	"budget_exhausted",
 	"cancelled",
 ] as const;
@@ -17,7 +16,6 @@ export const TERMINAL_JOB_STATES = new Set<SubagentJobState>([
 	"completed",
 	"partial",
 	"failed",
-	"timed_out",
 	"budget_exhausted",
 	"cancelled",
 ]);
@@ -52,7 +50,7 @@ export const DEFAULT_MAX_TURNS = 100;
 export interface ChildResult {
 	state: Extract<
 		SubagentJobState,
-		"completed" | "partial" | "failed" | "timed_out" | "budget_exhausted" | "cancelled"
+		"completed" | "partial" | "failed" | "budget_exhausted" | "cancelled"
 	>;
 	result?: string;
 	error?: string;
@@ -82,14 +80,13 @@ export interface ChildRequest {
 	systemPrompt?: string;
 	thinkingLevel: SubagentThinkingLevel;
 	cwd: string;
-	timeout?: number;
 	/** Turn budget; the child is steered to wrap up when it is reached. Omit for no budget. */
 	maxTurns?: number;
 	projectTrusted: boolean;
 	signal: AbortSignal;
 	/**
-	 * Called once the child's RPC has accepted the task prompt, which is also when
-	 * its timeout starts. Observation only: nothing can be sent to a child.
+	 * Called once the child's RPC has accepted the task prompt.
+	 * Observation only: nothing can be sent to a child.
 	 */
 	onReady?: () => void;
 	/** Observer for child progress. Must not throw; failures are the caller's to contain. */
@@ -106,7 +103,6 @@ export interface JobSummary {
 	createdAt: number;
 	startedAt?: number;
 	finishedAt?: number;
-	timeout?: number;
 	maxTurns?: number;
 	/** Model responses the child has produced so far. */
 	turns?: number;

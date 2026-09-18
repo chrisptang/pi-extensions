@@ -226,7 +226,7 @@ test("handles late credential-pipe errors after child launch failure", async () 
 	await new Promise<void>((resolve) => setImmediate(resolve));
 });
 
-test("resolves optional execution timeouts with Pi bash semantics", () => {
+test("resolves optional wait timeouts with Pi bash semantics", () => {
 	assert.equal(resolveTimeoutMs(undefined), undefined);
 	assert.equal(resolveTimeoutMs(0.025), 25);
 	assert.equal(resolveTimeoutMs(2_147_483.647), 2_147_483_647);
@@ -357,20 +357,13 @@ async function handle(command) {
 	assert.doesNotMatch(result.limitations.join("\n"), /may be incomplete/u);
 });
 
-test("runChild starts its deadline after RPC readiness and honors cancellation", async () => {
+test("runChild honors cancellation after RPC readiness", async () => {
 	installFakePi(`
 async function handle(command) {
   if (command.type === "prompt") respond(command);
 }
 setInterval(() => {}, 1000);
 `);
-	let timeoutReady!: () => void;
-	const timedOut = runChild(childRequest({ timeout: 0.025, onReady: () => timeoutReady() }));
-	await new Promise<void>((resolve) => {
-		timeoutReady = resolve;
-	});
-	assert.equal((await timedOut).state, "timed_out");
-
 	const controller = new AbortController();
 	let cancelReady!: () => void;
 	const work = runChild(childRequest({ signal: controller.signal, onReady: () => cancelReady() }));
@@ -381,7 +374,7 @@ setInterval(() => {}, 1000);
 	assert.equal((await work).state, "cancelled");
 });
 
-test("runChild reuses one termination flow when timeout and cancellation race", {
+test("runChild escalates to SIGKILL when a cancelled child ignores SIGTERM", {
 	skip: process.platform === "win32",
 }, async () => {
 	installFakePi(`
@@ -402,11 +395,9 @@ setInterval(() => {}, 1000);
 	const ready = new Promise<void>((resolve) => {
 		resolveReady = resolve;
 	});
-	const work = runChild(
-		childRequest({ signal: controller.signal, timeout: 0.05, onReady: resolveReady }),
-	);
+	const work = runChild(childRequest({ signal: controller.signal, onReady: resolveReady }));
 	await ready;
-	setTimeout(() => controller.abort(), 60);
+	controller.abort();
 	const result = await work;
 	assert.equal(result.state, "cancelled");
 	assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);

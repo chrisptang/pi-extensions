@@ -33,7 +33,6 @@ const WRAP_UP_MESSAGE =
 interface ProcessSettlement {
 	code: number;
 	cancelled: boolean;
-	timedOut: boolean;
 	budgetExhausted: boolean;
 	completed: boolean;
 	launchError?: string;
@@ -152,7 +151,6 @@ async function executeProcess(
 	invocation: { command: string; args: string[] },
 	request: ChildRequest,
 ): Promise<ChildResult> {
-	const timeoutMs = resolveTimeoutMs(request.timeout);
 	const maxTurns = resolveMaxTurns(request.maxTurns);
 	const hintTurn = maxTurns === undefined ? undefined : budgetHintTurn(maxTurns);
 	let turns = 0;
@@ -337,11 +335,9 @@ async function executeProcess(
 		let spawned = false;
 		let terminating = false;
 		let cancelled = false;
-		let timedOut = false;
 		let budgetExhausted = false;
 		let completed = false;
 		let ready = false;
-		let deadline: NodeJS.Timeout | undefined;
 		let forceClose: NodeJS.Timeout | undefined;
 		let escalation: NodeJS.Timeout | undefined;
 		let termination: Promise<void> | undefined;
@@ -352,12 +348,11 @@ async function executeProcess(
 			const complete = () => {
 				if (settled) return;
 				settled = true;
-				if (deadline) clearTimeout(deadline);
 				if (forceClose) clearTimeout(forceClose);
 				if (escalation) clearTimeout(escalation);
 				request.signal.removeEventListener("abort", onAbort);
 				rejectPendingCommands(new Error("Subagent RPC process closed."));
-				resolve({ code, cancelled, timedOut, budgetExhausted, completed, launchError });
+				resolve({ code, cancelled, budgetExhausted, completed, launchError });
 			};
 			if (termination) void termination.then(complete, complete);
 			else complete();
@@ -365,10 +360,6 @@ async function executeProcess(
 		const terminate = (code: number) => {
 			if (settled || terminating) return;
 			terminating = true;
-			if (deadline) {
-				clearTimeout(deadline);
-				deadline = undefined;
-			}
 			if (globalThis.process.platform === "win32") {
 				termination = terminateWindowsProcessTree(process);
 			} else {
@@ -483,13 +474,6 @@ async function executeProcess(
 						throw new Error("Subagent RPC prompt was superseded.");
 					}
 					ready = true;
-					if (timeoutMs !== undefined) {
-						deadline = setTimeout(() => {
-							timedOut = true;
-							terminate(124);
-						}, timeoutMs);
-						deadline.unref();
-					}
 					try {
 						request.onReady?.();
 					} catch {
@@ -514,7 +498,7 @@ async function executeProcess(
 		});
 		process.once("close", (code) => {
 			decoder.finish();
-			finish(cancelled ? 130 : timedOut || budgetExhausted ? 124 : completed ? 0 : (code ?? 1));
+			finish(cancelled ? 130 : budgetExhausted ? 124 : completed ? 0 : (code ?? 1));
 		});
 		process.once("error", (error) => {
 			const limited = truncateText(error.message, MAX_ERROR_BYTES);
@@ -545,15 +529,6 @@ async function executeProcess(
 			state: "budget_exhausted",
 			...(output ? { result: output } : {}),
 			error: `Subagent exhausted its turn budget of ${maxTurns} without wrapping up.`,
-			limitations,
-			truncated,
-		};
-	}
-	if (settlement.timedOut) {
-		return {
-			state: "timed_out",
-			...(output ? { result: output } : {}),
-			error: "Subagent execution timed out.",
 			limitations,
 			truncated,
 		};

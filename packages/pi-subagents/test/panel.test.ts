@@ -86,7 +86,7 @@ test("list view keeps the selection visible and counts the jobs outside the wind
 test("detail view shows the job's budget, meta line, and activity", () => {
 	const job = sampleJobs()[0] as PanelJob;
 	const lines = renderDetailView(job, identityTheme(), 100, 10, undefined);
-	assert.match(lines[0] ?? "", /^╭─ explorer · running · 42s \/ 2m · 7\/100 turns ─+╮$/u);
+	assert.match(lines[0] ?? "", /^╭─ explorer · running · 42s · 7\/100 turns ─+╮$/u);
 	// The description leads the meta line; the id and tools follow it.
 	assert.match(lines[1] ?? "", /^│ review auth middleware {2}job_a · tools: read, grep\s+│$/u);
 	assert.match(lines[3] ?? "", /^│ 12:04:31 read {3}✓ src\/auth\/mw\.ts → 80 lines/u);
@@ -571,7 +571,6 @@ function sampleJobs(): PanelJob[] {
 			createdAt: 0,
 			startedAt: 0,
 			elapsedMs: 42_000,
-			timeout: 120,
 			maxTurns: 100,
 			turns: 7,
 			tools: ["read", "grep"],

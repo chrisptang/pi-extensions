@@ -59,7 +59,6 @@ export interface PanelJob {
 	startedAt?: number;
 	finishedAt?: number;
 	elapsedMs: number;
-	timeout?: number;
 	maxTurns?: number;
 	turns: number;
 	tools: string[];
@@ -78,7 +77,6 @@ export interface ActiveJobDisplay {
 	description?: string;
 	state: Extract<SubagentJobState, "queued" | "running">;
 	elapsedMs: number;
-	timeout?: number;
 	maxTurns?: number;
 	turns: number;
 	tools: string[];
@@ -92,7 +90,6 @@ export interface StartJobInput {
 	model: string;
 	thinkingLevel: SubagentThinkingLevel;
 	cwd: string;
-	timeout?: number;
 	/** Turn budget after which the child is asked to wrap up. */
 	maxTurns?: number;
 	projectTrusted: boolean;
@@ -161,7 +158,6 @@ export class SubagentRuntime {
 				...(job.description ? { description: job.description } : {}),
 				state: job.state,
 				elapsedMs: Math.max(0, now - (job.startedAt ?? job.createdAt)),
-				...(job.timeout !== undefined ? { timeout: job.timeout } : {}),
 				...(job.maxTurns !== undefined ? { maxTurns: job.maxTurns } : {}),
 				turns: job.turns,
 				tools: [...job.tools],
@@ -189,7 +185,6 @@ export class SubagentRuntime {
 				...(job.startedAt !== undefined ? { startedAt: job.startedAt } : {}),
 				...(job.finishedAt !== undefined ? { finishedAt: job.finishedAt } : {}),
 				elapsedMs: Math.max(0, (job.finishedAt ?? now) - (job.startedAt ?? job.createdAt)),
-				...(job.timeout !== undefined ? { timeout: job.timeout } : {}),
 				...(job.maxTurns !== undefined ? { maxTurns: job.maxTurns } : {}),
 				turns: job.turns,
 				tools: [...job.tools],
@@ -203,7 +198,6 @@ export class SubagentRuntime {
 	start(input: StartJobInput): {
 		jobId: string;
 		state: "queued";
-		timeout?: number;
 		maxTurns?: number;
 	} {
 		if (!this.sessionActive) {
@@ -226,7 +220,6 @@ export class SubagentRuntime {
 			...(input.description ? { description: input.description } : {}),
 			state: "queued",
 			createdAt: this.now(),
-			...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
 			...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
 			controller,
 			tools: [...input.tools],
@@ -261,7 +254,6 @@ export class SubagentRuntime {
 					...(input.systemPrompt ? { systemPrompt: input.systemPrompt } : {}),
 					thinkingLevel: input.thinkingLevel,
 					cwd: input.cwd,
-					timeout: input.timeout,
 					maxTurns: input.maxTurns,
 					projectTrusted: input.projectTrusted,
 					signal: controller.signal,
@@ -282,7 +274,6 @@ export class SubagentRuntime {
 		return {
 			jobId,
 			state: "queued",
-			...(job.timeout !== undefined ? { timeout: job.timeout } : {}),
 			...(job.maxTurns !== undefined ? { maxTurns: job.maxTurns } : {}),
 		};
 	}
@@ -511,7 +502,6 @@ export class SubagentRuntime {
 			createdAt: job.createdAt,
 			...(job.startedAt !== undefined ? { startedAt: job.startedAt } : {}),
 			...(job.finishedAt !== undefined ? { finishedAt: job.finishedAt } : {}),
-			...(job.timeout !== undefined ? { timeout: job.timeout } : {}),
 			...(job.maxTurns !== undefined ? { maxTurns: job.maxTurns } : {}),
 			turns: job.turns,
 			...(job.resultSummary !== undefined ? { resultSummary: job.resultSummary } : {}),

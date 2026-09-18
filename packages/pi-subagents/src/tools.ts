@@ -126,9 +126,6 @@ function buildSpawnParameters(agents: AgentRegistry) {
 						"Child thinking level. Omit it: the child inherits this session's effective level, which is almost always right. Set it only to deliberately spend less thinking on a mechanical job or more on a hard one.",
 				}),
 			),
-			timeout: Type.Optional(
-				Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }),
-			),
 			maxTurns: MaxTurnsParameter,
 		},
 		{ additionalProperties: false },
@@ -149,8 +146,6 @@ function agentParameterDescription(agents: AgentRegistry): string {
 		"Agent definition name. Its instructions become the child's system prompt and supply default tools, model, and thinking level.";
 	return roster ? `${base} Available: ${roster}.` : base;
 }
-
-type SpawnArguments = Static<ReturnType<typeof buildSpawnParameters>>;
 
 const InspectParameters = Type.Object({}, { additionalProperties: false });
 
@@ -216,7 +211,6 @@ export function registerSubagentTools(
 		promptSnippet: "Use subagent_spawn to start one Pi subagent job",
 		promptGuidelines: spawnInstruction.guidelines,
 		parameters: buildSpawnParameters(agents),
-		prepareArguments: prepareSpawnArguments,
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			throwIfAborted(signal, "Subagent spawn was cancelled");
 			assertNotNested();
@@ -235,7 +229,6 @@ export function registerSubagentTools(
 			const thinkingLevel = resolveThinkingLevel(
 				params.thinkingLevel ?? agent?.thinkingLevel ?? ctx.thinkingLevel ?? pi.getThinkingLevel(),
 			);
-			resolveTimeoutMs(params.timeout);
 			const maxTurns = resolveMaxTurns(params.maxTurns ?? DEFAULT_MAX_TURNS);
 			return toolResult(
 				runtime.start({
@@ -247,7 +240,6 @@ export function registerSubagentTools(
 					...(selected.limitation ? { limitations: [selected.limitation] } : {}),
 					thinkingLevel,
 					cwd: ctx.cwd,
-					timeout: params.timeout,
 					maxTurns,
 					projectTrusted: ctx.isProjectTrusted(),
 					notifyOnCompletion: params.background === true,
@@ -262,7 +254,6 @@ export function registerSubagentTools(
 		description: instruction("skill_run").description,
 		promptSnippet: "Use skill_run to execute one skill inside a subagent",
 		parameters: buildSkillRunParameters(skills),
-		prepareArguments: prepareSkillRunArguments,
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			throwIfAborted(signal, "Skill run was cancelled");
 			assertNotNested();
@@ -276,7 +267,6 @@ export function registerSubagentTools(
 			const thinkingLevel = resolveThinkingLevel(
 				params.thinkingLevel ?? skill.thinkingLevel ?? ctx.thinkingLevel ?? pi.getThinkingLevel(),
 			);
-			resolveTimeoutMs(params.timeout);
 			const maxTurns = resolveMaxTurns(params.maxTurns ?? DEFAULT_MAX_TURNS);
 			const limitations = [
 				...(selected.limitation ? [selected.limitation] : []),
@@ -293,7 +283,6 @@ export function registerSubagentTools(
 					...(limitations.length > 0 ? { limitations } : {}),
 					thinkingLevel,
 					cwd: ctx.cwd,
-					timeout: params.timeout,
 					maxTurns,
 					projectTrusted: ctx.isProjectTrusted(),
 					notifyOnCompletion: params.background === true,
@@ -510,9 +499,6 @@ function buildSkillRunParameters(skills: SkillRegistry) {
 					description: "Child thinking level. Defaults to the skill's, then the main agent's.",
 				}),
 			),
-			timeout: Type.Optional(
-				Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }),
-			),
 			maxTurns: MaxTurnsParameter,
 		},
 		{ additionalProperties: false },
@@ -529,8 +515,6 @@ function skillParameterDescription(skills: SkillRegistry): string {
 		"Skill name. Its SKILL.md becomes the child's system prompt and supplies default tools, model, and thinking level. A skill installed outside the advertised set can still be named directly.";
 	return roster ? `${base} Available: ${roster}.` : base;
 }
-
-type SkillRunArguments = Static<ReturnType<typeof buildSkillRunParameters>>;
 
 function requireSkill(skills: SkillRegistry, requested: string): SkillDefinition {
 	const name = requiredString(requested, "name");
@@ -607,19 +591,11 @@ function buildSkillTask(skill: SkillDefinition, args: string | undefined): strin
 	].join("\n");
 }
 
-function prepareSkillRunArguments(args: unknown): SkillRunArguments {
-	return prepareTimeoutArguments(args) as SkillRunArguments;
-}
-
 function resolveThinkingLevel(value: unknown): SubagentThinkingLevel {
 	if (typeof value !== "string" || !THINKING_LEVEL_SET.has(value)) {
 		throw new Error("Subagent thinkingLevel is invalid.");
 	}
 	return value as SubagentThinkingLevel;
-}
-
-function prepareSpawnArguments(args: unknown): SpawnArguments {
-	return prepareTimeoutArguments(args) as SpawnArguments;
 }
 
 function prepareWaitArguments(args: unknown): WaitArguments {

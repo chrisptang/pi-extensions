@@ -85,10 +85,10 @@ test("registers five fixed main-agent tools with stable schemas and explicit lim
 		"max",
 	]);
 	assert.deepEqual(Object.keys(tool(mock, "subagent_inspect").parameters.properties ?? {}), []);
-	assert.deepEqual(tools[0]?.prepareArguments?.({ task: "old", timeoutMs: 1_500 }), {
-		task: "old",
-		timeout: 1.5,
-	});
+	// Only turns bound a child; there is no execution timeout on spawn or skill_run.
+	for (const name of ["subagent_spawn", "skill_run"] as const) {
+		assert.equal(Object.hasOwn(tool(mock, name).parameters.properties ?? {}, "timeout"), false);
+	}
 	assert.deepEqual(
 		tool(mock, "subagent_wait").prepareArguments?.({ jobId: "job_old", timeoutMs: 30_000 }),
 		{
@@ -96,14 +96,11 @@ test("registers five fixed main-agent tools with stable schemas and explicit lim
 			timeout: 30,
 		},
 	);
-	for (const [candidate, malformedAlias] of [
-		[tool(mock, "subagent_spawn"), { task: "legacy", timeoutMs: "1500" }],
-		[tool(mock, "subagent_wait"), { jobId: "job_old", timeoutMs: "30000" }],
-	] as const) {
-		const preparedMalformed = candidate?.prepareArguments?.(malformedAlias);
-		assert.deepEqual(preparedMalformed, malformedAlias);
-		assert.equal(Check(candidate?.parameters, preparedMalformed), false);
-	}
+	const waitTool = tool(mock, "subagent_wait");
+	const malformedAlias = { jobId: "job_old", timeoutMs: "30000" };
+	const preparedMalformed = waitTool?.prepareArguments?.(malformedAlias);
+	assert.deepEqual(preparedMalformed, malformedAlias);
+	assert.equal(Check(waitTool?.parameters, preparedMalformed), false);
 	assert.match(tools[0]?.description ?? "", /task defines.*selected tools define/is);
 	for (const candidate of tools) {
 		assert.doesNotMatch(
@@ -198,7 +195,7 @@ test("spawns jobs with default and explicit tools and thinking levels", async ()
 	);
 	const inherited = await tool(mock, "subagent_spawn").execute(
 		"inherited",
-		{ description: "test job", task: "Review one thing", timeout: 1 },
+		{ description: "test job", task: "Review one thing" },
 		undefined,
 		undefined,
 		context.ctx,
@@ -292,7 +289,6 @@ test("labels active jobs with their agent and description above the editor", asy
 			task: "First",
 			agent: "explorer",
 			tools: ["read", "edit"],
-			timeout: 120,
 			maxTurns: 50,
 		},
 		undefined,
@@ -310,7 +306,7 @@ test("labels active jobs with their agent and description above the editor", asy
 	const lines = factory?.({}, identityTheme()).render(120) ?? [];
 	// One compact line per job; no rules, so the widget costs as few rows as possible.
 	assert.equal(lines[0], "Subagents · 2 active · /subagents to inspect or terminate");
-	assert.equal(lines[1], "▶ explorer  review auth middleware  1m5s / 2m · 7/50 turns");
+	assert.equal(lines[1], "▶ explorer  review auth middleware  1m5s · 7/50 turns");
 	// A job spawned without an agent has only its id to identify it.
 	assert.equal(lines[2], `▶ ${String(second.details.jobId)}  test job  0s · 0/100 turns`);
 	assert.equal(lines.length, 3);
@@ -321,7 +317,7 @@ test("labels active jobs with their agent and description above the editor", asy
 		| ((_tui: unknown, theme: Theme) => Component)
 		| undefined;
 	const refreshedLines = refreshedFactory?.({}, identityTheme()).render(80) ?? [];
-	assert.match(refreshedLines[1] ?? "", / {2}1m6s \/ 2m · 7\/50 turns$/u);
+	assert.match(refreshedLines[1] ?? "", / {2}1m6s · 7\/50 turns$/u);
 	assert.match(refreshedLines[2] ?? "", / {2}1s · 0\/100 turns$/u);
 	for (const line of refreshedFactory?.({}, identityTheme()).render(24) ?? []) {
 		assert.ok(visibleWidth(line) <= 24);
@@ -381,7 +377,6 @@ test("rejects invalid spawn arguments and nesting before child launch", async ()
 		{ description: "test job", task: "typo", tools: ["baash"] },
 		{ description: "test job", task: "extension tool", tools: ["subagent_spawn"] },
 		{ description: "test job", task: "bad thinking", thinkingLevel: "turbo" },
-		{ description: "test job", task: "bad timeout", timeout: 0 },
 		{ description: "test job", task: "bad turns", maxTurns: 0 },
 		{ description: "test job", task: "fractional turns", maxTurns: 1.5 },
 	]) {

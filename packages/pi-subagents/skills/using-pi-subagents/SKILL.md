@@ -1,6 +1,6 @@
 ---
 name: using-pi-subagents
-description: Operate pi-subagents jobs safely, including direct-work decisions, agent-definition selection, blocking versus background execution, least-privilege tool selection, thinking-level selection, delegation, parallel starts, timeout and turn-budget selection, waiting, cancellation, result handling, verification, and writer isolation.
+description: Operate pi-subagents jobs safely, including direct-work decisions, agent-definition selection, blocking versus background execution, least-privilege tool selection, thinking-level selection, delegation, parallel starts, turn-budget selection, waiting, cancellation, result handling, verification, and writer isolation.
 license: MIT
 ---
 
@@ -116,23 +116,13 @@ Run the focused test command and report changed files, results, and remaining ri
 
 Grant the implementation task only the work tools it needs.
 
-## Choose timeouts
-
-Set `timeout` in seconds to the shortest realistic execution deadline for the task.
-
-Execution timeouts accept positive finite numbers and have no default.
-
-Omit `timeout` only when the child may run until completion, explicit cancellation, session shutdown, or process exit.
-
-Use short deadlines for extraction and focused review, moderate deadlines for ordinary multi-file work, and longer deadlines only when the scoped work genuinely requires them.
-
-Split an oversized task instead of extending its deadline to compensate for unclear scope.
-
-The execution timeout, when set, belongs to the job and terminates its child when exceeded.
-
 ## Choose turn budgets
 
-Every job has a `maxTurns` budget of model responses, defaulting to 100, that bounds exploration independently of model speed. The child is told its budget in its system prompt, so it can pace the work from the start, and reminded of how many turns remain once 90% of the budget is used.
+A job has no execution timeout: a slow model is not a failed job, and the child runs until completion, explicit cancellation, session shutdown, or process exit.
+
+Every job has a `maxTurns` budget of model responses, defaulting to 100, that bounds exploration independently of model speed.
+
+Split an oversized task instead of raising its budget to compensate for unclear scope. The child is told its budget in its system prompt, so it can pace the work from the start, and reminded of how many turns remain once 90% of the budget is used.
 
 At the budget the child is asked to stop using tools and report; its report returns as a normal result carrying a limitation that names the budget.
 
@@ -202,7 +192,7 @@ Omitting `timeout` waits until the job becomes terminal or the caller cancels th
 
 A wait timeout stops only the caller's wait.
 
-A wait timeout does not cancel, close, or shorten the job's optional execution deadline.
+A wait timeout does not cancel or close the job.
 
 Do not poll repeatedly because asynchronous completion delivery remains active.
 
@@ -227,8 +217,6 @@ Treat `completed` as a child report that still requires main-agent review and ap
 Treat `partial` as incomplete evidence, identify what remains unverified, and continue directly or start a newly scoped job only when justified.
 
 Treat `failed` as no reliable completion and inspect the available error before choosing a direct fallback.
-
-Treat `timed_out` as terminal for that job, preserve any available partial evidence, and do not assume work continued after the deadline.
 
 Treat `budget_exhausted` as a child that did not converge: keep any available output as partial evidence, and narrow the task before starting a new job rather than raising `maxTurns`.
 

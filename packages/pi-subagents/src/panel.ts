@@ -410,8 +410,6 @@ export function renderDetailView(
 
 function detailTitle(job: PanelJob, theme: Theme): string {
 	const elapsed = formatDuration(job.elapsedMs / 1_000);
-	const budget =
-		job.timeout === undefined ? elapsed : `${elapsed} / ${formatDuration(job.timeout)}`;
 	const turns =
 		job.maxTurns === undefined ? `${job.turns} turns` : `${job.turns}/${job.maxTurns} turns`;
 	const separator = theme.fg("muted", " · ");
@@ -420,7 +418,7 @@ function detailTitle(job: PanelJob, theme: Theme): string {
 		separator +
 		theme.fg(stateColor(job.state), job.state) +
 		separator +
-		theme.fg("muted", `${budget} · ${turns}`)
+		theme.fg("muted", `${elapsed} · ${turns}`)
 	);
 }
 

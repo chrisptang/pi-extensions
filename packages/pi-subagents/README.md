@@ -92,7 +92,7 @@ While a job runs you can watch it and stop it, but you cannot talk to it. If a c
 
 Completion messages follow Pi's global tool-output expansion state and the `app.tools.expand` binding (`Ctrl+O` by default).
 
-In TUI mode, the above-editor widget shows one line per queued or running job: its agent or ID, description, elapsed time against its timeout, turns used against its budget, and its most recent activity line.
+In TUI mode, the above-editor widget shows one line per queued or running job: its agent or ID, description, elapsed time, turns used against its budget, and its most recent activity line.
 The widget disappears when no jobs remain active, and clears when the session ends.
 
 Run `/subagents` for the full inspection panel. See [Inspecting and terminating jobs](#-inspecting-and-terminating-jobs).
@@ -103,22 +103,21 @@ The main Pi session exposes five fixed tools and the `/agents`, `/skills`, and `
 
 | Tool | Parameters | Purpose |
 | --- | --- | --- |
-| `subagent_spawn` | `task`, `description`, optional `agent`, `background`, `tools`, `thinkingLevel`, `timeout`, `maxTurns` | Start one subagent job and return its `jobId`. |
-| `skill_run` | `name`, `description`, optional `args`, `background`, `tools`, `thinkingLevel`, `timeout`, `maxTurns` | Run one skill inside a subagent and return its `jobId`. |
+| `subagent_spawn` | `task`, `description`, optional `agent`, `background`, `tools`, `thinkingLevel`, `maxTurns` | Start one subagent job and return its `jobId`. |
+| `skill_run` | `name`, `description`, optional `args`, `background`, `tools`, `thinkingLevel`, `maxTurns` | Run one skill inside a subagent and return its `jobId`. |
 | `subagent_inspect` | none | List privacy-filtered retained-job metadata. |
 | `subagent_cancel` | `jobId` | Idempotently cancel one queued or running job. |
 | `subagent_wait` | `jobId`, optional `timeout` | Wait for one job to reach a terminal state. |
 
 A child receives **only** its selected work tools. No `subagent_*` tool is added to a child, so it cannot spawn, cancel, inspect, wait on, or message anything: its final message is its only output.
 
-Execution and wait timeouts use seconds, accept finite numbers greater than zero through 2,147,483.647, and have no default.
-Omitting a job execution timeout lets the child run until it exits, is cancelled, the session shuts down, or the Pi process exits.
-A wait timeout or caller cancellation stops only that wait and does not cancel its job.
+A job has no execution timeout: a slow model is not a failed job, so the child runs until it exits, is cancelled, the session shuts down, or the Pi process exits.
+The `subagent_wait` timeout uses seconds, accepts finite numbers greater than zero through 2,147,483.647, and has no default. It, like caller cancellation, stops only that wait and does not cancel its job.
 
-Every job also has a turn budget, `maxTurns`, which defaults to 100 model responses. Unlike a timeout it does not depend on how fast the model answers, so it is the bound that keeps an exploration from running forever. The child is told its budget in its system prompt, so it can pace the work from the start, and reminded of how many turns remain once 90% of the budget is used. When the budget is reached the child is asked to stop using tools and report what it found; that report comes back as a normal result with a limitation noting the budget. A child that keeps working three turns past the budget is stopped with the `budget_exhausted` state and whatever it last said.
+What bounds a job is its turn budget, `maxTurns`, which defaults to 100 model responses. It does not depend on how fast the model answers, so it is the bound that keeps an exploration from running forever. The child is told its budget in its system prompt, so it can pace the work from the start, and reminded of how many turns remain once 90% of the budget is used. When the budget is reached the child is asked to stop using tools and report what it found; that report comes back as a normal result with a limitation noting the budget. A child that keeps working three turns past the budget is stopped with the `budget_exhausted` state and whatever it last said.
 
 Tasks are limited to 50 KiB of UTF-8 text.
-The terminal states are `completed`, `partial`, `failed`, `timed_out`, `budget_exhausted`, and `cancelled`.
+The terminal states are `completed`, `partial`, `failed`, `budget_exhausted`, and `cancelled`.
 `subagent_inspect` never returns complete task text, child output, prompts, selected tools, context, credentials, environment variables, or secrets.
 
 See [`docs/tools.md`](./docs/tools.md) for the concise schema reference.
@@ -408,7 +407,7 @@ The key hints sit in the bottom border, and a list longer than the panel says ho
 ```
 
 `Enter` opens the selected job: its description, `jobId`, and selected work tools above a rule, any error or limitation beside them, and below the rule its activity as the child produces it.
-The title carries its elapsed time against its timeout and turns used against its budget.
+The title carries its elapsed time and turns used against its budget.
 The log follows the newest event until you scroll up, and `←→` moves to the neighbouring job without leaving the view:
 
 ```
