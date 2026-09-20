@@ -1,6 +1,6 @@
 # 🔎 pi-github-pr — See Current Pull Request Status in Pi
 
-[![npm](https://img.shields.io/npm/v/@narumitw/pi-github-pr)](https://www.npmjs.com/package/@narumitw/pi-github-pr) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@chrisptang/pi-github-pr)](https://www.npmjs.com/package/@chrisptang/pi-github-pr) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 See the current branch's pull request number, checks, review state, and discussion count in Pi's statusline.
 The extension reads only GitHub pull request metadata.
@@ -34,19 +34,19 @@ You do not need to set `GH_HOST` manually.
 Install the extension persistently:
 
 ```bash
-pi install npm:@narumitw/pi-github-pr
+pi install npm:@chrisptang/pi-github-pr
 ```
 
 Try the published package without installing it:
 
 ```bash
-pi -e npm:@narumitw/pi-github-pr
+pi -e npm:@chrisptang/pi-github-pr
 ```
 
 Build and load a local checkout from the repository root:
 
 ```bash
-npm --workspace @narumitw/pi-github-pr run build
+npm --workspace @chrisptang/pi-github-pr run build
 pi -e ./packages/pi-github-pr
 ```
 

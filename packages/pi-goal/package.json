@@ -1,5 +1,5 @@
 {
-	"name": "@narumitw/pi-goal",
+	"name": "@chrisptang/pi-goal",
 	"version": "0.54.4",
 	"description": "Pi extension for autonomous single-objective /goal completion.",
 	"type": "module",
@@ -52,7 +52,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/narumiruna/pi-extensions",
+		"url": "https://github.com/chrisptang/pi-extensions",
 		"directory": "packages/pi-goal"
 	}
 }

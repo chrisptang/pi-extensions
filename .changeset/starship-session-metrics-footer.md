@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-starship": minor
+"@chrisptang/pi-starship": minor
 ---
 
 Make the built-in footer a two-line environment and session-metrics layout. Context now always shows tokens, window, and percentage with thresholds used only for color. The metrics row reports cumulative inclusive input, output, token-weighted session cache rate, and reported cost; it distinguishes unavailable usage from measured zero and labels subscription-backed amounts as estimates.

@@ -13,7 +13,12 @@ import {
 	runChild,
 	terminateWindowsProcessTree,
 } from "../src/process.js";
-import { CHILD_CORE_TOOL_NAMES, type ChildActivity, type ChildRequest } from "../src/types.js";
+import {
+	CHILD_CORE_TOOL_NAMES,
+	type ChildActivity,
+	type ChildRequest,
+	type ChildUsage,
+} from "../src/types.js";
 
 let directory: string;
 let previousPackageDirectory: string | undefined;
@@ -868,6 +873,82 @@ async function handle(command) {
 		activity.map((event) => event.type),
 		["output"],
 	);
+});
+
+test("runChild reports each response's token accounting", async () => {
+	installFakePi(`
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  event({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [],
+      stopReason: "error",
+      errorMessage: "provider overloaded",
+      usage: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 10, cost: { total: 0.001 } },
+    },
+  });
+  event({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "done" }],
+      stopReason: "stop",
+      usage: { input: 100, output: 20, cacheRead: 900, cacheWrite: 50, totalTokens: 1070, cost: { total: 0.02 } },
+    },
+  });
+  event({ type: "agent_settled" });
+}
+`);
+	const usage: ChildUsage[] = [];
+	const result = await runChild(
+		childRequest({
+			onActivity: (activity) => {
+				if (activity.type === "usage") usage.push(activity.usage);
+			},
+		}),
+	);
+	assert.equal(result.state, "completed");
+	// A failed response was still billed, so its tokens count; it cannot say how
+	// full the child's context is, so it reports no context size.
+	assert.deepEqual(usage, [
+		{ input: 10, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0.001 },
+		{ input: 100, output: 20, cacheRead: 900, cacheWrite: 50, contextTokens: 1_070, cost: 0.02 },
+	]);
+});
+
+test("runChild sums a response's own counts when it reports no total", async () => {
+	installFakePi(`
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  event({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "done" }],
+      stopReason: "stop",
+      usage: { input: 100, output: 20, cacheRead: 900, cacheWrite: 50, cost: { total: "free" } },
+    },
+  });
+  event({ type: "agent_settled" });
+}
+`);
+	const usage: ChildUsage[] = [];
+	await runChild(
+		childRequest({
+			onActivity: (activity) => {
+				if (activity.type === "usage") usage.push(activity.usage);
+			},
+		}),
+	);
+	// Child stdout is untrusted, so a nonsensical cost reads as zero rather than
+	// poisoning the job's running total.
+	assert.deepEqual(usage, [
+		{ input: 100, output: 20, cacheRead: 900, cacheWrite: 50, contextTokens: 1_070, cost: 0 },
+	]);
 });
 
 function childRequest(overrides: Partial<ChildRequest> = {}): ChildRequest {

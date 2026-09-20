@@ -243,7 +243,7 @@ A dual-version migration requires a separate specification because emitting mult
 
 Packages MUST document the minimum counterpart versions required for guaranteed coexistence.
 
-The first release-intent versions derived from the repository Changesets are `@narumitw/pi-plan-mode@0.52.0` and `@narumitw/pi-goal@0.53.0`.
+The first release-intent versions derived from the repository Changesets are `@narumitw/pi-plan-mode@0.52.0` and `@chrisptang/pi-goal@0.53.0`.
 These are compatibility floors, not evidence that either package has been published.
 A v1 participant operating beside a pre-v1 extension remains standalone-compatible but cannot claim mutual exclusion.
 
@@ -272,7 +272,7 @@ If a supported Pi version stops satisfying any property, participants MUST fail 
 
 ## Product conformance
 
-`@narumitw/pi-plan-mode` and `@narumitw/pi-goal` each implement v1 in a package-local module without importing, identifying, or depending on the other extension.
+`@narumitw/pi-plan-mode` and `@chrisptang/pi-goal` each implement v1 in a package-local module without importing, identifying, or depending on the other extension.
 [`test/plan-goal-coexistence.test.ts`](../../test/plan-goal-coexistence.test.ts) covers both source load orders, both acquisition orders, restoration, tool-write rejection, release and reacquisition, standalone parity, and built generated entries on one public Pi event bus.
 Package-focused mutex suites cover each participant's activation, rollback, waiting, continuation, settings, managed-run, and lifecycle boundaries.
 The coexistence claim applies only at or above both documented package floors on the characterized Pi runtime.

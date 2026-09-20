@@ -15,7 +15,7 @@ import {
 } from "typescript/unstable/ast";
 import { API } from "typescript/unstable/sync";
 
-const EXTENSION_PACKAGE_RE = /^@narumitw\/pi-/;
+const EXTENSION_PACKAGE_RE = /^@(?:narumitw|chrisptang)\/pi-/;
 const SUPPORTED_EXTENSION_ENTRIES = new Set(["./src/index.ts", "./dist/index.ts"]);
 const DEPENDENCY_FIELDS = [
 	"dependencies",

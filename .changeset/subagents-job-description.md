@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": minor
+"@chrisptang/pi-subagents": minor
 ---
 
 Label active jobs in the widget with the agent name and a caller-supplied description instead of only the generated job ID.

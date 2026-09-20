@@ -1,4 +1,4 @@
-# @narumitw/pi-github-pr
+# @chrisptang/pi-github-pr
 
 ## 0.49.7
 

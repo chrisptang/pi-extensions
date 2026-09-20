@@ -1,4 +1,4 @@
-# @narumitw/pi-goal
+# @chrisptang/pi-goal
 
 ## 0.54.4
 

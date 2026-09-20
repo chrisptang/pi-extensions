@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": patch
+"@chrisptang/pi-subagents": patch
 ---
 
 Treat `model: inherit` as inheritance rather than a failed alias lookup.

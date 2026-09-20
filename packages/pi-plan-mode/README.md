@@ -267,7 +267,7 @@ Successful session replacement relies on source-session shutdown to clean up and
 The coexistence guarantee is cooperative and applies only when every contender implements v1 on the characterized Pi runtime and shares its event bus and session-manager identity.
 A pre-v1, mixed-version, non-participating, forked, or otherwise uncharacterized counterpart remains unsupported for mutual exclusion.
 Plan mode does not identify, inspect, configure, start, stop, or depend on another extension.
-Guaranteed coexistence with Goal requires `@narumitw/pi-goal` `0.53.0` or newer and this package at `0.52.0` or newer on the characterized Pi `0.84.2` runtime.
+Guaranteed coexistence with Goal requires `@chrisptang/pi-goal` `0.53.0` or newer and this package at `0.52.0` or newer on the characterized Pi `0.84.2` runtime.
 
 | Installation | Support |
 | --- | --- |

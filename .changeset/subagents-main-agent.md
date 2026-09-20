@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": minor
+"@chrisptang/pi-subagents": minor
 ---
 
 Run the main session as an agent definition, and ship `architect` as the third built-in.

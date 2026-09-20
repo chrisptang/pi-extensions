@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": minor
+"@chrisptang/pi-subagents": minor
 ---
 
 Tell the model to do the work itself by default, and say when a subagent is actually worth its cost.

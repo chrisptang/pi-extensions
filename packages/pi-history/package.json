@@ -1,5 +1,5 @@
 {
-	"name": "@narumitw/pi-history",
+	"name": "@chrisptang/pi-history",
 	"version": "0.1.0",
 	"description": "Pi extension that persists typed prompts per project and restores them into the editor's Up-arrow history.",
 	"type": "module",
@@ -46,7 +46,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/narumiruna/pi-extensions",
+		"url": "https://github.com/chrisptang/pi-extensions",
 		"directory": "packages/pi-history"
 	}
 }

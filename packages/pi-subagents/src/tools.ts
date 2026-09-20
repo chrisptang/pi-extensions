@@ -2,7 +2,11 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import type { AgentDefinition } from "./agent-definitions.js";
-import { type ModelCandidateLookup, resolveAgentModel } from "./agent-model.js";
+import {
+	type ModelCandidateLookup,
+	parseModelReference,
+	resolveAgentModel,
+} from "./agent-model.js";
 import { AgentRegistry } from "./agent-registry.js";
 import {
 	applyOverride,
@@ -230,11 +234,13 @@ export function registerSubagentTools(
 				params.thinkingLevel ?? agent?.thinkingLevel ?? ctx.thinkingLevel ?? pi.getThinkingLevel(),
 			);
 			const maxTurns = resolveMaxTurns(params.maxTurns ?? DEFAULT_MAX_TURNS);
+			const model = selected.model ?? inherited;
 			return toolResult(
 				runtime.start({
 					task,
 					tools,
-					model: selected.model ?? inherited,
+					model,
+					...contextWindowOf(ctx, model),
 					description,
 					...(agent ? { agent: agent.name, systemPrompt: agent.body } : {}),
 					...(selected.limitation ? { limitations: [selected.limitation] } : {}),
@@ -272,11 +278,13 @@ export function registerSubagentTools(
 				...(selected.limitation ? [selected.limitation] : []),
 				...skillToolLimitations(skill, params.tools !== undefined),
 			];
+			const model = selected.model ?? inherited;
 			return toolResult(
 				runtime.start({
 					task: buildSkillTask(skill, args),
 					tools,
-					model: selected.model ?? inherited,
+					model,
+					...contextWindowOf(ctx, model),
 					agent: `skill:${skill.name}`,
 					description,
 					systemPrompt: buildSkillSystemPrompt(skill),
@@ -425,6 +433,19 @@ function isExtensionProvider(ctx: ExtensionContext, provider: string): boolean {
 
 function usesRuntimeCredentials(ctx: ExtensionContext, provider: string): boolean {
 	return ctx.modelRegistry.getProviderAuthStatus(provider).source === "runtime";
+}
+
+/**
+ * The child's context window, for the panel's context gauge. A child reports how
+ * many tokens it sent but not what its ceiling is, so the parent resolves it
+ * from the registry at spawn time.
+ */
+function contextWindowOf(ctx: ExtensionContext, model: string): { contextWindow?: number } {
+	const reference = parseModelReference(model);
+	const found = reference
+		? ctx.modelRegistry.find(reference.provider, reference.modelId)
+		: undefined;
+	return found && found.contextWindow > 0 ? { contextWindow: found.contextWindow } : {};
 }
 
 function modelLookup(ctx: ExtensionContext): ModelCandidateLookup {

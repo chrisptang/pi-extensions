@@ -21,7 +21,7 @@ A representative uncolored layout:
 - Loads a generated split runtime to reduce Pi package startup work.
 
 > **Need more customization?**
-> See [`pi-starship`](https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-starship) ([npm](https://www.npmjs.com/package/@narumitw/pi-starship)).
+> See [`pi-starship`](https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-starship) ([npm](https://www.npmjs.com/package/@chrisptang/pi-starship)).
 > It uses [Starship-inspired](https://starship.rs/) TOML and style syntax for deeper control over layout, modules, and colors.
 > Choose `pi-statusline` for practical defaults and quick setup.
 

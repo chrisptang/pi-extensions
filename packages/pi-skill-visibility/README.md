@@ -1,6 +1,6 @@
 # 👁️ pi-skill-visibility — Reduce Automatic Skill Exposure
 
-[![npm](https://img.shields.io/npm/v/@narumitw/pi-skill-visibility)](https://www.npmjs.com/package/@narumitw/pi-skill-visibility) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@chrisptang/pi-skill-visibility)](https://www.npmjs.com/package/@chrisptang/pi-skill-visibility) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 Hide selected skills from Pi's automatic prompt catalog and TUI completion, while keeping skills available when explicitly requested. The extension can also inspect local Pi and Claude Code session logs for skill-use evidence.
 
@@ -17,13 +17,13 @@ This is exposure control, **not access control**. It never modifies Pi, installe
 ## 📦 Install
 
 ```bash
-pi install npm:@narumitw/pi-skill-visibility
+pi install npm:@chrisptang/pi-skill-visibility
 ```
 
 Try it without installing permanently:
 
 ```bash
-pi -e npm:@narumitw/pi-skill-visibility
+pi -e npm:@chrisptang/pi-skill-visibility
 ```
 
 Try the package from this repository checkout:

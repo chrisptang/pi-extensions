@@ -1,6 +1,6 @@
 # pi-goal interruption and continuation lifecycle
 
-This note records the current lifecycle contract behind `@narumitw/pi-goal`. It explains why Goal
+This note records the current lifecycle contract behind `@chrisptang/pi-goal`. It explains why Goal
 continuation waits for Pi's settled boundary, how retry and compaction ownership is retained, and
 which races cannot be eliminated by an extension.
 

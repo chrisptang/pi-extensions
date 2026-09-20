@@ -1,12 +1,12 @@
 # 🚀 pi-starship — Build Pi's Footer with Starship-style TOML
 
-[![npm](https://img.shields.io/npm/v/@narumitw/pi-starship)](https://www.npmjs.com/package/@narumitw/pi-starship) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@chrisptang/pi-starship)](https://www.npmjs.com/package/@chrisptang/pi-starship) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 Build a customizable Pi footer with Starship-style TOML, native Pi modules, conditional formats, palettes, and responsive multiline layout.
 The extension parses and renders the footer itself, so it does not need the `starship` executable or a shell prompt.
 
 > **Different package:** The unscoped npm package `pi-starship` delegates to the Starship binary.
-> This package is `@narumitw/pi-starship` and renders Pi-specific modules natively.
+> This package is `@chrisptang/pi-starship` and renders Pi-specific modules natively.
 
 ## ✨ Features
 
@@ -22,19 +22,19 @@ The extension parses and renders the footer itself, so it does not need the `sta
 ## 📦 Install
 
 ```bash
-pi install npm:@narumitw/pi-starship
+pi install npm:@chrisptang/pi-starship
 ```
 
 Try the published package without installing it permanently:
 
 ```bash
-pi -e npm:@narumitw/pi-starship
+pi -e npm:@chrisptang/pi-starship
 ```
 
 Build the generated runtime and try the local package from this repository:
 
 ```bash
-npm --workspace @narumitw/pi-starship run build
+npm --workspace @chrisptang/pi-starship run build
 pi -e ./packages/pi-starship
 ```
 

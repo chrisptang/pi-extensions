@@ -303,6 +303,7 @@ async function setup(dependencies: SubagentsDependencies = {}) {
 		modelRegistry: {
 			getProviderAuthStatus: () => ({ configured: true, source: "environment" as const }),
 			getRegisteredProviderIds: () => [],
+			find: () => ({ contextWindow: 200_000 }),
 		},
 	});
 	subagents(mock.pi, {

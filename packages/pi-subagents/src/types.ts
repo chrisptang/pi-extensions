@@ -70,7 +70,26 @@ export type ChildActivity =
 	| { type: "tool_end"; toolCallId: string; tool: string; result: unknown; isError: boolean }
 	| { type: "output"; text: string }
 	| { type: "turn"; turns: number }
-	| { type: "notice"; text: string };
+	| { type: "notice"; text: string }
+	| { type: "usage"; usage: ChildUsage };
+
+/**
+ * Token accounting from one child model response.
+ *
+ * The cumulative fields count every response, because a failed call still costs
+ * what it consumed. `contextTokens` is absent when the response cannot say how
+ * full the child's context is, which is what Pi core's own context gauge does.
+ */
+export interface ChildUsage {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	/** Context the response carried, when it reported usable usage. */
+	contextTokens?: number;
+	/** Provider cost of this response, in USD. */
+	cost: number;
+}
 
 export interface ChildRequest {
 	task: string;

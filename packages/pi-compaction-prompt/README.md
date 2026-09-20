@@ -1,6 +1,6 @@
 # 🗜️ pi-compaction-prompt — Your Own Rules for Context Compaction
 
-[![npm](https://img.shields.io/npm/v/@narumitw/pi-compaction-prompt)](https://www.npmjs.com/package/@narumitw/pi-compaction-prompt) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@chrisptang/pi-compaction-prompt)](https://www.npmjs.com/package/@chrisptang/pi-compaction-prompt) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 Write a Markdown file saying what a compaction summary must keep, and Pi applies it every time context is compacted.
 
@@ -17,13 +17,13 @@ Pi's built-in summary asks for goals, progress, decisions, and next steps, and a
 ## 📦 Install
 
 ```bash
-pi install npm:@narumitw/pi-compaction-prompt
+pi install npm:@chrisptang/pi-compaction-prompt
 ```
 
 Try without installing permanently:
 
 ```bash
-pi -e npm:@narumitw/pi-compaction-prompt
+pi -e npm:@chrisptang/pi-compaction-prompt
 ```
 
 Try this package locally from the repository root:

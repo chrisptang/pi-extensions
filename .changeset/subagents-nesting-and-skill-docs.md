@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": patch
+"@chrisptang/pi-subagents": patch
 ---
 
 Document that only the main session can create jobs, and why the example skill is not installed for you.

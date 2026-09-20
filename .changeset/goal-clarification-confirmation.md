@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-goal": minor
+"@chrisptang/pi-goal": minor
 ---
 
 Require user clarification and a native `goal_confirm` approval before `/goal <objective>` persists or activates a new goal. Preserve the requested token budget, reject stale confirmations, and cancel draft approval on superseding commands or session teardown.

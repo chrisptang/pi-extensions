@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-model-alias": minor
+"@chrisptang/pi-model-alias": minor
 ---
 
 Hold an alias on one model per session, and rotate off a candidate the provider rate-limits.

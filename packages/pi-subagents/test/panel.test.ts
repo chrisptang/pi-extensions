@@ -62,6 +62,8 @@ test("list view keeps the selection visible and counts the jobs outside the wind
 		elapsedMs: 0,
 		turns: 0,
 		tools: [],
+		model: "anthropic/model-x",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
 		limitations: [],
 		droppedEvents: 0,
 		activity: [],
@@ -87,10 +89,15 @@ test("detail view shows the job's budget, meta line, and activity", () => {
 	const job = sampleJobs()[0] as PanelJob;
 	const lines = renderDetailView(job, identityTheme(), 100, 10, undefined);
 	assert.match(lines[0] ?? "", /^╭─ explorer · running · 42s · 7\/100 turns ─+╮$/u);
-	// The description leads the meta line; the id and tools follow it.
-	assert.match(lines[1] ?? "", /^│ review auth middleware {2}job_a · tools: read, grep\s+│$/u);
-	assert.match(lines[3] ?? "", /^│ 12:04:31 read {3}✓ src\/auth\/mw\.ts → 80 lines/u);
-	assert.match(lines[4] ?? "", /^│ 12:04:35 say {6}The middleware verifies exp before refresh\./u);
+	// The description leads the meta line and the id follows it; what the job
+	// costs to run sits on its own line under it.
+	assert.match(lines[1] ?? "", /^│ review auth middleware {2}job_a\s+│$/u);
+	assert.match(
+		lines[2] ?? "",
+		/^│ anthropic\/model-x · ctx 49k\/1\.0m 4\.9% · cache 90\.2% · in 41k · out 6\.6k · \$0\.029\s+│$/u,
+	);
+	assert.match(lines[4] ?? "", /^│ 12:04:31 read {3}✓ src\/auth\/mw\.ts → 80 lines/u);
+	assert.match(lines[5] ?? "", /^│ 12:04:35 say {6}The middleware verifies exp before refresh\./u);
 	assert.match(
 		lines.at(-1) ?? "",
 		/^╰─ ↑↓ scroll {2}PgUp\/PgDn page {2}←→ job {2}k terminate {2}esc back ─+╯$/u,
@@ -109,11 +116,11 @@ test("detail view keeps the tool column aligned across tool-name lengths", () =>
 	};
 	const lines = renderDetailView(job, identityTheme(), 80, 10, undefined);
 	// Clock, a six-column label, a two-column outcome mark, then the detail.
-	assert.match(lines[3] ?? "", /^│ 01:00:00 read {3}✓ a\.ts/u);
-	assert.match(lines[4] ?? "", /^│ 01:00:01 write {2}✗ b\.ts/u);
+	assert.match(lines[4] ?? "", /^│ 01:00:00 read {3}✓ a\.ts/u);
+	assert.match(lines[5] ?? "", /^│ 01:00:01 write {2}✗ b\.ts/u);
 	// Truncating the name adds pi-tui's own style resets around the ellipsis.
-	assert.match((lines[5] ?? "").split("\u001b[0m").join(""), /^│ 01:00:02 list_… … src/u);
-	assert.match(lines[6] ?? "", /^│ 01:00:03 say {6}done/u);
+	assert.match((lines[6] ?? "").split("\u001b[0m").join(""), /^│ 01:00:02 list_… … src/u);
+	assert.match(lines[7] ?? "", /^│ 01:00:03 say {6}done/u);
 });
 
 test("detail view follows the newest event and scrolls to an explicit offset", () => {
@@ -126,17 +133,17 @@ test("detail view follows the newest event and scrolls to an explicit offset", (
 			detail: `line ${index + 1}`,
 		})),
 	};
-	// 10 body rows leave 8 for the log: the meta line and the rule take the rest.
+	// 10 body rows leave 7 for the log: the meta lines and the rule take the rest.
 	const tail = renderDetailView(job, identityTheme(), 80, 10, undefined);
 	assert.equal(tail.length, 12);
 	assert.ok(tail.some((line) => line.includes("line 30")));
-	assert.ok(!tail.some((line) => line.includes("line 22 ")));
+	assert.ok(!tail.some((line) => line.includes("line 23 ")));
 	// The scroll position sits at the right end of the bottom border.
-	assert.match(tail.at(-1) ?? "", /─ 23–30\/30 ─╯$/u);
+	assert.match(tail.at(-1) ?? "", /─ 24–30\/30 ─╯$/u);
 	const head = renderDetailView(job, identityTheme(), 80, 10, 0);
 	assert.ok(head.some((line) => line.includes("line 1 ")));
-	assert.ok(!head.some((line) => line.includes("line 9 ")));
-	assert.match(head.at(-1) ?? "", /─ 1–8\/30 ─╯$/u);
+	assert.ok(!head.some((line) => line.includes("line 8 ")));
+	assert.match(head.at(-1) ?? "", /─ 1–7\/30 ─╯$/u);
 });
 
 test("panel reports a terminal selection as not terminable", () => {
@@ -147,6 +154,8 @@ test("panel reports a terminal selection as not terminable", () => {
 		elapsedMs: 1_000,
 		turns: 0,
 		tools: [],
+		model: "anthropic/model-x",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
 		limitations: [],
 		droppedEvents: 0,
 		activity: [],
@@ -169,6 +178,8 @@ test("detail view reports dropped events and a job's own limitations", () => {
 			elapsedMs: 0,
 			turns: 0,
 			tools: ["read"],
+			model: "anthropic/model-x",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
 			limitations: ["Agent model was unavailable; inherited the main model."],
 			droppedEvents: 37,
 			activity: [{ seq: 38, at: at(1, 2, 3), kind: "notice", detail: "Job started." }],
@@ -180,9 +191,9 @@ test("detail view reports dropped events and a job's own limitations", () => {
 	);
 	// The limitation is a fact about the job, so it sits above the rule with the
 	// meta line rather than being appended to the chronological log.
-	assert.match(lines[2] ?? "", /^│ note: Agent model was unavailable; inherited the main model\./u);
-	assert.match(lines[3] ?? "", /^│ ─+ │$/u);
-	assert.match(lines[4] ?? "", /^│ … 37 earlier event\(s\) dropped/u);
+	assert.match(lines[3] ?? "", /^│ note: Agent model was unavailable; inherited the main model\./u);
+	assert.match(lines[4] ?? "", /^│ ─+ │$/u);
+	assert.match(lines[5] ?? "", /^│ … 37 earlier event\(s\) dropped/u);
 });
 
 test("list view renders an empty session", () => {
@@ -201,6 +212,8 @@ test("every panel line stays within the render width", () => {
 		elapsedMs: 0,
 		turns: 0,
 		tools: ["read", "grep", "find", "ls", "bash"],
+		model: "anthropic/model-x",
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
 		limitations: [],
 		droppedEvents: 0,
 		activity: [{ seq: 1, at: at(1, 2, 3), kind: "output", detail: "x".repeat(400) }],
@@ -254,6 +267,88 @@ test("a job's activity records the child's tool calls, results, and visible outp
 	// The widget surfaces only the newest line.
 	assert.equal(runtime.activeJobsForDisplay()[0]?.latestActivity, "Read the file.");
 	release?.();
+});
+
+test("a job records what its child spends and the panel reports it", async () => {
+	let report: ((activity: ChildActivity) => void) | undefined;
+	let release: (() => void) | undefined;
+	const runChild = async (request: ChildRequest): Promise<ChildResult> => {
+		report = request.onActivity;
+		await new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		return { state: "completed", result: "done", limitations: [], truncated: false };
+	};
+	const { mock, context } = await setup({ runChild });
+	const spawned = await spawnJob(mock, context);
+	const jobId = String(spawned.details.jobId);
+	await Promise.resolve();
+	assert.ok(report, "expected the runtime to pass an activity observer");
+	report?.({
+		type: "usage",
+		usage: {
+			input: 100,
+			output: 20,
+			cacheRead: 0,
+			cacheWrite: 900,
+			contextTokens: 1_020,
+			cost: 0.01,
+		},
+	});
+	report?.({
+		type: "usage",
+		usage: {
+			input: 30,
+			output: 10,
+			cacheRead: 1_000,
+			cacheWrite: 0,
+			contextTokens: 1_060,
+			cost: 0.002,
+		},
+	});
+	const job = runtimeOf(mock)
+		.panelJobs()
+		.find((candidate) => candidate.jobId === jobId);
+	// Tokens and cost accumulate; context size is the latest reading, not a sum.
+	assert.deepEqual(job?.usage, {
+		input: 130,
+		output: 30,
+		cacheRead: 1_000,
+		cacheWrite: 900,
+		cost: 0.012,
+		contextTokens: 1_060,
+	});
+	// The child's model and its window come from the parent, which resolved both
+	// before the spawn; the child only reports how many tokens it sent.
+	assert.equal(job?.model, "test-provider/test-model");
+	assert.equal(job?.contextWindow, 200_000);
+	const detail = renderDetailView(job as PanelJob, identityTheme(), 100, 10, undefined);
+	assert.match(
+		detail[2] ?? "",
+		/^│ test-provider\/test-model · ctx 1\.1k\/200k 0\.5% · cache 49\.3% · in 2\.0k · out 30 · \$0\.012/u,
+	);
+	release?.();
+});
+
+test("the cost line degrades when the model's window or usage is unknown", () => {
+	const job = sampleJobs()[1] as PanelJob;
+	const lines = renderDetailView(job, identityTheme(), 100, 10, undefined);
+	// No response has reported usage yet, so context and cache rate are unknown
+	// rather than zero.
+	assert.match(
+		lines[2] ?? "",
+		/^│ anthropic\/model-x · ctx — · cache — · in 0 · out 0 · \$0\.000/u,
+	);
+	const unmeasured = renderDetailView(
+		{ ...job, contextWindow: undefined, usage: { ...job.usage, contextTokens: 8_000 } },
+		identityTheme(),
+		100,
+		10,
+		undefined,
+	);
+	// An unregistered model has no window to measure against, so the panel shows
+	// the context size alone instead of an invented percentage.
+	assert.match(unmeasured[2] ?? "", /^│ anthropic\/model-x · ctx 8\.0k · cache —/u);
 });
 
 test("an observer that throws cannot disturb the job", async () => {
@@ -574,6 +669,16 @@ function sampleJobs(): PanelJob[] {
 			maxTurns: 100,
 			turns: 7,
 			tools: ["read", "grep"],
+			model: "anthropic/model-x",
+			contextWindow: 1_000_000,
+			usage: {
+				input: 3_000,
+				output: 6_600,
+				cacheRead: 37_000,
+				cacheWrite: 1_000,
+				cost: 0.029,
+				contextTokens: 49_000,
+			},
 			limitations: [],
 			droppedEvents: 0,
 			activity: [
@@ -605,6 +710,8 @@ function sampleJobs(): PanelJob[] {
 			elapsedMs: 62_000,
 			turns: 0,
 			tools: ["read", "edit"],
+			model: "anthropic/model-x",
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
 			error: "Subagent execution was cancelled by the user.",
 			limitations: [],
 			droppedEvents: 0,
@@ -666,6 +773,7 @@ async function setup(dependencies: SubagentsDependencies = {}) {
 		modelRegistry: {
 			getProviderAuthStatus: () => ({ configured: true, source: "environment" as const }),
 			getRegisteredProviderIds: () => [],
+			find: () => ({ contextWindow: 200_000 }),
 		},
 	});
 	subagents(mock.pi, {

@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-model-alias": minor
+"@chrisptang/pi-model-alias": minor
 ---
 
 Start a session on an alias with `pi --model <alias>`.

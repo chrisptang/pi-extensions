@@ -1,5 +1,5 @@
 {
-	"name": "@narumitw/pi-analytics",
+	"name": "@chrisptang/pi-analytics",
 	"version": "0.49.9",
 	"description": "Local-first usage analytics for Pi models, tokens, skills, tools, and reliability.",
 	"type": "module",
@@ -47,7 +47,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/narumiruna/pi-extensions",
+		"url": "https://github.com/chrisptang/pi-extensions",
 		"directory": "packages/pi-analytics"
 	}
 }

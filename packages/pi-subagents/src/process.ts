@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { type AssistantMessage, isRetryableAssistantError } from "@earendil-works/pi-ai";
 import { getPackageDir } from "@earendil-works/pi-coding-agent";
-import type { ChildActivity, ChildRequest, ChildResult } from "./types.js";
+import type { ChildActivity, ChildRequest, ChildResult, ChildUsage } from "./types.js";
 
 const CORE_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 const MAX_TIMEOUT_MS = 2_147_483_647;
@@ -56,11 +56,21 @@ interface AssistantEvent {
 	result?: unknown;
 	isError?: boolean;
 	toolResults?: unknown[];
-	message?: {
-		role?: string;
-		content?: Array<{ type?: string; text?: string }>;
-		stopReason?: string;
-		errorMessage?: string;
+	message?: AssistantEventMessage;
+}
+
+interface AssistantEventMessage {
+	role?: string;
+	content?: Array<{ type?: string; text?: string }>;
+	stopReason?: string;
+	errorMessage?: string;
+	usage?: {
+		input?: unknown;
+		output?: unknown;
+		cacheRead?: unknown;
+		cacheWrite?: unknown;
+		totalTokens?: unknown;
+		cost?: { total?: unknown };
 	};
 }
 
@@ -317,6 +327,8 @@ async function executeProcess(
 				return;
 			}
 			if (event.type === "message_end" && event.message?.role === "assistant") {
+				const usage = readUsage(event.message);
+				if (usage) reportActivity({ type: "usage", usage });
 				const text = (event.message.content ?? [])
 					.filter((part) => part.type === "text" && typeof part.text === "string")
 					.map((part) => part.text)
@@ -813,6 +825,38 @@ function cancelledResult(
 		limitations,
 		truncated,
 	};
+}
+
+/**
+ * Read one response's token accounting.
+ *
+ * Context size follows Pi core: `totalTokens` wins over the component sum, and a
+ * response that was aborted or failed reports none, because its usage does not
+ * describe the conversation the child will send next. The cumulative fields are
+ * read from every response, failed ones included, since they were still billed.
+ */
+function readUsage(message: AssistantEventMessage): ChildUsage | undefined {
+	const usage = message.usage;
+	if (!usage) return undefined;
+	const input = tokenCount(usage.input);
+	const output = tokenCount(usage.output);
+	const cacheRead = tokenCount(usage.cacheRead);
+	const cacheWrite = tokenCount(usage.cacheWrite);
+	const failed = message.stopReason === "error" || message.stopReason === "aborted";
+	const contextTokens = tokenCount(usage.totalTokens) || input + output + cacheRead + cacheWrite;
+	return {
+		input,
+		output,
+		cacheRead,
+		cacheWrite,
+		...(failed || contextTokens <= 0 ? {} : { contextTokens }),
+		cost: tokenCount(usage.cost?.total),
+	};
+}
+
+/** Child stdout is untrusted, so a missing or nonsensical count reads as zero. */
+function tokenCount(value: unknown): number {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function truncateText(text: string, maxBytes: number): { text: string; truncated: boolean } {

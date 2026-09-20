@@ -52,3 +52,14 @@ export function formatDuration(seconds: number): string {
 	if (hours > 0) return `${hours}h${minutes > 0 ? `${minutes}m` : ""}`;
 	return `${minutes}m${rest > 0 ? `${rest}s` : ""}`;
 }
+
+/**
+ * Compact token count: `842`, `6.6k`, `663k`, `1.0m`. It matches the notation
+ * Pi's own footer uses, so a child's numbers read like the parent's.
+ */
+export function formatTokenCount(value: number): string {
+	const whole = Math.max(0, Math.round(value));
+	if (whole < 1_000) return `${whole}`;
+	if (whole < 1_000_000) return `${(whole / 1_000).toFixed(whole < 10_000 ? 1 : 0)}k`;
+	return `${(whole / 1_000_000).toFixed(1)}m`;
+}

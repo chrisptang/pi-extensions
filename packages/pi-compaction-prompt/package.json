@@ -1,5 +1,5 @@
 {
-	"name": "@narumitw/pi-compaction-prompt",
+	"name": "@chrisptang/pi-compaction-prompt",
 	"version": "0.1.0",
 	"description": "Pi extension that injects a Markdown compaction prompt from the project or user scope into context summarization.",
 	"type": "module",
@@ -40,7 +40,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/narumiruna/pi-extensions",
+		"url": "https://github.com/chrisptang/pi-extensions",
 		"directory": "packages/pi-compaction-prompt"
 	}
 }

@@ -1,8 +1,8 @@
 ---
-"@narumitw/pi-history": minor
+"@chrisptang/pi-history": minor
 ---
 
-Add `@narumitw/pi-history`, which makes Pi's Up-arrow prompt history survive the session.
+Add `@chrisptang/pi-history`, which makes Pi's Up-arrow prompt history survive the session.
 
 Pi already browses typed prompts with Up and Down, but that history is in-memory only and seeded solely from the current session, so it is empty again on the next start. This extension records each interactively typed prompt to `<workspace>/.pi/pi-history.json` and replays the stored prompts into the editor at session start, so Up reaches prompts from previous sessions the way a shell history does.
 

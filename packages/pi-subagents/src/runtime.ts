@@ -7,6 +7,7 @@ import {
 	type ChildActivity,
 	type ChildRequest,
 	type ChildResult,
+	type ChildUsage,
 	type JobSummary,
 	type SubagentJobState,
 	type SubagentThinkingLevel,
@@ -24,6 +25,9 @@ interface StopRequest {
 interface InternalJob extends JobSummary {
 	controller: AbortController;
 	tools: string[];
+	model: string;
+	contextWindow?: number;
+	usage: JobUsage;
 	notifyOnCompletion: boolean;
 	terminal: Promise<void>;
 	resolveTerminal: () => void;
@@ -50,6 +54,24 @@ export interface RuntimeDependencies {
  * This is a human-facing view: unlike `JobSummary`, which the model receives and
  * which deliberately omits the tool list, it carries everything the panel shows.
  */
+/**
+ * What a job has spent so far, accumulated from its child's responses.
+ *
+ * `contextTokens` is the latest usable reading rather than a sum: it says how
+ * full the child's context is now, which is what a reader watching a long job
+ * needs to know.
+ */
+export interface JobUsage {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	/** Provider cost so far, in USD. */
+	cost: number;
+	/** Context the child's latest usable response carried. */
+	contextTokens?: number;
+}
+
 export interface PanelJob {
 	jobId: string;
 	agent?: string;
@@ -62,6 +84,11 @@ export interface PanelJob {
 	maxTurns?: number;
 	turns: number;
 	tools: string[];
+	/** Concrete `provider/modelId` the child runs. */
+	model: string;
+	/** Context window of `model`, when the registry reported one. */
+	contextWindow?: number;
+	usage: JobUsage;
 	error?: string;
 	limitations: string[];
 	/** Events evicted by the per-job capacity bound. */
@@ -88,6 +115,8 @@ export interface StartJobInput {
 	task: string;
 	tools: string[];
 	model: string;
+	/** Context window of `model`, when the registry reports one. */
+	contextWindow?: number;
 	thinkingLevel: SubagentThinkingLevel;
 	cwd: string;
 	/** Turn budget after which the child is asked to wrap up. */
@@ -188,6 +217,9 @@ export class SubagentRuntime {
 				...(job.maxTurns !== undefined ? { maxTurns: job.maxTurns } : {}),
 				turns: job.turns,
 				tools: [...job.tools],
+				model: job.model,
+				...(job.contextWindow !== undefined ? { contextWindow: job.contextWindow } : {}),
+				usage: { ...job.usage },
 				...(job.error ? { error: job.error } : {}),
 				limitations: [...job.limitations],
 				droppedEvents: job.activity.droppedCount,
@@ -223,6 +255,9 @@ export class SubagentRuntime {
 			...(input.maxTurns !== undefined ? { maxTurns: input.maxTurns } : {}),
 			controller,
 			tools: [...input.tools],
+			model: input.model,
+			...(input.contextWindow !== undefined ? { contextWindow: input.contextWindow } : {}),
+			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
 			notifyOnCompletion: input.notifyOnCompletion ?? false,
 			terminal,
 			resolveTerminal,
@@ -319,6 +354,9 @@ export class SubagentRuntime {
 				break;
 			case "notice":
 				job.activity.notice(activity.text, at);
+				break;
+			case "usage":
+				accumulateUsage(job.usage, activity.usage);
 				break;
 		}
 		this.notifyJobsChanged();
@@ -543,6 +581,20 @@ export class SubagentRuntime {
  * Only the newest event is exposed: the widget exists to say a job is alive and
  * roughly where it is, and the panel is where the full record is read.
  */
+/**
+ * Fold one response's accounting into the job's running totals. Context size is
+ * replaced rather than added, because each reading already covers the whole
+ * conversation the child sent.
+ */
+function accumulateUsage(totals: JobUsage, usage: ChildUsage): void {
+	totals.input += usage.input;
+	totals.output += usage.output;
+	totals.cacheRead += usage.cacheRead;
+	totals.cacheWrite += usage.cacheWrite;
+	totals.cost += usage.cost;
+	if (usage.contextTokens !== undefined) totals.contextTokens = usage.contextTokens;
+}
+
 function latestActivityOf(job: InternalJob): { latestActivity?: string } {
 	const events = job.activity.snapshot();
 	const latest = events.at(-1);

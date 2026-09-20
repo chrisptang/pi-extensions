@@ -11,10 +11,10 @@ Published packages use the `@narumitw` npm scope, and package READMEs identify s
 
 ## 🚀 Quick start
 
-Install an extension permanently:
+Published packages use the `@narumitw` npm scope, except the packages maintained in this fork, which use `@chrisptang`. Package READMEs identify source-only exceptions.
 
 ```bash
-pi install npm:@narumitw/pi-goal
+pi install npm:@chrisptang/pi-goal
 ```
 
 Try one without adding it permanently:
@@ -26,7 +26,7 @@ pi -e npm:@narumitw/pi-statusline
 Combine multiple extensions:
 
 ```bash
-pi -e npm:@narumitw/pi-goal \
+pi -e npm:@chrisptang/pi-goal \
   -e npm:@narumitw/pi-statusline \
   -e npm:@narumitw/pi-lsp
 ```
@@ -74,7 +74,7 @@ These extensions are part of my daily Pi setup:
 | --- | --- | --- |
 | [`pi-btw`](./packages/pi-btw) | Ask a quick `/btw` side question without adding it to the main conversation. | `pi install npm:@narumitw/pi-btw` |
 | [`pi-caffeinate`](./packages/pi-caffeinate) | Prevent system sleep while Pi processes a long-running prompt. | `pi install npm:@narumitw/pi-caffeinate` |
-| [`pi-goal`](./packages/pi-goal) | Keep the agent working until a goal is verified complete; optionally enable an experimental ordered queue. | `pi install npm:@narumitw/pi-goal` |
+| [`pi-goal`](./packages/pi-goal) | Keep the agent working until a goal is verified complete; optionally enable an experimental ordered queue. | `pi install npm:@chrisptang/pi-goal` |
 | [`pi-worktree`](./packages/pi-worktree) | Create, switch, remove, and prune Git worktrees while carrying the Pi session into another workspace. | `pi install npm:@narumitw/pi-worktree` |
 
 Current Plan and Goal releases can coexist on the characterized Pi runtime through their anonymous cooperative workflow mutex.
@@ -101,11 +101,11 @@ The deprecated combined `pi-workflow` package has no atomic Plan-to-Goal replace
 
 | Package | Use it for | Install |
 | --- | --- | --- |
-| [`pi-analytics`](./packages/pi-analytics) | Review private, content-free local metrics for model calls, skills, tools, response cycles, and observed provider reliability through `/analytics`. | `pi install npm:@narumitw/pi-analytics` |
-| [`pi-github-pr`](./packages/pi-github-pr) | Show current-branch pull request checks, reviews, and comment counts through the authenticated `gh` CLI. | `pi install npm:@narumitw/pi-github-pr` |
+| [`pi-analytics`](./packages/pi-analytics) | Review private, content-free local metrics for model calls, skills, tools, response cycles, and observed provider reliability through `/analytics`. | `pi install npm:@chrisptang/pi-analytics` |
+| [`pi-github-pr`](./packages/pi-github-pr) | Show current-branch pull request checks, reviews, and comment counts through the authenticated `gh` CLI. | `pi install npm:@chrisptang/pi-github-pr` |
 | [`pi-langfuse`](./packages/pi-langfuse) | Send agent runs, generations, token usage, costs, and tool activity to Langfuse. | `pi install npm:@narumitw/pi-langfuse` |
 | [`pi-stamp`](./packages/pi-stamp) | Show configurable timestamps with opt-in assistant metadata, response timing, and tool timing in the TUI transcript. | `pi install npm:@narumitw/pi-stamp` |
-| [`pi-starship`](./packages/pi-starship) | Use a native Starship-style TOML footer with Pi-specific modules and no Starship binary dependency. | `pi install npm:@narumitw/pi-starship` |
+| [`pi-starship`](./packages/pi-starship) | Use a native Starship-style TOML footer with Pi-specific modules and no Starship binary dependency. | `pi install npm:@chrisptang/pi-starship` |
 | [`pi-statusline`](./packages/pi-statusline) | Show model, tools, Git state, context usage, tokens, cost, and time in a preset or JSON-configured footer. | `pi install npm:@narumitw/pi-statusline` |
 | [`pi-tool`](./packages/pi-tool) | Browse every configured tool and inspect its active state, source, parameter schema, and prompt guidelines with `/tool`. | `pi install npm:@narumitw/pi-tool` |
 
@@ -175,7 +175,7 @@ npm run check
 Build generated entries before loading local packages, and use the generic npm pack workflow with an unscoped package name:
 
 ```bash
-npm --workspace @narumitw/pi-goal run build --if-present
+npm --workspace @chrisptang/pi-goal run build --if-present
 pi -e ./packages/pi-goal
 npm run package:pack -- goal
 
@@ -238,7 +238,7 @@ npm run changeset
 After changesets reach `main`, the release workflow creates or updates one version pull request. That
 pull request changes only selected package versions, dependency ranges where configured, changelogs,
 and the lockfile. Merging it publishes the new versions with npm provenance and creates
-package-specific tags and GitHub releases such as `@narumitw/pi-goal@0.50.0`.
+package-specific tags and GitHub releases such as `@chrisptang/pi-goal@0.50.0`.
 
 Repository-only documentation, tests, tooling, and path migrations may omit a changeset. Use
 `npm run changeset:status` to inspect pending releases. Versioning and publication run through the

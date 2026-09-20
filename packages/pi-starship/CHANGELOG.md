@@ -1,4 +1,4 @@
-# @narumitw/pi-starship
+# @chrisptang/pi-starship
 
 ## 0.55.0
 

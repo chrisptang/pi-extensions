@@ -1,4 +1,4 @@
-# @narumitw/pi-subagents
+# @chrisptang/pi-subagents
 
 ## 3.0.1
 

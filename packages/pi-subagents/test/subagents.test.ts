@@ -984,6 +984,7 @@ async function setup(
 		modelRegistry: {
 			getProviderAuthStatus: () => ({ configured: true, source: "environment" as const }),
 			getRegisteredProviderIds: () => [],
+			find: () => ({ contextWindow: 200_000 }),
 		},
 		...contextOverrides,
 	});

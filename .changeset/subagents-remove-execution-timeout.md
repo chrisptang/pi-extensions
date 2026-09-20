@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": major
+"@chrisptang/pi-subagents": major
 ---
 
 Remove the execution `timeout` parameter from `subagent_spawn` and `skill_run`, and the `timed_out` job state with it.

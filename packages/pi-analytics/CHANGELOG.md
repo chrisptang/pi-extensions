@@ -1,4 +1,4 @@
-# @narumitw/pi-analytics
+# @chrisptang/pi-analytics
 
 ## 0.49.9
 

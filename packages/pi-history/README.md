@@ -1,6 +1,6 @@
 # ⌨️ pi-history — Prompt History That Survives the Session
 
-[![npm](https://img.shields.io/npm/v/@narumitw/pi-history)](https://www.npmjs.com/package/@narumitw/pi-history) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@chrisptang/pi-history)](https://www.npmjs.com/package/@chrisptang/pi-history) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 Pi already lets you press Up to browse the prompts you typed, but that history lives in memory and disappears when the session ends. This extension writes each typed prompt to a per-project file and restores it into the editor at startup, so Up reaches yesterday's prompts the way a shell history does.
 
@@ -16,19 +16,19 @@ Pi already lets you press Up to browse the prompts you typed, but that history l
 ## 📦 Install
 
 ```bash
-pi install npm:@narumitw/pi-history
+pi install npm:@chrisptang/pi-history
 ```
 
 Try without installing permanently:
 
 ```bash
-pi -e npm:@narumitw/pi-history
+pi -e npm:@chrisptang/pi-history
 ```
 
 Try this package locally from the repository root:
 
 ```bash
-npm --workspace @narumitw/pi-history run build
+npm --workspace @chrisptang/pi-history run build
 pi -e ./packages/pi-history
 ```
 

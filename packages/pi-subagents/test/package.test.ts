@@ -18,7 +18,7 @@ test("package declares one generated extension without a bundled skill", () => {
 		peerDependencies: Record<string, string>;
 		repository: { directory: string };
 	};
-	assert.equal(manifest.name, "@narumitw/pi-subagents");
+	assert.equal(manifest.name, "@chrisptang/pi-subagents");
 	assert.doesNotMatch(manifest.description, /\b(?:background|bounded)\b/i);
 	assert.equal(manifest.private, false);
 	assert.equal(manifest.repository.directory, "packages/pi-subagents");

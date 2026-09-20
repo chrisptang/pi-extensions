@@ -1,6 +1,6 @@
 # 🎯 pi-goal — Keep Pi Working Toward a Goal
 
-[![npm](https://img.shields.io/npm/v/@narumitw/pi-goal)](https://www.npmjs.com/package/@narumitw/pi-goal) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@chrisptang/pi-goal)](https://www.npmjs.com/package/@chrisptang/pi-goal) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 Give Pi one session-scoped objective and let it continue after Pi becomes fully idle.
 Goal mode stops when work completes, pauses, waits for an external event, or reaches a safety limit.
@@ -26,19 +26,19 @@ Explicit completion, blocker, and wait tools give each managed run a clear stopp
 Requires Pi `0.80.6` or newer for the `agent_settled` lifecycle event.
 
 ```bash
-pi install npm:@narumitw/pi-goal
+pi install npm:@chrisptang/pi-goal
 ```
 
 Try without installing permanently:
 
 ```bash
-pi -e npm:@narumitw/pi-goal
+pi -e npm:@chrisptang/pi-goal
 ```
 
 Build and try this package locally from the repository root:
 
 ```bash
-npm --workspace @narumitw/pi-goal run build
+npm --workspace @chrisptang/pi-goal run build
 pi -e ./packages/pi-goal
 ```
 

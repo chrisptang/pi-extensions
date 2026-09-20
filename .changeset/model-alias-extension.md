@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-model-alias": minor
+"@chrisptang/pi-model-alias": minor
 ---
 
 Add pi-model-alias, which switches the session model through short aliases defined in `model-alias.json`.

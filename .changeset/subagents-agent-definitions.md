@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": minor
+"@chrisptang/pi-subagents": minor
 ---
 
 Add agent definitions, two built-in agents, and background jobs to pi-subagents.

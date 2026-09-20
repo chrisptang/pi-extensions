@@ -1,6 +1,6 @@
 # 📈 pi-analytics — Understand Pi Activity Without Sending Data Away
 
-[![npm](https://img.shields.io/npm/v/@narumitw/pi-analytics)](https://www.npmjs.com/package/@narumitw/pi-analytics) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@chrisptang/pi-analytics)](https://www.npmjs.com/package/@chrisptang/pi-analytics) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 Measure local model, skill, tool, and provider reliability activity without storing conversation or tool content or sending analytics elsewhere.
 
@@ -19,19 +19,19 @@ Measure local model, skill, tool, and provider reliability activity without stor
 Install persistently:
 
 ```bash
-pi install npm:@narumitw/pi-analytics
+pi install npm:@chrisptang/pi-analytics
 ```
 
 Try the published package without installing:
 
 ```bash
-pi -e npm:@narumitw/pi-analytics
+pi -e npm:@chrisptang/pi-analytics
 ```
 
 Build and try a local checkout from the repository root:
 
 ```bash
-npm --workspace @narumitw/pi-analytics run build
+npm --workspace @chrisptang/pi-analytics run build
 pi -e ./packages/pi-analytics
 ```
 

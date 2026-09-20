@@ -1,5 +1,5 @@
 {
-	"name": "@narumitw/pi-skill-visibility",
+	"name": "@chrisptang/pi-skill-visibility",
 	"version": "0.1.0",
 	"description": "Pi extension that reduces automatic skill exposure and analyzes local skill-use evidence.",
 	"type": "module",
@@ -43,7 +43,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/narumiruna/pi-extensions",
+		"url": "https://github.com/chrisptang/pi-extensions",
 		"directory": "packages/pi-skill-visibility"
 	}
 }

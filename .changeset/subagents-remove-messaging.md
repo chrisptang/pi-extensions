@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": major
+"@chrisptang/pi-subagents": major
 ---
 
 Remove messaging in both directions. A subagent job is now one-way: start it, watch it, read its result.

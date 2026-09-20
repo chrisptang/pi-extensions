@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": minor
+"@chrisptang/pi-subagents": minor
 ---
 
 Bound subagent exploration with a turn budget.

@@ -7,8 +7,8 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { ActivityEvent } from "./activity.js";
-import type { PanelJob, SubagentRuntime } from "./runtime.js";
-import { formatDuration, sanitizeTerminalText } from "./text.js";
+import type { JobUsage, PanelJob, SubagentRuntime } from "./runtime.js";
+import { formatDuration, formatTokenCount, sanitizeTerminalText } from "./text.js";
 import { TERMINAL_JOB_STATES } from "./types.js";
 
 /** Panel repaint cadence, matching the active-jobs widget. */
@@ -366,7 +366,7 @@ function renderJobRow(
 /**
  * Render one job's activity log inside a frame.
  *
- * The job's own facts (description, id, tools, error, limitations) sit above the
+ * The job's own facts (description, id, cost, error, limitations) sit above the
  * rule; below it is the chronological log, which follows the newest event unless
  * the reader scrolled up. The eviction notice at its head makes the bounded
  * retention explicit instead of letting the log look complete.
@@ -424,20 +424,57 @@ function detailTitle(job: PanelJob, theme: Theme): string {
 
 type JobLine = readonly [role: "text" | "dim" | "error" | "warning", line: string];
 
-/** The job-level lines shown above the rule: what it is, then what went wrong. */
+/** The job-level lines shown above the rule: what it is, what it spends, then what went wrong. */
 function jobLines(job: PanelJob): JobLine[] {
-	const tools = job.tools.length > 0 ? job.tools.map(sanitizeLabel).join(", ") : "none";
-	const identity = `${job.jobId} · tools: ${tools}`;
 	const lines: JobLine[] = [
 		job.description
-			? ["text", `${sanitizeLabel(job.description)}  ${identity}`]
-			: ["dim", identity],
+			? ["text", `${sanitizeLabel(job.description)}  ${job.jobId}`]
+			: ["dim", job.jobId],
+		["dim", costLine(job)],
 	];
 	if (job.error) lines.push(["error", `error: ${sanitizeLabel(job.error)}`]);
 	for (const limitation of job.limitations) {
 		lines.push(["warning", `note: ${sanitizeLabel(limitation)}`]);
 	}
 	return lines;
+}
+
+/**
+ * What the child is spending: the model it runs, how full its context is, how
+ * much of its input the provider served from cache, and what it has cost. The
+ * granted tool list is fixed at spawn and says nothing about the run, so the
+ * activity log below shows the tools that were actually used instead.
+ */
+function costLine(job: PanelJob): string {
+	return [
+		sanitizeLabel(job.model),
+		`ctx ${contextText(job)}`,
+		`cache ${cacheText(job.usage)}`,
+		`in ${formatTokenCount(promptTokens(job.usage))}`,
+		`out ${formatTokenCount(job.usage.output)}`,
+		`$${job.usage.cost.toFixed(3)}`,
+	].join(" · ");
+}
+
+/** `49k/1.0m 4.9%`, or just the tokens when the model's window is unknown. */
+function contextText(job: PanelJob): string {
+	const tokens = job.usage.contextTokens;
+	if (tokens === undefined) return "—";
+	const compact = formatTokenCount(tokens);
+	if (job.contextWindow === undefined) return compact;
+	const percent = (tokens / job.contextWindow) * 100;
+	return `${compact}/${formatTokenCount(job.contextWindow)} ${percent.toFixed(1)}%`;
+}
+
+/** Share of the child's prompt tokens the provider served from its cache. */
+function cacheText(usage: JobUsage): string {
+	const prompt = promptTokens(usage);
+	return prompt > 0 ? `${((usage.cacheRead / prompt) * 100).toFixed(1)}%` : "—";
+}
+
+/** Everything the provider read as input, cached or not, as Pi's footer counts it. */
+function promptTokens(usage: JobUsage): number {
+	return usage.input + usage.cacheRead + usage.cacheWrite;
 }
 
 function detailLogLines(job: PanelJob, theme: Theme): string[] {

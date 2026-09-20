@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": minor
+"@chrisptang/pi-subagents": minor
 ---
 
 Add `skill_run`, which executes a skill inside a subagent instead of loading it into the main session.

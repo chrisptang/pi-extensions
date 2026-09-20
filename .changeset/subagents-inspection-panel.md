@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": minor
+"@chrisptang/pi-subagents": minor
 ---
 
 Add `/subagents`, an interactive panel for watching and terminating subagent jobs.

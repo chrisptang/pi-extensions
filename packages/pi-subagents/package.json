@@ -1,5 +1,5 @@
 {
-	"name": "@narumitw/pi-subagents",
+	"name": "@chrisptang/pi-subagents",
 	"version": "3.0.1",
 	"description": "One-way subagent jobs with live inspection and termination for Pi.",
 	"type": "module",
@@ -50,7 +50,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/narumiruna/pi-extensions",
+		"url": "https://github.com/chrisptang/pi-extensions",
 		"directory": "packages/pi-subagents"
 	}
 }

@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": minor
+"@chrisptang/pi-subagents": minor
 ---
 
 Let `~/.pi/agent/subagent_instruction.md` replace the tool instructions the main session reads.

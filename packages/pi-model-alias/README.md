@@ -1,6 +1,6 @@
 # 🎚️ pi-model-alias — Switch Models by Short Name, Per Session or Per Skill
 
-[![npm](https://img.shields.io/npm/v/@narumitw/pi-model-alias)](https://www.npmjs.com/package/@narumitw/pi-model-alias) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@chrisptang/pi-model-alias)](https://www.npmjs.com/package/@chrisptang/pi-model-alias) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 Give your models short names, switch with `/ma sonnet` instead of a full `provider/model-id`, and let a skill run on a model of its own.
 
@@ -19,19 +19,19 @@ Give your models short names, switch with `/ma sonnet` instead of a full `provid
 ## 📦 Install
 
 ```bash
-pi install npm:@narumitw/pi-model-alias
+pi install npm:@chrisptang/pi-model-alias
 ```
 
 Try without installing permanently:
 
 ```bash
-pi -e npm:@narumitw/pi-model-alias
+pi -e npm:@chrisptang/pi-model-alias
 ```
 
 Try this package locally from the repository root:
 
 ```bash
-npm --workspace @narumitw/pi-model-alias run build
+npm --workspace @chrisptang/pi-model-alias run build
 pi -e ./packages/pi-model-alias
 ```
 

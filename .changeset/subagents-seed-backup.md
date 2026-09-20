@@ -1,5 +1,5 @@
 ---
-"@narumitw/pi-subagents": patch
+"@chrisptang/pi-subagents": patch
 ---
 
 Back up a built-in agent definition before seeding overwrites it, and report the replacement instead of letting it pass silently.

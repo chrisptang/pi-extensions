@@ -1,6 +1,6 @@
 # 🧩 Pi Subagents — One-Way Subagent Jobs
 
-[![npm](https://img.shields.io/npm/v/@narumitw/pi-subagents)](https://www.npmjs.com/package/@narumitw/pi-subagents) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
+[![npm](https://img.shields.io/npm/v/@chrisptang/pi-subagents)](https://www.npmjs.com/package/@chrisptang/pi-subagents) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
 Pi Subagents runs Pi jobs in separate child processes. A job is one-way by design: the main session starts it, watches it, and reads its final result. A child has no channel back to the parent — when it hits a decision it cannot make, it returns the decision instead of asking.
 
@@ -49,7 +49,7 @@ The npm package still contains the legacy 2.x runtime and does not provide the t
 Install the repository source as one Pi package:
 
 ```bash
-pi install git:github.com/narumiruna/pi-extensions
+pi install git:github.com/chrisptang/pi-extensions
 ```
 
 This Git installation enables every extension listed in the repository root manifest, including Pi Subagents.
@@ -57,17 +57,17 @@ This Git installation enables every extension listed in the repository root mani
 To install only Pi Subagents, clone the repository, install dependencies, build its generated runtime, and install its package directory:
 
 ```bash
-git clone https://github.com/narumiruna/pi-extensions.git
+git clone https://github.com/chrisptang/pi-extensions.git
 cd pi-extensions
 npm install
-npm --workspace @narumitw/pi-subagents run build
+npm --workspace @chrisptang/pi-subagents run build
 pi install ./packages/pi-subagents
 ```
 
 Build before trying the extension from a local checkout:
 
 ```bash
-npm --workspace @narumitw/pi-subagents run build
+npm --workspace @chrisptang/pi-subagents run build
 pi --no-extensions -e ./packages/pi-subagents
 ```
 
@@ -129,7 +129,7 @@ See [`docs/tools.md`](./docs/tools.md) for the concise schema reference.
 The task should state the child's role, objective, scope, constraints, and expected result.
 For reusable delegation policy, you can create your own project skill under `.pi/skills/<your-skill>/SKILL.md` or global skill under `~/.pi/agent/skills/<your-skill>/SKILL.md`.
 Choose its name, trigger, tool policy, task format, and verification workflow for your use case.
-The package intentionally registers and publishes no skill; the repository-only [`using-pi-subagents` example](https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-subagents/skills/using-pi-subagents) is an optional starting point.
+The package intentionally registers and publishes no skill; the repository-only [`using-pi-subagents` example](https://github.com/chrisptang/pi-extensions/tree/main/packages/pi-subagents/skills/using-pi-subagents) is an optional starting point.
 
 Installing is deliberately left to you, and the example is not copied into `~/.pi/agent/skills/` on install, for two reasons.
 A skill in that directory joins the `skill_run` roster, so the example — whose body is guidance about *when to delegate* — would become something the model can hand to a child to "execute", which is meaningless work.
@@ -408,19 +408,24 @@ The key hints sit in the bottom border, and a list longer than the panel says ho
 ╰─ ↑↓ select  ⏎ open  k terminate  esc close ────────────────────────╯
 ```
 
-`Enter` opens the selected job: its description, `jobId`, and selected work tools above a rule, any error or limitation beside them, and below the rule its activity as the child produces it.
+`Enter` opens the selected job: its description and `jobId`, what the child is spending, any error or limitation beside them, and below the rule its activity as the child produces it.
 The title carries its elapsed time and turns used against its budget.
 The log follows the newest event until you scroll up, and `←→` moves to the neighbouring job without leaving the view:
 
 ```
 ╭─ explorer · running · 42s / 2m · 7/100 turns ──────────────────────╮
-│ review auth middleware  job_m2x1_3 · tools: read, grep             │
+│ review auth middleware  job_m2x1_3                                 │
+│ anthropic/claude-x · ctx 49k/1.0m 4.9% · cache 92.5% · in 663k …   │
 │ ────────────────────────────────────────────────────────────────── │
 │ 12:04:31 read   ✓ src/auth/middleware.ts → 80 lines                │
 │ 12:04:33 grep   ✓ "verifyToken" src/ → 7 matches                   │
 │ 12:04:35 say      The middleware verifies exp before refresh.      │
 ╰─ ↑↓ scroll  PgUp/PgDn page  ←→ job  k terminate  esc back ─────────╯
 ```
+
+The second line is the job's running cost: the model the child actually runs, how full its context is against that model's window, the share of its prompt tokens the provider served from cache, its prompt and output token totals, and what it has cost so far.
+Token counts come from the child's own responses, so they stay `—` until its first one returns, and context size is the latest reading rather than a sum.
+The tool list the child was granted is fixed at spawn and says nothing about the run, so the activity log below shows the tools it actually used instead.
 
 `k` starts termination from either view, `esc` returns to the list or closes it, and `Ctrl+C` closes the panel from anywhere.
 Navigation keys follow Pi's `tui.select.*` keybindings, so a rebinding in `~/.pi/agent/keybindings.json` applies here too.
