@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, test } from "vitest";
@@ -97,6 +97,24 @@ test("an empty body is rejected", () => {
 	const { agents, diagnostics } = discoverPrimaryAgents();
 	assert.equal(agents.get("hollow"), undefined);
 	assert.ok(diagnostics.some((line) => line.includes("empty body")));
+});
+
+test("symlinked definitions are loaded and broken links are skipped", () => {
+	// Shared agent trees are commonly linked in one entry at a time, so a
+	// symlink to a `.md` file must be read like a regular file.
+	const directory = path.join(root, "agents");
+	const shared = path.join(root, "shared");
+	writeAgent(shared, "reviewer.md", "---\nname: reviewer\n---\n\nLinked body.\n");
+	mkdirSync(directory, { recursive: true });
+	symlinkSync(path.join(shared, "reviewer.md"), path.join(directory, "reviewer.md"));
+	symlinkSync(path.join(shared, "gone.md"), path.join(directory, "gone.md"));
+	symlinkSync(shared, path.join(directory, "tree.md"));
+
+	const { agents, diagnostics } = discoverPrimaryAgents();
+	assert.equal(agents.get("reviewer")?.body, "Linked body.");
+	assert.equal(agents.get("gone"), undefined);
+	assert.equal(agents.get("tree"), undefined);
+	assert.deepEqual(diagnostics, []);
 });
 
 test("primary discovery ignores the optional lookup directories", () => {

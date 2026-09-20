@@ -111,7 +111,7 @@ function listAgentFiles(directory: string, diagnostics: string[]): string[] {
 		return [];
 	}
 	const files = entries
-		.filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith(".md"))
+		.filter((entry) => isAgentFile(directory, entry))
 		.map((entry) => path.join(directory, entry.name))
 		.sort();
 	if (files.length > MAX_AGENTS_PER_DIRECTORY) {
@@ -121,6 +121,24 @@ function listAgentFiles(directory: string, diagnostics: string[]): string[] {
 		return files.slice(0, MAX_AGENTS_PER_DIRECTORY);
 	}
 	return files;
+}
+
+/**
+ * Accept regular `.md` files and symlinks that resolve to one. Symlinked agent
+ * definitions are normal in the lookup directories: a shared agents tree is
+ * commonly linked into `~/.claude/agents` or `~/.agents/agents` one entry at a
+ * time, and `Dirent.isFile()` is false for every one of those links.
+ */
+function isAgentFile(directory: string, entry: fs.Dirent): boolean {
+	if (!entry.name.toLowerCase().endsWith(".md")) return false;
+	if (entry.isFile()) return true;
+	if (!entry.isSymbolicLink()) return false;
+	try {
+		return fs.statSync(path.join(directory, entry.name)).isFile();
+	} catch {
+		// A broken or unreadable link has nothing to load; skip it silently.
+		return false;
+	}
 }
 
 function readAgentFile(
