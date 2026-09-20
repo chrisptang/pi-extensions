@@ -30,6 +30,8 @@ The active-jobs widget labels the job with its `agent` name, or its job ID when 
 
 The runtime adds nothing to the selected tools. A child receives exactly what `tools` names, and no `subagent_*` tool ever reaches a child.
 
+Pi handles recognized transient provider failures first. If a premature stream disconnect escapes Pi's classifier, the runtime waits for `agent_settled` and then prompts the same RPC child to continue the original task. Pi-native and extension continuations share a maximum of three retries with 2s, 4s, and 8s backoff. Cancellation interrupts the wait. Authentication, quota, configuration, tool, model-limit, and other deterministic failures are not retried.
+
 A definition's `model: inherit` keeps the main agent's model without reporting a limitation, the same as omitting the field.
 
 `agent` appends the definition's body to the child's system prompt, so `task` stays free for the caller's own instructions. Explicit `tools`, `thinkingLevel`, and `model` arguments always override the definition's defaults. An unknown name throws before the job is queued.

@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { StringDecoder } from "node:string_decoder";
+import { type AssistantMessage, isRetryableAssistantError } from "@earendil-works/pi-ai";
 import { getPackageDir } from "@earendil-works/pi-coding-agent";
 import type { ChildActivity, ChildRequest, ChildResult } from "./types.js";
 
@@ -13,6 +14,12 @@ const MAX_ERROR_BYTES = 8 * 1024;
 const MAX_EVENT_LINE_BYTES = 256 * 1024;
 const RPC_RESPONSE_TIMEOUT_MS = 30_000;
 const KILL_GRACE_MS = 1_000;
+const MAX_TRANSIENT_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 2_000;
+const CONTINUE_AFTER_TRANSIENT_FAILURE_MESSAGE =
+	"Continue after transient failure and finish the original task. Do not redo completed work; use the existing conversation and workspace state.";
+const PREMATURE_STREAM_ERROR_PATTERN =
+	/stream disconnected before completion|stream closed before response\.completed/iu;
 /**
  * Turns the child may still take after its budget is reached. The wrap-up steer
  * lands only before the next model call, so one turn may already be in flight
@@ -166,8 +173,12 @@ async function executeProcess(
 	let rpcCounter = 0;
 	const pendingCommands = new Map<string, PendingRpcCommand>();
 	let rpcInputError: Error | undefined;
+	let transientRetryAttempts = 0;
+	let nativeRetryDisabled = false;
 	let sendCommand: (
-		command: { type: "prompt" | "steer"; message: string },
+		command:
+			| { type: "prompt" | "steer"; message: string }
+			| { type: "set_auto_retry"; enabled: boolean },
 		onAccepted?: () => void,
 		signal?: AbortSignal,
 	) => Promise<void> = () => Promise.reject(new Error("Subagent RPC process is unavailable."));
@@ -233,6 +244,10 @@ async function executeProcess(
 				}
 				return;
 			}
+			if (event.type === "auto_retry_start") {
+				transientRetryAttempts++;
+				return;
+			}
 			if (event.type === "agent_settled") {
 				onAgentSettled();
 				return;
@@ -245,9 +260,14 @@ async function executeProcess(
 				reportActivity({ type: "turn", turns });
 				// A turn without tool calls is the child's final report: it settles on
 				// its own, so neither a wrap-up request nor a stop applies.
-				const finishing = Array.isArray(event.toolResults) && event.toolResults.length === 0;
-				if (maxTurns === undefined || finishing) return;
-				if (turns === hintTurn) {
+				const failedTurn =
+					event.message?.stopReason === "error" || event.message?.stopReason === "aborted";
+				const finishing =
+					Array.isArray(event.toolResults) && event.toolResults.length === 0 && !failedTurn;
+				// Failed model calls consume turns, but retry policy owns their next action.
+				// Applying the wrap-up steer here would suppress the transient retry.
+				if (maxTurns === undefined || finishing || failedTurn) return;
+				if (!budgetReached && turns === hintTurn) {
 					const remaining = maxTurns - turns;
 					reportActivity({
 						type: "notice",
@@ -257,7 +277,7 @@ async function executeProcess(
 						type: "steer",
 						message: `You have used ${turns} of your ${maxTurns} turns; ${remaining} remain. Finish the thread you are on and start converging on your report.`,
 					}).catch(() => undefined);
-				} else if (turns === maxTurns) {
+				} else if (!budgetReached && turns >= maxTurns) {
 					budgetReached = true;
 					reportActivity({
 						type: "notice",
@@ -315,11 +335,19 @@ async function executeProcess(
 				}
 				if (event.message.stopReason === "error" || event.message.stopReason === "aborted") {
 					assistantFailed = true;
-				}
-				if (event.message.errorMessage) {
-					const limited = truncateText(event.message.errorMessage, MAX_ERROR_BYTES);
-					errorMessage = limited.text;
-					truncated ||= limited.truncated;
+					if (event.message.errorMessage) {
+						const limited = truncateText(event.message.errorMessage, MAX_ERROR_BYTES);
+						errorMessage = limited.text;
+						truncated ||= limited.truncated;
+					} else {
+						errorMessage = "";
+					}
+				} else {
+					// Pi retains failed assistant messages during native retries. A later
+					// successful message is authoritative and starts a fresh retry budget.
+					assistantFailed = false;
+					errorMessage = "";
+					transientRetryAttempts = 0;
 				}
 			}
 		},
@@ -338,6 +366,7 @@ async function executeProcess(
 		let budgetExhausted = false;
 		let completed = false;
 		let ready = false;
+		let retryWaiting = false;
 		let forceClose: NodeJS.Timeout | undefined;
 		let escalation: NodeJS.Timeout | undefined;
 		let termination: Promise<void> | undefined;
@@ -386,7 +415,69 @@ async function executeProcess(
 			completed = true;
 			terminate(0);
 		};
-		onAgentSettled = completeNormally;
+		onAgentSettled = () => {
+			if (retryWaiting) return;
+			if (settled || terminating || budgetReached || !assistantFailed || !errorMessage) {
+				completeNormally();
+				return;
+			}
+			if (!isTransientAssistantError(errorMessage)) {
+				completeNormally();
+				return;
+			}
+			if (transientRetryAttempts >= MAX_TRANSIENT_RETRIES) {
+				completeNormally();
+				return;
+			}
+
+			const retryAttempt = ++transientRetryAttempts;
+			retryWaiting = true;
+			const delayMs = RETRY_BASE_DELAY_MS * 2 ** (retryAttempt - 1);
+			reportActivity({
+				type: "notice",
+				text: `Transient child model failure; continuing after ${delayMs / 1000}s backoff (retry ${retryAttempt}/${MAX_TRANSIENT_RETRIES}).`,
+			});
+			void (async () => {
+				try {
+					await abortableDelay(delayMs, request.signal);
+					if (settled || terminating || request.signal.aborted) return;
+					// Pi already spent any native attempts reported before agent_settled.
+					// Disable a fresh native budget before our continuation so both layers
+					// cannot exceed MAX_TRANSIENT_RETRIES together.
+					if (!nativeRetryDisabled) {
+						await sendCommand(
+							{ type: "set_auto_retry", enabled: false },
+							undefined,
+							request.signal,
+						);
+						nativeRetryDisabled = true;
+					}
+					if (settled || terminating || request.signal.aborted) return;
+					await sendCommand(
+						{ type: "prompt", message: CONTINUE_AFTER_TRANSIENT_FAILURE_MESSAGE },
+						() => {
+							if (settled || terminating || request.signal.aborted) {
+								throw new Error("Subagent retry prompt was superseded.");
+							}
+							// RPC may deliver the acceptance and settled events in one stdout
+							// chunk, so reopen settlement synchronously at acceptance.
+							retryWaiting = false;
+						},
+						request.signal,
+					);
+				} catch (error) {
+					if (settled || terminating || request.signal.aborted) return;
+					retryWaiting = false;
+					const limited = truncateText(
+						error instanceof Error ? error.message : String(error),
+						MAX_ERROR_BYTES,
+					);
+					errorMessage = limited.text;
+					truncated ||= limited.truncated;
+					terminate(1);
+				}
+			})();
+		};
 		onBudgetExhausted = () => {
 			if (settled || terminating) return;
 			budgetExhausted = true;
@@ -573,10 +664,14 @@ async function executeProcess(
 function resolvePiInvocation(args: string[]): { command: string; args: string[] } {
 	const packageDirectory = fs.realpathSync(getPackageDir());
 	const manifestPath = path.join(packageDirectory, "package.json");
-	const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as {
-		name?: string;
-		bin?: { pi?: string };
-	};
+	let manifest: { name?: string; bin?: { pi?: string } };
+	try {
+		manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+	} catch (error) {
+		throw new Error(
+			`Could not read the Pi core package manifest: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 	if (manifest.name !== CORE_PACKAGE_NAME || typeof manifest.bin?.pi !== "string") {
 		throw new Error("Loaded Pi core package does not declare a valid bin.pi entry.");
 	}
@@ -669,6 +764,35 @@ function killImmediateChild(process: ChildProcess): void {
 	} catch {
 		// The process may already be terminal.
 	}
+}
+
+function isTransientAssistantError(errorMessage: string): boolean {
+	const assistantError = {
+		stopReason: "error",
+		errorMessage,
+	} as AssistantMessage;
+	return (
+		isRetryableAssistantError(assistantError) || PREMATURE_STREAM_ERROR_PATTERN.test(errorMessage)
+	);
+}
+
+function abortableDelay(delayMs: number, signal: AbortSignal): Promise<void> {
+	return new Promise((resolve, reject) => {
+		if (signal.aborted) {
+			reject(abortError("Subagent retry was cancelled."));
+			return;
+		}
+		const timer = setTimeout(() => {
+			signal.removeEventListener("abort", onAbort);
+			resolve();
+		}, delayMs);
+		timer.unref();
+		const onAbort = () => {
+			clearTimeout(timer);
+			reject(abortError("Subagent retry was cancelled."));
+		};
+		signal.addEventListener("abort", onAbort, { once: true });
+	});
 }
 
 function abortError(message: string): Error {

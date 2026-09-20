@@ -154,6 +154,288 @@ async function handle(command) {
 	assert.match(partial.error ?? "", /child failed/);
 });
 
+test("runChild retries a missed premature-stream error in the same RPC child", async () => {
+	installFakePi(`
+let prompts = 0;
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  prompts++;
+  if (prompts === 1) {
+    event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "stream disconnected before completion: stream closed before response.completed",
+      },
+    });
+    event({ type: "agent_settled" });
+    return;
+  }
+  event(message(command.message + " completed"));
+  event({ type: "agent_settled" });
+}
+`);
+	const result = await runChild(childRequest());
+	assert.equal(result.state, "completed");
+	assert.match(result.result ?? "", /continue after transient failure.*completed/iu);
+});
+
+test("runChild stops after three transient continuation retries", async () => {
+	vi.useFakeTimers();
+	installFakePi(`
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  event({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [],
+      stopReason: "error",
+      errorMessage: "stream disconnected before completion",
+    },
+  });
+  event({ type: "agent_settled" });
+}
+`);
+	let resolveNotice!: () => void;
+	let nextNotice = new Promise<void>((resolve) => {
+		resolveNotice = resolve;
+	});
+	const notices: ChildActivity[] = [];
+	const work = runChild(
+		childRequest({
+			onActivity: (activity) => {
+				if (activity.type !== "notice" || !/Transient child model failure/u.test(activity.text))
+					return;
+				notices.push(activity);
+				resolveNotice();
+			},
+		}),
+	);
+	for (const delayMs of [2_000, 4_000, 8_000]) {
+		await nextNotice;
+		nextNotice = new Promise<void>((resolve) => {
+			resolveNotice = resolve;
+		});
+		await vi.advanceTimersByTimeAsync(delayMs);
+	}
+	const result = await work;
+	assert.equal(result.state, "failed");
+	assert.equal(notices.length, 3);
+});
+
+test("runChild does not retry non-transient assistant errors", async () => {
+	installFakePi(`
+let prompts = 0;
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  prompts++;
+  if (prompts > 1) {
+    event(message("unexpected retry"));
+  } else {
+    event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "authentication failed" }],
+        stopReason: "error",
+        errorMessage: "Authentication failed: invalid API key",
+      },
+    });
+  }
+  event({ type: "agent_settled" });
+}
+`);
+	const result = await runChild(childRequest());
+	assert.equal(result.state, "partial");
+	assert.equal(result.result, "authentication failed");
+	assert.doesNotMatch(result.result ?? "", /unexpected retry/u);
+});
+
+test("runChild cancels transient retry backoff", async () => {
+	installFakePi(`
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  event({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [],
+      stopReason: "error",
+      errorMessage: "stream disconnected before completion",
+    },
+  });
+  event({ type: "agent_settled" });
+}
+`);
+	const controller = new AbortController();
+	const result = await runChild(
+		childRequest({
+			signal: controller.signal,
+			onActivity: (activity) => {
+				if (activity.type === "notice" && /Transient child model failure/u.test(activity.text)) {
+					controller.abort();
+				}
+			},
+		}),
+	);
+	assert.equal(result.state, "cancelled");
+});
+
+test("runChild retries an error turn even when it reaches the turn budget", async () => {
+	installFakePi(`
+let prompts = 0;
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  prompts++;
+  if (prompts === 1) {
+    event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "stream disconnected before completion",
+      },
+    });
+    event({ type: "turn_end", message: { stopReason: "error" }, toolResults: [] });
+    event({ type: "agent_settled" });
+    return;
+  }
+  event(message("recovered at the turn budget"));
+  event({ type: "agent_settled" });
+}
+`);
+	const result = await runChild(childRequest({ maxTurns: 1 }));
+	assert.equal(result.state, "completed");
+	assert.equal(result.result, "recovered at the turn budget");
+});
+
+test("runChild applies the turn budget after a failed call is retried", async () => {
+	installFakePi(`
+let prompts = 0;
+async function handle(command) {
+  respond(command);
+  if (command.type === "prompt") {
+    prompts++;
+    if (prompts === 1) {
+      event({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [],
+          stopReason: "error",
+          errorMessage: "stream disconnected before completion",
+        },
+      });
+      event({ type: "turn_end", message: { stopReason: "error" }, toolResults: [] });
+      event({ type: "agent_settled" });
+      return;
+    }
+    event(message("working after retry", "toolUse"));
+    event({ type: "turn_end", message: { stopReason: "toolUse" }, toolResults: [{}] });
+    return;
+  }
+  if (command.type === "steer") {
+    event(message("wrapped after retry"));
+    event({ type: "turn_end", message: { stopReason: "stop" }, toolResults: [] });
+    event({ type: "agent_settled" });
+  }
+}
+`);
+	const result = await runChild(childRequest({ maxTurns: 2 }));
+	assert.equal(result.state, "completed");
+	assert.equal(result.result, "wrapped after retry");
+	assert.match(result.limitations.join("\n"), /turn budget of 2.*may be incomplete/u);
+});
+
+test("runChild counts Pi native retries against its transient retry budget", async () => {
+	installFakePi(`
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  event({ type: "auto_retry_start", attempt: 1 });
+  event({ type: "auto_retry_start", attempt: 2 });
+  event({ type: "auto_retry_start", attempt: 3 });
+  event({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [],
+      stopReason: "error",
+      errorMessage: "stream disconnected before completion",
+    },
+  });
+  event({ type: "agent_settled" });
+}
+`);
+	const result = await runChild(childRequest());
+	assert.equal(result.state, "failed");
+	assert.match(result.error ?? "", /stream disconnected before completion/u);
+});
+
+test("runChild disables a fresh Pi retry budget before fallback continuation", async () => {
+	installFakePi(`
+let prompts = 0;
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  prompts++;
+  if (prompts === 1) {
+    event({ type: "auto_retry_start", attempt: 1 });
+    event({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "stream disconnected before completion",
+      },
+    });
+    event({ type: "agent_settled" });
+    return;
+  }
+  event(message("continued with the remaining shared budget"));
+  event({ type: "agent_settled" });
+}
+`);
+	const result = await runChild(childRequest());
+	assert.equal(result.state, "completed");
+	assert.equal(result.result, "continued with the remaining shared budget");
+});
+
+test("runChild clears a native-retry failure after a later successful assistant message", async () => {
+	installFakePi(`
+async function handle(command) {
+  if (command.type !== "prompt") return;
+  respond(command);
+  event({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [],
+      stopReason: "error",
+      errorMessage: "503 service unavailable",
+    },
+  });
+  event({ type: "auto_retry_start", attempt: 1 });
+  event(message("recovered after native retry"));
+  event({ type: "agent_settled" });
+}
+`);
+	const result = await runChild(childRequest());
+	assert.equal(result.state, "completed");
+	assert.equal(result.result, "recovered after native retry");
+	assert.equal(result.error, undefined);
+});
+
 test("runChild requires a settled terminal result and preserves incomplete evidence", async () => {
 	installFakePi(`
 async function handle(command) {
@@ -630,7 +912,10 @@ process.stdin.on("data", (chunk) => {
     if (newline < 0) break;
     const line = input.slice(0, newline);
     input = input.slice(newline + 1);
-    if (line.trim()) void handle(JSON.parse(line));
+    if (!line.trim()) continue;
+    const command = JSON.parse(line);
+    if (command.type === "set_auto_retry") respond(command);
+    else void handle(command);
   }
 });
 `,
