@@ -20,7 +20,7 @@ Planning, the critical path, integration, deterministic checks, authorization de
 | `background` | `boolean` | No | `true` runs without blocking and interrupts the main agent when the job ends; defaults to `false`. |
 | `tools` | `string[]` | No | Up to 64 names from `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`; defaults to the agent definition's tools, otherwise `read`, `grep`, `find`, and `ls`. |
 | `thinkingLevel` | `string` | No | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; defaults to the agent definition's level, otherwise the main agent's effective thinking level. |
-| `maxTurns` | `integer` | No | Turn budget, `>= 1`; defaults to `100`. The child is told the budget in its system prompt and reminded of the remaining turns at 90%. At the budget the child is asked to stop using tools and report; three turns later it is stopped as `budget_exhausted`. Independently, when the model's context window is known, a child whose context reaches 70% of it is asked to wrap up the same way. |
+| `maxTurns` | `integer` | No | Turn budget, `>= 1`; defaults to `100`. The child is told the budget in its system prompt and reminded of the remaining turns at 90%. At the budget the child is asked to stop using tools and report; three turns later it is stopped as `budget_exhausted`. Independently, a child whose context reaches 70% of its model's window (200K when the registry does not know it) is asked to wrap up the same way. |
 
 Starts one task-specialized subagent job with the selected tool capabilities and returns its job ID immediately.
 

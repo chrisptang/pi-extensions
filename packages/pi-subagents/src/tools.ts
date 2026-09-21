@@ -474,16 +474,25 @@ function usesRuntimeCredentials(ctx: ExtensionContext, provider: string): boolea
 }
 
 /**
- * The child's context window, for the panel's context gauge. A child reports how
- * many tokens it sent but not what its ceiling is, so the parent resolves it
- * from the registry at spawn time.
+ * Context window assumed when the registry does not know the child model's.
+ * Current models start at 200K; a smaller guess would stop children early, a
+ * larger one would let them overflow before the wrap-up fires.
  */
-function contextWindowOf(ctx: ExtensionContext, model: string): { contextWindow?: number } {
+const FALLBACK_CONTEXT_WINDOW = 200_000;
+
+/**
+ * The child's context window, for the panel's context gauge and the context
+ * wrap-up. A child reports how many tokens it sent but not what its ceiling
+ * is, so the parent resolves it from the registry at spawn time.
+ */
+function contextWindowOf(ctx: ExtensionContext, model: string): { contextWindow: number } {
 	const reference = parseModelReference(model);
 	const found = reference
 		? ctx.modelRegistry.find(reference.provider, reference.modelId)
 		: undefined;
-	return found && found.contextWindow > 0 ? { contextWindow: found.contextWindow } : {};
+	return {
+		contextWindow: found && found.contextWindow > 0 ? found.contextWindow : FALLBACK_CONTEXT_WINDOW,
+	};
 }
 
 function modelLookup(ctx: ExtensionContext): ModelCandidateLookup {

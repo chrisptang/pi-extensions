@@ -456,6 +456,31 @@ test("rejects parent-only model providers and credentials before child launch", 
 	}
 });
 
+test("falls back to a 200K context window when the registry has none for the child model", async () => {
+	for (const find of [() => undefined, () => ({ contextWindow: 0 })]) {
+		const requests: ChildRequest[] = [];
+		const { mock, context } = await setup(
+			{
+				runChild: async (request) => {
+					requests.push(request);
+					return completed("done");
+				},
+			},
+			{},
+			{
+				modelRegistry: {
+					getProviderAuthStatus: () => ({ configured: true, source: "environment" as const }),
+					getRegisteredProviderIds: () => [],
+					find,
+				},
+			},
+		);
+		const spawned = await spawnJob(mock, context, "Map the package");
+		await waitFor(mock, context, String(spawned.details.jobId));
+		assert.equal(requests[0]?.contextWindow, 200_000);
+	}
+});
+
 test("sanitizes terminal controls at child-output display boundaries", async () => {
 	const raw = "reported\u001b[31m output";
 	const { mock, context } = await setup({ runChild: async () => completed(raw) });
