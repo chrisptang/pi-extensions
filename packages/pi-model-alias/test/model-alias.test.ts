@@ -676,57 +676,90 @@ test("a session replacement does not re-apply the startup --model flag", async (
 	assert.deepEqual(harness.setModels, []);
 });
 
+// Pi loads a fresh extension instance for the replacement session, so every
+// `/new` test drives `session_before_switch` on one instance and `session_start`
+// on another, as the real hand-off does.
 test("/new re-applies the model of the outgoing session", async () => {
 	useAgentDir({ aliases: {} });
-	const harness = createMockPi();
-	modelAlias(harness.pi);
-	const { ctx, notifications } = createMockContext({
+	const outgoing = createMockPi();
+	modelAlias(outgoing.pi);
+	const { ctx: outgoingCtx } = createMockContext({
 		model: model("local", "chosen"),
 		thinkingLevel: "high",
 		modelRegistry: registryFor([{ provider: "local", id: "chosen" }]),
 	});
+	await outgoing.events.get("session_before_switch")?.[0]?.({ reason: "new" }, outgoingCtx);
 
-	await harness.events.get("session_before_switch")?.[0]?.({ reason: "new" }, ctx);
-	// The replacement session comes up on the settings default.
-	setContextModel(ctx, model("local", "default"));
-	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
+	// The replacement session comes up on the CLI or settings default.
+	const replacement = createMockPi();
+	modelAlias(replacement.pi);
+	const { ctx, notifications } = createMockContext({
+		model: model("amazon-bedrock", "us.chosen"),
+		modelRegistry: registryFor([{ provider: "local", id: "chosen" }]),
+	});
+	await replacement.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
 
-	assert.deepEqual(harness.setModels, [{ provider: "local", id: "chosen" }]);
-	assert.deepEqual(harness.thinkingLevels, ["high"]);
+	assert.deepEqual(outgoing.setModels, []);
+	assert.deepEqual(replacement.setModels, [{ provider: "local", id: "chosen" }]);
+	assert.deepEqual(replacement.thinkingLevels, ["high"]);
 	assert.equal(notifications.length, 0);
 });
 
 test("/new leaves the model alone when the new session already matches", async () => {
 	useAgentDir({ aliases: {} });
-	const harness = createMockPi();
-	modelAlias(harness.pi);
+	const outgoing = createMockPi();
+	modelAlias(outgoing.pi);
+	const { ctx: outgoingCtx } = createMockContext({ model: model("local", "chosen") });
+	await outgoing.events.get("session_before_switch")?.[0]?.({ reason: "new" }, outgoingCtx);
+
+	const replacement = createMockPi();
+	modelAlias(replacement.pi);
 	const { ctx } = createMockContext({
 		model: model("local", "chosen"),
 		modelRegistry: registryFor([{ provider: "local", id: "chosen" }]),
 	});
+	await replacement.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
 
-	await harness.events.get("session_before_switch")?.[0]?.({ reason: "new" }, ctx);
-	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
+	assert.deepEqual(replacement.setModels, []);
+});
 
-	assert.deepEqual(harness.setModels, []);
+test("/new warns when the outgoing model is missing from the new registry", async () => {
+	useAgentDir({ aliases: {} });
+	const outgoing = createMockPi();
+	modelAlias(outgoing.pi);
+	const { ctx: outgoingCtx } = createMockContext({ model: model("local", "chosen") });
+	await outgoing.events.get("session_before_switch")?.[0]?.({ reason: "new" }, outgoingCtx);
+
+	const replacement = createMockPi();
+	modelAlias(replacement.pi);
+	const { ctx, notifications } = createMockContext({
+		model: model("local", "default"),
+		modelRegistry: registryFor([{ provider: "local", id: "default" }]),
+	});
+	await replacement.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
+
+	assert.deepEqual(replacement.setModels, []);
+	assert.match(notifications.at(-1)?.message ?? "", /local\/chosen is no longer available/u);
 });
 
 test("the carried model is consumed by a single session start", async () => {
 	useAgentDir({ aliases: {} });
-	const harness = createMockPi();
-	modelAlias(harness.pi);
+	const outgoing = createMockPi();
+	modelAlias(outgoing.pi);
+	const { ctx: outgoingCtx } = createMockContext({ model: model("local", "chosen") });
+	await outgoing.events.get("session_before_switch")?.[0]?.({ reason: "new" }, outgoingCtx);
+
+	const replacement = createMockPi();
+	modelAlias(replacement.pi);
 	const { ctx } = createMockContext({
-		model: model("local", "chosen"),
+		model: model("local", "default"),
 		modelRegistry: registryFor([{ provider: "local", id: "chosen" }]),
 	});
-
-	await harness.events.get("session_before_switch")?.[0]?.({ reason: "new" }, ctx);
+	await replacement.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
 	setContextModel(ctx, model("local", "default"));
-	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
-	setContextModel(ctx, model("local", "default"));
-	await harness.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
+	await replacement.events.get("session_start")?.[0]?.({ reason: "new" }, ctx);
 
-	assert.deepEqual(harness.setModels, [{ provider: "local", id: "chosen" }]);
+	assert.deepEqual(replacement.setModels, [{ provider: "local", id: "chosen" }]);
 });
 
 test("resuming a session does not carry the model over", async () => {

@@ -21,6 +21,33 @@ function isRateLimited(status: number): boolean {
 	return status === 429 || status === 503;
 }
 
+/**
+ * The model in use when `/new` was issued, kept for the replacement session.
+ *
+ * Pi rebuilds its resource loader for every session replacement and loads
+ * extensions with the module cache disabled, so a new session gets a fresh
+ * factory instance and a fresh module scope. Only process-global state survives
+ * that hand-off, hence the `globalThis` slot rather than a closure variable.
+ */
+interface CarryOver {
+	provider: string;
+	modelId: string;
+	thinkingLevel: ThinkingLevel | undefined;
+}
+
+const CARRY_OVER_KEY = Symbol.for("@chrisptang/pi-model-alias/carry-over");
+
+function takeCarryOver(): CarryOver | undefined {
+	const slot = globalThis as { [CARRY_OVER_KEY]?: CarryOver };
+	const carried = slot[CARRY_OVER_KEY];
+	delete slot[CARRY_OVER_KEY];
+	return carried;
+}
+
+function setCarryOver(carried: CarryOver): void {
+	(globalThis as { [CARRY_OVER_KEY]?: CarryOver })[CARRY_OVER_KEY] = carried;
+}
+
 function formatDuration(ms: number): string {
 	const seconds = Math.ceil(ms / 1000);
 	if (seconds < 60) return `${seconds}s`;
@@ -44,12 +71,6 @@ export default function modelAlias(pi: ExtensionAPI): void {
 	 * a status but not a model, so this is what a rate limit gets attributed to.
 	 */
 	let inFlight: { alias: string; model: Model<Api> } | undefined;
-	/**
-	 * The model in use when `/new` was issued. Pi starts a fresh session on the
-	 * settings default rather than the outgoing session's model, so this is
-	 * re-applied once the replacement session is up.
-	 */
-	let carryOver: RestorePoint | undefined;
 
 	const aliases = (warn?: (message: string) => void): LoadedAliases => {
 		loaded ??= loadAliases(getAgentDir(), warn);
@@ -272,13 +293,19 @@ export default function modelAlias(pi: ExtensionAPI): void {
 	// Feature 5: `/new` keeps the current model.
 	//
 	// A new session has no transcript to restore a model from, so Pi falls back to
-	// the settings default. Capture the outgoing model here and re-apply it once
-	// the replacement session has started. "resume" restores from the target
-	// session's own transcript and needs nothing.
+	// the CLI `--model` or the settings default. Capture the outgoing model here
+	// and re-apply it once the replacement session has started. "resume" restores
+	// from the target session's own transcript and needs nothing. The replacement
+	// session runs a new extension instance, so the hand-off goes through the
+	// process-global slot (see `CarryOver`).
 	// ---------------------------------------------------------------------------
 	pi.on("session_before_switch", async (event, ctx) => {
 		if (event.reason !== "new" || !ctx.model) return;
-		carryOver = { model: ctx.model, thinkingLevel: ctx.thinkingLevel };
+		setCarryOver({
+			provider: ctx.model.provider,
+			modelId: ctx.model.id,
+			thinkingLevel: ctx.thinkingLevel,
+		});
 	});
 
 	// A replaced session invalidates the restore point, the held picks, and the
@@ -289,11 +316,18 @@ export default function modelAlias(pi: ExtensionAPI): void {
 		cooldowns.clear();
 		inFlight = undefined;
 
-		const carried = carryOver;
-		carryOver = undefined;
+		const carried = takeCarryOver();
 		if (event.reason === "new" && carried) {
-			if (!ctx.model || describe(ctx.model) !== describe(carried.model)) {
-				await applyModel(ctx, carried);
+			// Resolve against the new session's registry rather than reusing the old
+			// session's model object.
+			const target = ctx.modelRegistry.find(carried.provider, carried.modelId);
+			if (!target) {
+				ctx.ui.notify(
+					`Previous model ${carried.provider}/${carried.modelId} is no longer available.`,
+					"warning",
+				);
+			} else if (!ctx.model || describe(ctx.model) !== describe(target)) {
+				await applyModel(ctx, { model: target, thinkingLevel: carried.thinkingLevel });
 			} else if (carried.thinkingLevel) {
 				pi.setThinkingLevel(carried.thinkingLevel);
 			}
