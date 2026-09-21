@@ -154,6 +154,49 @@ test("disable-model-invocation is recorded and hides a skill from the roster", (
 	assert.ok(registry.find("hidden"));
 });
 
+test("a Claude Code fork skill parses with agent and other unknown fields ignored", () => {
+	// The frontmatter shape Claude Code writes for a forked slash skill.
+	writeSkill(
+		piSkills(),
+		"xm-gitcommit",
+		[
+			"---",
+			"name: xm-gitcommit",
+			"allowed-tools: Bash(git add:*), Bash(git status:*), Bash(git commit:*), Bash(git push:*)",
+			"description: Commit and push.",
+			"slash: true",
+			"model: haiku",
+			"user-invocable: true",
+			"content: fork",
+			"agent: general-purpose",
+			"disable-model-invocation: true",
+			"---",
+			"",
+			"Commit the pending changes.",
+		].join("\n"),
+	);
+	const { skills, diagnostics } = discoverPrimarySkills(project);
+	const skill = skills.get("xm-gitcommit");
+	assert.ok(skill);
+	assert.deepEqual(diagnostics, []);
+	assert.equal(skill.fork, true);
+	assert.equal(skill.model, "haiku");
+	assert.deepEqual(skill.tools, ["bash"]);
+	assert.equal(skill.disableModelInvocation, true);
+	// `agent` names a Claude Code agent; the child runs on the skill body alone.
+	assert.equal("agent" in skill, false);
+});
+
+test("content: fork is recorded and any other content value is not a fork", () => {
+	writeSkill(piSkills(), "forked", "---\ncontent: fork\n---\n\nBody.\n");
+	writeSkill(piSkills(), "inline", "---\ncontent: inline\n---\n\nBody.\n");
+	writeSkill(piSkills(), "plain", "---\ndescription: Plain.\n---\n\nBody.\n");
+	const { skills } = discoverPrimarySkills(project);
+	assert.equal(skills.get("forked")?.fork, true);
+	assert.equal(skills.get("inline")?.fork, false);
+	assert.equal(skills.get("plain")?.fork, false);
+});
+
 test("skills without SKILL.md and empty bodies are skipped", () => {
 	mkdirSync(path.join(piSkills(), "not-a-skill"), { recursive: true });
 	writeSkill(piSkills(), "empty", "---\ndescription: Nothing.\n---\n\n");

@@ -20,7 +20,7 @@ Planning, the critical path, integration, deterministic checks, authorization de
 | `background` | `boolean` | No | `true` runs without blocking and interrupts the main agent when the job ends; defaults to `false`. |
 | `tools` | `string[]` | No | Up to 64 names from `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`; defaults to the agent definition's tools, otherwise `read`, `grep`, `find`, and `ls`. |
 | `thinkingLevel` | `string` | No | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; defaults to the agent definition's level, otherwise the main agent's effective thinking level. |
-| `maxTurns` | `integer` | No | Turn budget, `>= 1`; defaults to `100`. The child is told the budget in its system prompt and reminded of the remaining turns at 90%. At the budget the child is asked to stop using tools and report; three turns later it is stopped as `budget_exhausted`. |
+| `maxTurns` | `integer` | No | Turn budget, `>= 1`; defaults to `100`. The child is told the budget in its system prompt and reminded of the remaining turns at 90%. At the budget the child is asked to stop using tools and report; three turns later it is stopped as `budget_exhausted`. Independently, when the model's context window is known, a child whose context reaches 70% of it is asked to wrap up the same way. |
 
 Starts one task-specialized subagent job with the selected tool capabilities and returns its job ID immediately.
 
@@ -85,6 +85,10 @@ Children run with `--no-skills` and cannot load the skill themselves, so the sys
 The `name` parameter description lists only the skills in `.pi/skills/` and `~/.pi/agent/skills/`. A skill that exists only in `~/.claude/skills/` or `~/.agents/skills/` still resolves when named directly.
 
 `disable-model-invocation: true` removes a skill from that roster while leaving it runnable by explicit name, which is what the flag reserves it for.
+
+### `/skill:<name>` with `content: fork`
+
+The extension listens to Pi's `input` event. When the typed text is `/skill:<name>` and the named skill declares `content: fork`, the input is consumed and the skill starts as a subagent through the same path as `skill_run`: the body is the system prompt, text after the name is the task, and the skill's `model`, `allowed-tools`, and `thinkingLevel` apply; an `agent:` field is ignored, so the child runs on the skill body alone. The job is labelled `/skill:<name>` and delivers its completion with a turn trigger, as a `background: true` run does. Any other input, including `/skill:` for a skill without `content: fork`, continues to Pi unchanged. A fork that cannot start is reported as an error notification and the input is still consumed, because an inline expansion is what the skill opted out of.
 
 An unknown name throws before the job is queued. Every spawn-time rule above — extension providers, runtime API keys, and unavailable tool names — applies unchanged.
 

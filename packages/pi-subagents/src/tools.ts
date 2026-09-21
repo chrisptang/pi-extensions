@@ -182,10 +182,31 @@ export interface SubagentToolsDependencies extends RuntimeDependencies {
 	instructions?: InstructionOverrides;
 }
 
+export interface StartSkillJobOptions {
+	/** Widget label for the job; already validated by the caller. */
+	description: string;
+	/** The caller's request, or undefined to run the skill as written. */
+	args?: string;
+	/** Resolved core tool names; undefined keeps the skill's own. */
+	tools?: string[];
+	thinkingLevel?: string;
+	maxTurns?: number;
+	notifyOnCompletion: boolean;
+}
+
+export type StartSkillJob = (
+	skill: SkillDefinition,
+	ctx: ExtensionContext,
+	options: StartSkillJobOptions,
+) => ReturnType<SubagentRuntime["start"]>;
+
 export interface RegisteredSubagentTools {
 	runtime: SubagentRuntime;
 	agents: AgentRegistry;
 	skills: SkillRegistry;
+	startSkillJob: StartSkillJob;
+	/** User-typed `/skill:<name>` text validated the same way as the tool's `args`. */
+	validateSkillArgs(value: string): string;
 	startSession(): Promise<void>;
 	shutdown(): Promise<void>;
 }
@@ -262,42 +283,57 @@ export function registerSubagentTools(
 		parameters: buildSkillRunParameters(skills),
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			throwIfAborted(signal, "Skill run was cancelled");
-			assertNotNested();
 			const skill = requireSkill(skills, params.name);
-			const description = validateDescription(params.description);
-			const args = params.args === undefined ? undefined : validateSkillArgs(params.args);
-			// Explicit arguments always win over the skill's declared defaults.
-			const tools = params.tools !== undefined ? resolveTools(params.tools) : skillTools(skill);
-			const inherited = resolveChildModel(ctx);
-			const selected = resolveAgentModel(skill.model, modelLookup(ctx));
-			const thinkingLevel = resolveThinkingLevel(
-				params.thinkingLevel ?? skill.thinkingLevel ?? ctx.thinkingLevel ?? pi.getThinkingLevel(),
-			);
-			const maxTurns = resolveMaxTurns(params.maxTurns ?? DEFAULT_MAX_TURNS);
-			const limitations = [
-				...(selected.limitation ? [selected.limitation] : []),
-				...skillToolLimitations(skill, params.tools !== undefined),
-			];
-			const model = selected.model ?? inherited;
 			return toolResult(
-				runtime.start({
-					task: buildSkillTask(skill, args),
-					tools,
-					model,
-					...contextWindowOf(ctx, model),
-					agent: `skill:${skill.name}`,
-					description,
-					systemPrompt: buildSkillSystemPrompt(skill),
-					...(limitations.length > 0 ? { limitations } : {}),
-					thinkingLevel,
-					cwd: ctx.cwd,
-					maxTurns,
-					projectTrusted: ctx.isProjectTrusted(),
+				startSkillJob(skill, ctx, {
+					description: validateDescription(params.description),
+					args: params.args === undefined ? undefined : validateSkillArgs(params.args),
+					tools: params.tools === undefined ? undefined : resolveTools(params.tools),
+					thinkingLevel: params.thinkingLevel,
+					maxTurns: params.maxTurns,
 					notifyOnCompletion: params.background === true,
 				}),
 			);
 		},
 	});
+
+	/**
+	 * Shared by `skill_run` and the user's `/skill:<name>` fork path, so both start
+	 * a child from the same definition: the skill supplies the system prompt and
+	 * its declared model, tools, and thinking level, and the caller may override
+	 * the last three.
+	 */
+	const startSkillJob: StartSkillJob = (skill, ctx, options) => {
+		assertNotNested();
+		// Explicit arguments always win over the skill's declared defaults.
+		const tools = options.tools ?? skillTools(skill);
+		const inherited = resolveChildModel(ctx);
+		const selected = resolveAgentModel(skill.model, modelLookup(ctx));
+		const thinkingLevel = resolveThinkingLevel(
+			options.thinkingLevel ?? skill.thinkingLevel ?? ctx.thinkingLevel ?? pi.getThinkingLevel(),
+		);
+		const maxTurns = resolveMaxTurns(options.maxTurns ?? DEFAULT_MAX_TURNS);
+		const limitations = [
+			...(selected.limitation ? [selected.limitation] : []),
+			...skillToolLimitations(skill, options.tools !== undefined),
+		];
+		const model = selected.model ?? inherited;
+		return runtime.start({
+			task: buildSkillTask(skill, options.args),
+			tools,
+			model,
+			...contextWindowOf(ctx, model),
+			agent: `skill:${skill.name}`,
+			description: options.description,
+			systemPrompt: buildSkillSystemPrompt(skill),
+			...(limitations.length > 0 ? { limitations } : {}),
+			thinkingLevel,
+			cwd: ctx.cwd,
+			maxTurns,
+			projectTrusted: ctx.isProjectTrusted(),
+			notifyOnCompletion: options.notifyOnCompletion,
+		});
+	};
 
 	pi.registerTool({
 		name: "subagent_inspect",
@@ -349,6 +385,8 @@ export function registerSubagentTools(
 		runtime,
 		agents,
 		skills,
+		startSkillJob,
+		validateSkillArgs,
 		startSession: () =>
 			queueLifecycle(async () => {
 				await runtime.shutdown();

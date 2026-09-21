@@ -34,8 +34,16 @@ const BUDGET_GRACE_TURNS = 3;
  */
 const BUDGET_HINT_RATIO = 0.9;
 const BUDGET_HINT_MIN_REMAINING = 3;
-const WRAP_UP_MESSAGE =
-	"Your turn budget is exhausted. Stop calling tools and report your findings now: what you established, what remains unverified, and where you stopped.";
+/**
+ * Share of the context window at which the child is asked to wrap up. The turn
+ * budget cannot see this coming: a child reading large files fills its window
+ * long before its turns run out, and Pi's own compaction would then summarize
+ * away the evidence it gathered. Steering here leaves room for the report.
+ */
+export const CONTEXT_WRAP_UP_RATIO = 0.7;
+const WRAP_UP_REPORT =
+	"Stop calling tools and report your findings now: what you established, what remains unverified, and where you stopped.";
+const WRAP_UP_MESSAGE = `Your turn budget is exhausted. ${WRAP_UP_REPORT}`;
 
 interface ProcessSettlement {
 	code: number;
@@ -152,16 +160,30 @@ export function buildPiArgs(request: ChildRequest): string[] {
 	// than the task, so the task text stays free for the caller's own instructions.
 	// The budget goes there too: a child that knows it from the start can pace
 	// its exploration instead of learning about it only when it is asked to stop.
-	const appended = [request.systemPrompt, budgetInstruction(request.maxTurns)]
+	const appended = [request.systemPrompt, budgetInstruction(request)]
 		.filter((part): part is string => Boolean(part))
 		.join("\n\n");
 	if (appended) args.push("--append-system-prompt", appended);
 	return args;
 }
 
-function budgetInstruction(maxTurns: number | undefined): string | undefined {
-	if (maxTurns === undefined) return undefined;
-	return `You have a budget of ${maxTurns} turns for this task, where one turn is one of your responses, with or without tool calls. Pace your exploration so you finish and report well within it. When the budget is reached you will be asked to stop using tools and report what you have; a few turns after that you are stopped.`;
+function budgetInstruction(request: ChildRequest): string | undefined {
+	const parts: string[] = [];
+	if (request.maxTurns !== undefined) {
+		parts.push(
+			`You have a budget of ${request.maxTurns} turns for this task, where one turn is one of your responses, with or without tool calls. Pace your exploration so you finish and report well within it. When the budget is reached you will be asked to stop using tools and report what you have; a few turns after that you are stopped.`,
+		);
+	}
+	if (request.contextWindow !== undefined) {
+		parts.push(
+			`Your context window is also a budget: once it is ${percent(CONTEXT_WRAP_UP_RATIO)}% full you will be asked to stop using tools and report, whatever your turn count. Read narrowly, with line ranges and filtered searches, rather than whole files and unbounded listings.`,
+		);
+	}
+	return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+function percent(ratio: number): number {
+	return Math.round(ratio * 100);
 }
 
 async function executeProcess(
@@ -170,8 +192,12 @@ async function executeProcess(
 ): Promise<ChildResult> {
 	const maxTurns = resolveMaxTurns(request.maxTurns);
 	const hintTurn = maxTurns === undefined ? undefined : budgetHintTurn(maxTurns);
+	const contextWindow = request.contextWindow;
 	let turns = 0;
-	let budgetReached = false;
+	let latestContextTokens = 0;
+	// Which bound asked the child to wrap up, and on which turn, so the grace
+	// period counts from the request whether it came from turns or context.
+	let wrapUp: { reason: "turns" | "context"; turn: number; detail: string } | undefined;
 	let latestOutput = "";
 	let terminalOutput: string | undefined;
 	let terminalStopReason: "stop" | "length" | undefined;
@@ -276,8 +302,31 @@ async function executeProcess(
 					Array.isArray(event.toolResults) && event.toolResults.length === 0 && !failedTurn;
 				// Failed model calls consume turns, but retry policy owns their next action.
 				// Applying the wrap-up steer here would suppress the transient retry.
-				if (maxTurns === undefined || finishing || failedTurn) return;
-				if (!budgetReached && turns === hintTurn) {
+				if (finishing || failedTurn) return;
+				if (wrapUp) {
+					if (turns >= wrapUp.turn + BUDGET_GRACE_TURNS) onBudgetExhausted();
+					return;
+				}
+				// Context is checked first: it is the bound the turn budget cannot see.
+				if (
+					contextWindow !== undefined &&
+					latestContextTokens >= contextWindow * CONTEXT_WRAP_UP_RATIO
+				) {
+					const filled = percent(latestContextTokens / contextWindow);
+					wrapUp = { reason: "context", turn: turns, detail: `${filled}% of its context window` };
+					reportActivity({
+						type: "notice",
+						text: `Context ${filled}% full (${latestContextTokens}/${contextWindow} tokens); asked the child to wrap up.`,
+					});
+					// Best effort: a failed steer still leaves the grace-turn stop in place.
+					void sendCommand({
+						type: "steer",
+						message: `Your context window is ${filled}% full. ${WRAP_UP_REPORT}`,
+					}).catch(() => undefined);
+					return;
+				}
+				if (maxTurns === undefined) return;
+				if (turns === hintTurn) {
 					const remaining = maxTurns - turns;
 					reportActivity({
 						type: "notice",
@@ -287,16 +336,14 @@ async function executeProcess(
 						type: "steer",
 						message: `You have used ${turns} of your ${maxTurns} turns; ${remaining} remain. Finish the thread you are on and start converging on your report.`,
 					}).catch(() => undefined);
-				} else if (!budgetReached && turns >= maxTurns) {
-					budgetReached = true;
+				} else if (turns >= maxTurns) {
+					wrapUp = { reason: "turns", turn: turns, detail: `its turn budget of ${maxTurns}` };
 					reportActivity({
 						type: "notice",
 						text: `Turn budget of ${maxTurns} reached; asked the child to wrap up.`,
 					});
 					// Best effort: a failed steer still leaves the grace-turn stop in place.
 					void sendCommand({ type: "steer", message: WRAP_UP_MESSAGE }).catch(() => undefined);
-				} else if (turns >= maxTurns + BUDGET_GRACE_TURNS) {
-					onBudgetExhausted();
 				}
 				return;
 			}
@@ -328,7 +375,10 @@ async function executeProcess(
 			}
 			if (event.type === "message_end" && event.message?.role === "assistant") {
 				const usage = readUsage(event.message);
-				if (usage) reportActivity({ type: "usage", usage });
+				if (usage) {
+					reportActivity({ type: "usage", usage });
+					if (usage.contextTokens !== undefined) latestContextTokens = usage.contextTokens;
+				}
 				const text = (event.message.content ?? [])
 					.filter((part) => part.type === "text" && typeof part.text === "string")
 					.map((part) => part.text)
@@ -429,7 +479,7 @@ async function executeProcess(
 		};
 		onAgentSettled = () => {
 			if (retryWaiting) return;
-			if (settled || terminating || budgetReached || !assistantFailed || !errorMessage) {
+			if (settled || terminating || wrapUp || !assistantFailed || !errorMessage) {
 				completeNormally();
 				return;
 			}
@@ -621,9 +671,9 @@ async function executeProcess(
 	if (terminalStopReason === "length") {
 		limitations.push("Child output ended at the model output limit and may be incomplete.");
 	}
-	if (budgetReached && !settlement.budgetExhausted) {
+	if (wrapUp && !settlement.budgetExhausted) {
 		limitations.push(
-			`Child reached its turn budget of ${maxTurns} and was asked to wrap up; the result may be incomplete.`,
+			`Child reached ${wrapUp.detail} and was asked to wrap up; the result may be incomplete.`,
 		);
 	}
 	if (settlement.cancelled) return cancelledResult(output, limitations, truncated);
@@ -631,7 +681,7 @@ async function executeProcess(
 		return {
 			state: "budget_exhausted",
 			...(output ? { result: output } : {}),
-			error: `Subagent exhausted its turn budget of ${maxTurns} without wrapping up.`,
+			error: `Subagent exhausted ${wrapUp?.detail ?? "its budget"} without wrapping up.`,
 			limitations,
 			truncated,
 		};

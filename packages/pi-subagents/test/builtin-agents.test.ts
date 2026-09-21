@@ -33,6 +33,8 @@ test("seeds the built-in definitions and parses them back", () => {
 	assert.deepEqual([...agents.keys()].sort(), ["architect", "builder", "explorer"]);
 	const explorer = agents.get("explorer");
 	assert.equal(explorer?.model, "haiku");
+	// Declared as `effort`, the Claude Code spelling, and read as the thinking level.
+	assert.equal(explorer?.thinkingLevel, "low");
 	assert.deepEqual(explorer?.tools, ["read", "grep", "find", "ls", "bash"]);
 	assert.equal(explorer?.origin, "pi");
 	assert.ok(explorer?.body.startsWith("You are a read-only codebase explorer."));
@@ -45,6 +47,10 @@ test("seeds the built-in definitions and parses them back", () => {
 	assert.equal(architect?.model, undefined);
 	assert.equal(architect?.thinkingLevel, undefined);
 	assert.ok(architect?.body.includes("`explorer`") && architect.body.includes("`builder`"));
+	// The delegation rules the explorer depends on to receive a bounded task.
+	assert.match(architect?.body ?? "", /One explorer answers one question/u);
+	assert.match(architect?.body ?? "", /Never send explorer to compare designs/u);
+	assert.match(architect?.body ?? "", /The completion condition/u);
 	assert.equal(explorer?.role, "subagent");
 });
 

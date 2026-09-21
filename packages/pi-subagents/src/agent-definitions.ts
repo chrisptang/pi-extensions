@@ -175,7 +175,7 @@ function readAgentFile(
 	}
 
 	const tools = readTools(frontmatter?.tools, file, diagnostics);
-	const thinkingLevel = readThinkingLevel(frontmatter?.thinkingLevel, file, diagnostics);
+	const thinkingLevel = readThinkingLevel(frontmatter, file, diagnostics);
 	const model = readString(frontmatter?.model);
 	const role = readRole(frontmatter?.role, file, diagnostics);
 
@@ -232,15 +232,20 @@ function readTools(value: unknown, file: string, diagnostics: string[]): string[
 	return tools;
 }
 
+/**
+ * `effort` is Claude Code's spelling of the same field, so a definition written
+ * for either harness resolves the same. `thinkingLevel` wins when both are set.
+ */
 function readThinkingLevel(
-	value: unknown,
+	frontmatter: Record<string, unknown> | undefined,
 	file: string,
 	diagnostics: string[],
 ): SubagentThinkingLevel | undefined {
-	const level = readString(value)?.toLowerCase();
+	const field = readString(frontmatter?.thinkingLevel) ? "thinkingLevel" : "effort";
+	const level = readString(frontmatter?.[field])?.toLowerCase();
 	if (!level) return undefined;
 	if (!THINKING_LEVEL_SET.has(level)) {
-		diagnostics.push(`Agent ${file} has an invalid thinkingLevel ${level}; it is ignored.`);
+		diagnostics.push(`Agent ${file} has an invalid ${field} ${level}; it is ignored.`);
 		return undefined;
 	}
 	return level as SubagentThinkingLevel;

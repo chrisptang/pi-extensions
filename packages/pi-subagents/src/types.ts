@@ -101,6 +101,12 @@ export interface ChildRequest {
 	cwd: string;
 	/** Turn budget; the child is steered to wrap up when it is reached. Omit for no budget. */
 	maxTurns?: number;
+	/**
+	 * Context window of `model`. When known, the child is steered to wrap up once
+	 * its context fills to the wrap-up ratio, before Pi's own compaction would
+	 * discard the evidence it gathered. Omit for no context bound.
+	 */
+	contextWindow?: number;
 	projectTrusted: boolean;
 	signal: AbortSignal;
 	/**

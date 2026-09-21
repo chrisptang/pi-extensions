@@ -128,6 +128,8 @@ At the budget the child is asked to stop using tools and report; its report retu
 
 A child that keeps working three turns past the budget is stopped with the `budget_exhausted` state and its last visible output.
 
+The context window is a second bound the turn budget cannot see: when the model's window is known, a child whose context reaches 70% of it is asked to wrap up the same way, before Pi's compaction would discard what it read. A task that has the child read many files or several repositories hits this bound in a few dozen turns, so split by question rather than by turns.
+
 Lower `maxTurns` for a focused lookup that should not wander, and raise it only when a survey genuinely needs many tool rounds.
 
 Split an oversized task instead of raising its budget to compensate for unclear scope.
@@ -218,7 +220,7 @@ Treat `partial` as incomplete evidence, identify what remains unverified, and co
 
 Treat `failed` as no reliable completion and inspect the available error before choosing a direct fallback.
 
-Treat `budget_exhausted` as a child that did not converge: keep any available output as partial evidence, and narrow the task before starting a new job rather than raising `maxTurns`.
+Treat `budget_exhausted` as a child that did not converge on either its turn budget or its context window: keep any available output as partial evidence, and narrow the task before starting a new job rather than raising `maxTurns`.
 
 Treat `cancelled` as terminal and never wait for a later result from that attempt.
 

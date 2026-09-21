@@ -72,6 +72,11 @@ export interface SkillDefinition {
 	unsupportedTools: string[];
 	/** Set by `disable-model-invocation`; such skills stay hidden from the roster. */
 	disableModelInvocation: boolean;
+	/**
+	 * Set by Claude Code's `content: fork`. A user's `/skill:<name>` for such a
+	 * skill runs in a subagent instead of expanding into the main session.
+	 */
+	fork: boolean;
 	source: string;
 	origin: SkillDirectoryKind;
 }
@@ -216,6 +221,7 @@ function readSkillFile(
 		toolsDeclared: declared,
 		unsupportedTools: unsupported,
 		disableModelInvocation: frontmatter?.["disable-model-invocation"] === true,
+		fork: frontmatter?.content === "fork",
 		source: file,
 		origin,
 	};

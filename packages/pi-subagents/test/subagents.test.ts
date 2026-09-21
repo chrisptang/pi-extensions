@@ -669,6 +669,8 @@ test("spawns with an agent definition, letting explicit arguments override it", 
 	assert.equal(requests[0]?.systemPrompt, "You are a read-only explorer.");
 	assert.deepEqual(requests[0]?.tools, ["read", "grep", "find", "ls"]);
 	assert.equal(requests[0]?.thinkingLevel, "low");
+	// The registry's window reaches the child runner, so it can bound context.
+	assert.equal(requests[0]?.contextWindow, 200_000);
 	assert.equal(waited.details.agent, "explorer");
 
 	const overridden = await tool(mock, "subagent_spawn").execute(
@@ -973,6 +975,101 @@ test("skill_run advertises the primary roster and hides model-disabled skills", 
 	assert.doesNotMatch(description, /hidden/);
 });
 
+test("/skill:<name> forks a content: fork skill into a subagent with the skill's own model", async () => {
+	const requests: ChildRequest[] = [];
+	const ship = skillDefinition({
+		name: "ship",
+		body: "Inspect the diff, then push.",
+		baseDir: "/skills/ship",
+		tools: ["read", "bash"],
+		model: "fast-provider/fast-model",
+		fork: true,
+	});
+	const { mock, context } = await setup(
+		{
+			skills: skillRegistry(ship),
+			runChild: async (request) => {
+				requests.push(request);
+				return completed("pushed");
+			},
+		},
+		{},
+		{
+			modelRegistry: {
+				getProviderAuthStatus: () => ({ configured: true, source: "environment" as const }),
+				getRegisteredProviderIds: () => [],
+				find: () => ({ contextWindow: 100_000 }),
+				hasConfiguredAuth: () => true,
+			},
+		},
+	);
+
+	const result = await input(mock, context, "/skill:SHIP Release 2.1 to staging");
+	assert.deepEqual(result, { action: "handled" });
+	const jobId = context.notifications[0]?.message.match(/job (job_\S+);/)?.[1];
+	assert.ok(jobId, "notification names the job");
+	await waitFor(mock, context, jobId);
+
+	// The body is the child's system prompt; the typed args are the task.
+	assert.match(requests[0]?.systemPrompt ?? "", /Inspect the diff, then push\./);
+	assert.match(requests[0]?.task ?? "", /Release 2\.1 to staging/);
+	assert.doesNotMatch(requests[0]?.task ?? "", /Inspect the diff/);
+	// The skill's declared model, tools, and name reach the child unchanged.
+	assert.equal(requests[0]?.model, "fast-provider/fast-model");
+	assert.deepEqual(requests[0]?.tools, ["read", "bash"]);
+	const completion = mock.sentMessages.find(
+		(entry) => (entry.message as { customType?: string }).customType === "pi-subagents-completion",
+	);
+	assert.ok(completion);
+	// The completion interrupts the main agent so it reports the result to the user.
+	assert.deepEqual(completion.options, { deliverAs: "steer", triggerTurn: true });
+	assert.match((completion.message as { content: string }).content, /skill:ship/);
+	assert.match((completion.message as { content: string }).content, /\/skill:ship/);
+});
+
+test("/skill:<name> without content: fork, unknown skills, and other input pass through", async () => {
+	let launches = 0;
+	const { mock, context } = await setup({
+		skills: skillRegistry(
+			skillDefinition({ name: "inline" }),
+			skillDefinition({ name: "forked", fork: true }),
+		),
+		runChild: async () => {
+			launches++;
+			return completed("unexpected");
+		},
+	});
+	for (const text of [
+		"/skill:inline run as usual",
+		"/skill:absent",
+		"/skill:",
+		"/skills",
+		"skill:forked not a command",
+		"/skill:forked-other",
+	]) {
+		assert.deepEqual(await input(mock, context, text), { action: "continue" }, text);
+	}
+	assert.equal(launches, 0);
+	assert.equal(context.notifications.length, 0);
+});
+
+test("/skill:<name> reports a fork that cannot start instead of expanding inline", async () => {
+	let launches = 0;
+	const { mock, context } = await setup({
+		skills: skillRegistry(skillDefinition({ name: "forked", fork: true })),
+		runChild: async () => {
+			launches++;
+			return completed("unexpected");
+		},
+	});
+	process.env.PI_SUBAGENT_DEPTH = "1";
+	// Consumed either way: an inline expansion is what the skill opted out of.
+	assert.deepEqual(await input(mock, context, "/skill:forked"), { action: "handled" });
+	assert.equal(launches, 0);
+	assert.equal(context.notifications[0]?.level, "error");
+	assert.match(context.notifications[0]?.message ?? "", /Nested subagents are not supported/);
+});
+
 async function setup(
 	dependencies: SubagentsDependencies = {},
 	mockOptions: Parameters<typeof createMockPi>[0] = {},
@@ -1030,6 +1127,7 @@ function skillDefinition(overrides: Partial<SkillDefinition> & { name: string })
 		toolsDeclared: true,
 		unsupportedTools: [],
 		disableModelInvocation: false,
+		fork: false,
 		source: `/skills/${overrides.name}/SKILL.md`,
 		origin: "pi" as const,
 		...overrides,
@@ -1067,6 +1165,13 @@ function agentRegistry(
 
 async function emit(mock: Mock, event: string, payload: unknown, context: unknown): Promise<void> {
 	for (const handler of mock.events.get(event) ?? []) await handler(payload, context);
+}
+
+/** Deliver user input through the extension's `input` handler and return its verdict. */
+async function input(mock: Mock, context: Context, text: string): Promise<unknown> {
+	const handlers = mock.events.get("input") ?? [];
+	assert.equal(handlers.length, 1);
+	return handlers[0]?.({ type: "input", text, source: "interactive" }, context.ctx);
 }
 
 function tool(mock: Mock, name: string): RegisteredTool {

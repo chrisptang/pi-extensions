@@ -7,6 +7,7 @@ import { loadInstructionOverrides } from "./instruction-overrides.js";
 import { type MainAgentDependencies, registerMainAgent } from "./main-agent.js";
 import { registerSubagentsPanelCommand } from "./panel.js";
 import type { SubagentRuntime } from "./runtime.js";
+import { registerSkillFork } from "./skill-fork.js";
 import { registerSkillsCommand } from "./skills-command.js";
 import { registerSubagentTools, type SubagentToolsDependencies } from "./tools.js";
 import { createSubagentWidgetController } from "./widget.js";
@@ -35,6 +36,7 @@ export default function subagents(
 	const tools = registerSubagentTools(pi, { ...dependencies, agents, instructions });
 	dependencies.onRuntime?.(tools.runtime);
 	registerSkillsCommand(pi, tools.skills);
+	registerSkillFork(pi, tools.skills, tools.startSkillJob, tools.validateSkillArgs);
 	const panel = registerSubagentsPanelCommand(tools.runtime);
 	pi.registerCommand(panel.name, panel.options);
 	const widget = createSubagentWidgetController(tools.runtime);

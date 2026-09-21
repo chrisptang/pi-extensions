@@ -644,6 +644,124 @@ async function handle(command) {
 	assert.doesNotMatch(result.limitations.join("\n"), /may be incomplete/u);
 });
 
+test("buildPiArgs tells the child about its context bound when the window is known", () => {
+	const bounded = buildPiArgs(childRequest({ maxTurns: 40, contextWindow: 200_000 }));
+	const appended = bounded[bounded.indexOf("--append-system-prompt") + 1] ?? "";
+	assert.match(appended, /budget of 40 turns.*context window is also a budget.*70% full/u);
+
+	const unbounded = buildPiArgs(childRequest({ maxTurns: 40 }));
+	const turnsOnly = unbounded[unbounded.indexOf("--append-system-prompt") + 1] ?? "";
+	assert.doesNotMatch(turnsOnly, /context window/u);
+});
+
+test("runChild asks a child whose context fills to the ratio to wrap up and keeps its report", async () => {
+	installFakePi(`
+const toolTurn = (totalTokens) => {
+  event({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "looking" }],
+      stopReason: "toolUse",
+      usage: { input: totalTokens, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens },
+    },
+  });
+  event({ type: "turn_end", message: { stopReason: "toolUse" }, toolResults: [{}] });
+};
+async function handle(command) {
+  respond(command);
+  if (command.type === "prompt") {
+    toolTurn(500);
+    toolTurn(699);
+    toolTurn(700);
+    return;
+  }
+  if (command.type === "steer") {
+    event(message("Wrapped up: " + command.message));
+    event({ type: "turn_end", message: { stopReason: "stop" }, toolResults: [] });
+    event({ type: "agent_settled" });
+  }
+}
+`);
+	const activity: ChildActivity[] = [];
+	const result = await runChild(
+		childRequest({
+			maxTurns: 100,
+			contextWindow: 1_000,
+			onActivity: (entry) => activity.push(entry),
+		}),
+	);
+	assert.equal(result.state, "completed");
+	// 699/1000 stays under the 70% ratio; the third turn crosses it.
+	assert.match(
+		result.result ?? "",
+		/^Wrapped up: Your context window is 70% full\. Stop calling tools/u,
+	);
+	assert.match(result.limitations.join("\n"), /70% of its context window.*may be incomplete/u);
+	assert.equal(
+		activity.filter((entry) => entry.type === "notice").length,
+		1,
+		"one wrap-up notice, no turn-budget notice",
+	);
+	assert.ok(
+		activity.some(
+			(entry) =>
+				entry.type === "notice" &&
+				/Context 70% full \(700\/1000 tokens\); asked the child to wrap up/u.test(entry.text),
+		),
+	);
+});
+
+test("runChild ignores context without a known window", async () => {
+	installFakePi(`
+async function handle(command) {
+  respond(command);
+  if (command.type !== "prompt") return;
+  event({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "looking" }],
+      stopReason: "toolUse",
+      usage: { input: 900_000, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 900_000 },
+    },
+  });
+  event({ type: "turn_end", message: { stopReason: "toolUse" }, toolResults: [{}] });
+  event(message("done"));
+  event({ type: "turn_end", message: { stopReason: "stop" }, toolResults: [] });
+  event({ type: "agent_settled" });
+}
+`);
+	const result = await runChild(childRequest({ maxTurns: 10 }));
+	assert.equal(result.state, "completed");
+	assert.equal(result.result, "done");
+	assert.deepEqual(result.limitations, []);
+});
+
+test("runChild stops a child that keeps working past its context wrap-up", async () => {
+	installFakePi(`
+async function handle(command) {
+  respond(command);
+  if (command.type !== "prompt") return;
+  event({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      content: [{ type: "text", text: "still looking" }],
+      stopReason: "toolUse",
+      usage: { input: 800, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 800 },
+    },
+  });
+  setInterval(() => event({ type: "turn_end", message: { stopReason: "toolUse" }, toolResults: [{}] }), 5);
+}
+`);
+	const result = await runChild(childRequest({ maxTurns: 100, contextWindow: 1_000 }));
+	assert.equal(result.state, "budget_exhausted");
+	assert.equal(result.result, "still looking");
+	assert.match(result.error ?? "", /80% of its context window without wrapping up/u);
+	assert.doesNotMatch(result.limitations.join("\n"), /may be incomplete/u);
+});
+
 test("runChild honors cancellation after RPC readiness", async () => {
 	installFakePi(`
 async function handle(command) {

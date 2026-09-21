@@ -80,6 +80,25 @@ test("unavailable tools are dropped with a diagnostic", () => {
 	assert.ok(diagnostics.some((line) => line.includes("teleport")));
 });
 
+test("effort is read as the Claude Code spelling of thinkingLevel", () => {
+	const directory = path.join(root, "agents");
+	writeAgent(directory, "quick.md", "---\nname: quick\neffort: Low\n---\n\nBody.\n");
+	writeAgent(
+		directory,
+		"both.md",
+		"---\nname: both\nthinkingLevel: high\neffort: low\n---\n\nBody.\n",
+	);
+	writeAgent(directory, "odd.md", "---\nname: odd\neffort: extreme\n---\n\nBody.\n");
+	writeAgent(directory, "plain.md", "---\nname: plain\n---\n\nBody.\n");
+	const { agents, diagnostics } = discoverPrimaryAgents();
+	assert.equal(agents.get("quick")?.thinkingLevel, "low");
+	// The Pi spelling wins when a definition carries both.
+	assert.equal(agents.get("both")?.thinkingLevel, "high");
+	assert.equal(agents.get("odd")?.thinkingLevel, undefined);
+	assert.ok(diagnostics.some((line) => line.includes("invalid effort extreme")));
+	assert.equal(agents.get("plain")?.thinkingLevel, undefined);
+});
+
 test("role defaults to subagent, accepts main, and rejects anything else", () => {
 	const directory = path.join(root, "agents");
 	writeAgent(directory, "plain.md", "---\nname: plain\n---\n\nBody.\n");

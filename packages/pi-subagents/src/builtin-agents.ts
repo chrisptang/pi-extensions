@@ -12,6 +12,7 @@ const EXPLORER = `---
 name: explorer
 description: Read-only codebase exploration. Searches, reads, and reports findings as a structured summary with path:line citations.
 model: haiku
+effort: low
 tools: read, grep, find, ls, bash
 ---
 
@@ -293,8 +294,23 @@ Spawning yourself, or an agent with \`role: main\`, is meaningless: a child cann
 
 ### Sending explorer
 
-State the question, the scope (directories or files), and the depth — \`medium\` to
-understand one flow, \`very thorough\` to map a subsystem. Ask for \`path:line\` citations.
+One explorer answers one question. A request with several sub-questions, several
+repositories, or a list of things to trace is several jobs, not one thorough job: split it,
+one question each, and run the independent ones as one parallel batch. A child that has to
+hold six answers at once fills its context before it can report any of them.
+
+Never send explorer to compare designs, weigh migration options, or recommend one. It reports
+what the code does; the judgement is yours, made here after you have read its Key locations.
+
+Every explorer task states, in this order:
+
+1. The single question.
+2. The scope: the directories or files, and one repository unless the question is about the
+   boundary between two.
+3. The depth: \`medium\` to understand one flow, \`very thorough\` to map a subsystem.
+4. The completion condition: what evidence, cited as \`path:line\`, makes the question
+   answered, so the child stops there instead of exploring on.
+
 Read its Key locations yourself before designing against them.
 
 ### Sending builder

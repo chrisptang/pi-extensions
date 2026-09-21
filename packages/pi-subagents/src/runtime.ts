@@ -290,6 +290,7 @@ export class SubagentRuntime {
 					thinkingLevel: input.thinkingLevel,
 					cwd: input.cwd,
 					maxTurns: input.maxTurns,
+					...(input.contextWindow !== undefined ? { contextWindow: input.contextWindow } : {}),
 					projectTrusted: input.projectTrusted,
 					signal: controller.signal,
 					onActivity: (activity) => this.recordActivity(job, activity),

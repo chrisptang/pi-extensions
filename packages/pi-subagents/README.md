@@ -28,6 +28,7 @@ This shapes the design rather than just the documentation. Jobs are one-way so t
 - Ships three built-in agent definitions — `explorer`, `builder`, and the main-session `architect` — seeded into `~/.pi/agent/agents/` and kept current on every load.
 - Runs the main session as a `role: main` definition through `--agent <name>` or `mainAgent` in `~/.pi/agent/subagents.json`, so the session itself gets a persona, model, and thinking level.
 - Runs a skill inside a subagent through `skill_run`, keeping its instructions and intermediate work out of the main session.
+- Routes a user's `/skill:<name>` into a subagent when the skill declares Claude Code's `content: fork`, so the skill's steps never enter the main session.
 - Advertises only that directory's definitions, and resolves any other name on demand from `~/.claude/agents/` and `~/.agents/agents/`.
 - Runs a job blocking or in the background, where a background completion interrupts the main agent with the result.
 - Defaults work tools to `read`, `grep`, `find`, and `ls`.
@@ -118,6 +119,8 @@ Pi retries recognized transient provider failures inside the child. If Pi misses
 
 What bounds a job is its turn budget, `maxTurns`, which defaults to 100 model responses. It does not depend on how fast the model answers, so it is the bound that keeps an exploration from running forever. The child is told its budget in its system prompt, so it can pace the work from the start, and reminded of how many turns remain once 90% of the budget is used. Failed model turns still count toward the budget but may use the transient retry allowance; only successful report turns suppress budget enforcement. When the budget is reached the child is asked to stop using tools and report what it found; that report comes back as a normal result with a limitation noting the budget. A child that keeps working three turns past the budget is stopped with the `budget_exhausted` state and whatever it last said.
 
+The context window bounds a job the same way, because a child reading large files fills its window long before its turns run out, and Pi's own compaction would then summarize away the evidence it gathered. When the model's context window is known, the child is told about the bound in its system prompt, and once a response reports the context 70% full the child is asked to stop using tools and report. The report carries a limitation naming the context bound, and a child that keeps working three turns past the request is stopped as `budget_exhausted`.
+
 Tasks are limited to 50 KiB of UTF-8 text.
 The terminal states are `completed`, `partial`, `failed`, `budget_exhausted`, and `cancelled`.
 `subagent_inspect` never returns complete task text, child output, prompts, selected tools, context, credentials, environment variables, or secrets.
@@ -187,6 +190,7 @@ An agent definition is a Markdown file with YAML frontmatter that names a reusab
 name: explorer
 description: Read-only codebase exploration. Searches, reads, and reports findings as a structured summary with path:line citations.
 model: haiku
+effort: low
 tools: read, grep, find, ls, bash
 ---
 
@@ -199,7 +203,8 @@ You are a read-only codebase explorer.
 | `description` | Yes | One line, up to 200 characters, shown in `/agents` and in the `agent` parameter. |
 | `model` | No | Alias or `provider/modelId`, resolved by the parent at spawn time. |
 | `tools` | No | Default work tools for this agent. |
-| `thinkingLevel` | No | Default thinking level for this agent. |
+| `effort` | No | Default thinking level for this agent, in Claude Code's spelling: `low`, `medium`, `high`, `xhigh`, or `max`. Pi's `off` and `minimal` are accepted too. |
+| `thinkingLevel` | No | Same field in Pi's spelling; it wins when a definition carries both. |
 | `role` | No | `subagent` (default) or `main`. A `main` definition describes this session, not a child; see [Running the main session as an agent](#-running-the-main-session-as-an-agent). |
 
 The body, up to 50 KiB, becomes the child's system prompt, so `task` stays free for the caller's own instructions.
@@ -364,6 +369,31 @@ Because the body travels through `--append-system-prompt` rather than the 50 KiB
 Children run with `--no-skills`, so a child cannot load the skill itself.
 Its system prompt therefore names the skill's directory and requires relative paths to resolve against it, which keeps `references/` and `scripts/` reachable for multi-file skills.
 A child needs a read tool to follow those references; the default tool set provides one.
+
+### `/skill:<name>` with `content: fork`
+
+A skill whose frontmatter declares `content: fork` runs in a subagent when you type `/skill:<name>`, instead of expanding into the main session as Pi does by default.
+Text after the name becomes the child's request, exactly like `args`, and the skill's own `model`, `allowed-tools`, and `thinkingLevel` apply.
+The job appears in the widget as `/skill:<name>`, and its completion interrupts the main agent so it reports the result to you.
+
+```yaml
+---
+name: xm-gitcommit
+description: Analyze the pending changes, write a commit message, and push.
+content: fork
+model: haiku
+allowed-tools: Bash(git add:*), Bash(git commit:*), Bash(git push:*)
+---
+```
+
+Only user input takes this path.
+A skill without `content: fork` expands inline as before, and a model that wants a skill in a child still calls `skill_run`.
+An `agent:` field, such as Claude Code's `agent: general-purpose`, is ignored rather than rejected: the child is a plain Pi subagent whose system prompt is the skill body.
+Because the child is one-way, a step that would ask you a question ends the job with that question in its result instead.
+
+The interception matches the typed text, so a fork skill that lives only in `~/.claude/skills/` works when you type its full name.
+Autocompletion for `/skill:` is Pi's and covers only the directories Pi itself loads; symlink such a skill into `~/.pi/agent/skills/` if you want it completed.
+If the job cannot start, the failure is reported and the input is consumed rather than expanded inline.
 
 ### Skills written for Claude Code
 
