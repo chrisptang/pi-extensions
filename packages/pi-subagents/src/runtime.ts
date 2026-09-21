@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { type ActivityEvent, ActivityLog } from "./activity.js";
+import { type ActivityEvent, ActivityLog, formatActivityLine } from "./activity.js";
 import { COMPLETION_MESSAGE_TYPE } from "./completion-renderer.js";
 import { modelVisibleJson } from "./model-output.js";
 import { runChild as defaultRunChild } from "./process.js";
@@ -39,7 +39,7 @@ interface InternalJob extends JobSummary {
 	turns: number;
 	deliverySent: boolean;
 	generation: number;
-	/** Human-facing progress record. Never read by the model. */
+	/** Progress record shown in the panel; `tail` exposes its newest lines to the model. */
 	activity: ActivityLog;
 }
 
@@ -314,6 +314,46 @@ export class SubagentRuntime {
 		};
 	}
 
+	/**
+	 * The newest activity lines of one job, so the model can see that a running
+	 * child is alive and roughly where it is without waiting for it to end.
+	 */
+	tail(
+		jobId: string,
+		lines: number,
+	): {
+		jobId: string;
+		agent?: string;
+		description?: string;
+		state: SubagentJobState;
+		elapsedMs: number;
+		turns: number;
+		maxTurns?: number;
+		/** Milliseconds since the newest event, or absent when nothing was recorded. */
+		sinceLastEventMs?: number;
+		/** Events recorded before the returned lines, including any the buffer evicted. */
+		earlierEvents: number;
+		activity: string[];
+	} {
+		const job = this.requireJob(jobId);
+		const now = this.now();
+		const events = job.activity.snapshot();
+		const shown = events.slice(-lines);
+		const latest = events.at(-1);
+		return {
+			jobId: job.jobId,
+			...(job.agent ? { agent: job.agent } : {}),
+			...(job.description ? { description: job.description } : {}),
+			state: job.state,
+			elapsedMs: Math.max(0, (job.finishedAt ?? now) - (job.startedAt ?? job.createdAt)),
+			turns: job.turns,
+			...(job.maxTurns !== undefined ? { maxTurns: job.maxTurns } : {}),
+			...(latest ? { sinceLastEventMs: Math.max(0, now - latest.at) } : {}),
+			earlierEvents: job.activity.droppedCount + events.length - shown.length,
+			activity: shown.map((event) => formatActivityLine(event, job.startedAt ?? job.createdAt)),
+		};
+	}
+
 	inspectJobs(): { jobs: JobSummary[]; omitted: number } {
 		this.prune();
 		return {
@@ -390,33 +430,27 @@ export class SubagentRuntime {
 		return { jobId, state: job.state };
 	}
 
+	/**
+	 * Resolve when the job reaches a terminal state. There is no timeout: the
+	 * turn and context budgets already bound the child, and a wait that returned
+	 * early only cost the caller another turn to wait again.
+	 */
 	async wait(
 		jobId: string,
-		timeoutMs: number | undefined,
 		signal?: AbortSignal,
 	): Promise<{
 		jobId: string;
 		state: SubagentJobState;
-		timedOut: boolean;
 		result?: string;
 		error?: string;
 		limitations?: string[];
 	}> {
 		const job = this.requireJob(jobId);
-		if (isTerminal(job.state)) return this.waitResult(job, false);
+		if (isTerminal(job.state)) return this.waitResult(job);
 		if (signal?.aborted) throw abortError("Subagent wait was cancelled");
-		let timeout: NodeJS.Timeout | undefined;
 		let onAbort: (() => void) | undefined;
 		const outcome = await Promise.race([
 			job.terminal.then(() => "terminal" as const),
-			...(timeoutMs !== undefined
-				? [
-						new Promise<"timeout">((resolve) => {
-							timeout = setTimeout(() => resolve("timeout"), timeoutMs);
-							timeout.unref();
-						}),
-					]
-				: []),
 			...(signal
 				? [
 						new Promise<"aborted">((resolve) => {
@@ -426,11 +460,9 @@ export class SubagentRuntime {
 					]
 				: []),
 		]);
-		if (timeout) clearTimeout(timeout);
 		if (signal && onAbort) signal.removeEventListener("abort", onAbort);
 		if (outcome === "aborted") throw abortError("Subagent wait was cancelled");
-		if (isTerminal(job.state)) return this.waitResult(job, false);
-		return this.waitResult(job, outcome === "timeout");
+		return this.waitResult(job);
 	}
 
 	async shutdown(): Promise<void> {
@@ -501,7 +533,7 @@ export class SubagentRuntime {
 	private deliver(job: InternalJob): void {
 		if (!this.deliveryEnabled || job.deliverySent || job.generation !== this.generation) return;
 		job.deliverySent = true;
-		const payload = this.waitResult(job, false);
+		const payload = this.waitResult(job);
 		try {
 			this.pi.sendMessage(
 				{
@@ -519,16 +551,15 @@ export class SubagentRuntime {
 		}
 	}
 
-	private waitResult(job: InternalJob, timedOut: boolean) {
+	private waitResult(job: InternalJob) {
 		return {
 			jobId: job.jobId,
 			...(job.agent ? { agent: job.agent } : {}),
 			...(job.description ? { description: job.description } : {}),
 			state: job.state,
-			timedOut,
-			...(!timedOut && job.result ? { result: job.result } : {}),
-			...(!timedOut && job.error ? { error: job.error } : {}),
-			...(!timedOut && job.limitations.length > 0 ? { limitations: [...job.limitations] } : {}),
+			...(job.result ? { result: job.result } : {}),
+			...(job.error ? { error: job.error } : {}),
+			...(job.limitations.length > 0 ? { limitations: [...job.limitations] } : {}),
 		};
 	}
 

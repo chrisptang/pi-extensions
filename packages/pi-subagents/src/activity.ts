@@ -199,6 +199,27 @@ export function summarizeToolResult(result: unknown): string {
 }
 
 /**
+ * One event as a plain text line for `subagent_tail`: an offset from the job's
+ * start, then the same tool / say / note shape the panel shows, without theme
+ * colours. `detail` and `result` are already sanitized, redacted, and bounded.
+ */
+export function formatActivityLine(event: ActivityEvent, startedAt: number): string {
+	const offset = `+${formatOffset(Math.max(0, event.at - startedAt))}`;
+	if (event.kind === "output") return `${offset} say ${event.detail}`;
+	if (event.kind === "notice") return `${offset} note ${event.detail}`;
+	const outcome = event.outcome === undefined ? "…" : event.outcome === "error" ? "✗" : "✓";
+	const result = event.result ? ` → ${event.result}` : "";
+	return `${offset} ${event.tool ?? "tool"} ${outcome} ${event.detail}${result}`.trimEnd();
+}
+
+function formatOffset(ms: number): string {
+	const totalSeconds = Math.floor(ms / 1000);
+	const minutes = Math.floor(totalSeconds / 60);
+	const seconds = totalSeconds % 60;
+	return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/**
  * Per-job ring buffer of activity events.
  *
  * A tool call and its result share one entry, so the panel shows a stable row

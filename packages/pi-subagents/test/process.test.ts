@@ -9,7 +9,6 @@ import {
 	budgetHintTurn,
 	buildPiArgs,
 	resolveMaxTurns,
-	resolveTimeoutMs,
 	runChild,
 	terminateWindowsProcessTree,
 } from "../src/process.js";
@@ -511,15 +510,6 @@ test("handles late credential-pipe errors after child launch failure", async () 
 	assert.equal(result.state, "failed");
 	assert.match(result.error ?? "", /ENOENT|not found/iu);
 	await new Promise<void>((resolve) => setImmediate(resolve));
-});
-
-test("resolves optional wait timeouts with Pi bash semantics", () => {
-	assert.equal(resolveTimeoutMs(undefined), undefined);
-	assert.equal(resolveTimeoutMs(0.025), 25);
-	assert.equal(resolveTimeoutMs(2_147_483.647), 2_147_483_647);
-	assert.throws(() => resolveTimeoutMs(0), /finite number of seconds/);
-	assert.throws(() => resolveTimeoutMs(Number.POSITIVE_INFINITY), /finite number of seconds/);
-	assert.throws(() => resolveTimeoutMs(2_147_483.648), /maximum is 2147483\.647 seconds/);
 });
 
 test("resolves turn budgets as positive integers", () => {

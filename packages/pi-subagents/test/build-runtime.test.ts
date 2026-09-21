@@ -176,7 +176,14 @@ test("Pi's Jiti loader loads the generated extension", async () => {
 		assert.deepEqual([...(main?.messageRenderers.keys() ?? [])], ["pi-subagents-completion"]);
 		assert.deepEqual(
 			[...(main?.tools.keys() ?? [])],
-			["subagent_spawn", "skill_run", "subagent_inspect", "subagent_cancel", "subagent_wait"],
+			[
+				"subagent_spawn",
+				"skill_run",
+				"subagent_inspect",
+				"subagent_cancel",
+				"subagent_wait",
+				"subagent_tail",
+			],
 		);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

@@ -119,13 +119,25 @@ A job a human terminated through `/subagents` reports `Subagent execution was ca
 | Parameter | Type | Required | Constraint / default |
 | --- | --- | --- | --- |
 | `jobId` | `string` | Yes | Job ID to wait for. |
-| `timeout` | `number` | No | Seconds; `> 0` through `2,147,483.647`; no default and does not cancel the job. |
 
-Returns when the job reaches a terminal state. A timeout or caller cancellation stops only that wait and leaves the job running.
+Returns when the job reaches a terminal state. There is no timeout: the job's turn and context budgets already bound it, and a wait that returned early would only cost the main agent another turn to wait again. Caller cancellation stops only that wait and leaves the job running.
 
-There is no early return for an incoming message: a child has no channel to send one. The only outcomes are terminal, timeout, and cancellation.
+There is no early return for an incoming message: a child has no channel to send one. The only outcomes are terminal and cancellation.
 
 Subagents do not have this tool, or any other `subagent_*` tool.
+
+## `subagent_tail`
+
+| Parameter | Type | Required | Constraint / default |
+| --- | --- | --- | --- |
+| `jobId` | `string` | Yes | Job ID returned by `subagent_spawn`. |
+| `lines` | `integer` | No | Newest activity lines to return, `1` through `50`; defaults to `10`. |
+
+Returns at once with the job's `state`, `elapsedMs`, `turns` against `maxTurns`, `sinceLastEventMs` when anything was recorded, `earlierEvents` (recorded lines before the returned window, including any the buffer evicted), and `activity`: the newest lines, oldest first.
+
+Each line is `+m:ss` from the job's start followed by one of a tool call (`read ✓ src/a.ts → first result line`, with `…` while the call is still running and `✗` on error), visible assistant text (`say …`), or a lifecycle notice (`note Job completed.`). The lines are the `/subagents` panel's activity record — summarized arguments, credential redaction, and the 512-byte bound apply — so the tool never exposes file bodies or the child's thinking.
+
+The tool exists so the main agent can confirm a running job is alive and roughly where it is without waiting for it. Its lines are progress signals, not results: a running job still needs `subagent_wait` or its background completion.
 
 ## `/subagents`
 
@@ -139,7 +151,7 @@ The activity record holds tool calls with summarized arguments, their outcome an
 
 Each job retains its most recent 200 events, each bounded to 512 bytes of display text; older events are dropped and the panel reports how many. A job's record is released when the job is pruned.
 
-The panel is a human surface. Nothing it displays enters the main agent's context.
+The panel is a human surface. Nothing it displays enters the main agent's context on its own; `subagent_tail` returns the same redacted lines only when the main agent asks for them.
 
 ## Nesting
 
@@ -173,7 +185,7 @@ Name the files each job owns before starting it.
 - State each job's owning files in its task.
 ```
 
-Overridable sections: `subagent_spawn`, `subagent_wait`, `subagent_cancel`, `subagent_inspect`, `skill_run`. A heading naming anything else is reported through `/agents` rather than ignored.
+Overridable sections: `subagent_spawn`, `subagent_wait`, `subagent_cancel`, `subagent_inspect`, `subagent_tail`, `skill_run`. A heading naming anything else is reported through `/agents` rather than ignored.
 
 Each field is replaced only where the file defines it. A section with prose but no `### Guidelines` block keeps the shipped guidelines; a `### Guidelines` block with no items drops them, which is how you remove a built-in bullet rather than adding to it.
 

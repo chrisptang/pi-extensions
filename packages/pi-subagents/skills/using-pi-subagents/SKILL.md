@@ -182,21 +182,15 @@ To redirect a job that is going the wrong way, terminate it and start another. I
 
 ## Wait intentionally
 
-Use the main-agent form of `subagent_wait(jobId, timeout?)` only when a specific job result is required for the next action and useful overlapping main-agent work is complete.
+Use `subagent_wait(jobId)` only when a specific job result is required for the next action and useful overlapping main-agent work is complete.
 
-A wait returns only when the job becomes terminal, the timeout elapses, or the caller cancels it. Nothing else interrupts it.
+A wait returns only when the job becomes terminal or the caller cancels it. Nothing else interrupts it, and there is no wait timeout: the job's turn and context budgets already bound it.
 
-Set `subagent_wait.timeout` in seconds only when the caller needs a wait deadline.
-
-Wait timeouts accept positive finite numbers and have no default.
-
-Omitting `timeout` waits until the job becomes terminal or the caller cancels the wait.
-
-A wait timeout stops only the caller's wait.
-
-A wait timeout does not cancel or close the job.
+Cancelling a wait stops only the caller's wait and does not cancel or close the job.
 
 Do not poll repeatedly because asynchronous completion delivery remains active.
+
+Use `subagent_tail(jobId, lines?)` to check that a running job is alive and roughly where it is; it returns at once with the newest activity lines and never waits.
 
 A background job's completion arrives as an interrupt, so waiting for one is unnecessary.
 
@@ -205,6 +199,8 @@ A background job's completion arrives as an interrupt, so waiting for one is unn
 Use `subagent_inspect` for one privacy-filtered snapshot of retained job metadata.
 
 Inspection omits task text, complete child output, prompts, selected tools, context, credentials, environment variables, requests, responses, and secrets.
+
+`subagent_tail` returns one job's newest activity lines: tool calls with summarized arguments and outcomes, visible assistant text, and lifecycle notes, each redacted and cut to 512 bytes. Its lines are progress signals, not results.
 
 Use `subagent_cancel` when queued or running work is no longer needed, unsafe, stale, or incorrectly scoped.
 

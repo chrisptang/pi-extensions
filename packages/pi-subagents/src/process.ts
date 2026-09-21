@@ -7,8 +7,6 @@ import { getPackageDir } from "@earendil-works/pi-coding-agent";
 import type { ChildActivity, ChildRequest, ChildResult, ChildUsage } from "./types.js";
 
 const CORE_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
-const MAX_TIMEOUT_MS = 2_147_483_647;
-const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
 const MAX_OUTPUT_BYTES = 32 * 1024;
 const MAX_ERROR_BYTES = 8 * 1024;
 const MAX_EVENT_LINE_BYTES = 256 * 1024;
@@ -90,18 +88,6 @@ interface PendingRpcCommand {
 	onAccepted?: () => void;
 	signal?: AbortSignal;
 	onAbort?: () => void;
-}
-
-export function resolveTimeoutMs(timeout: number | undefined): number | undefined {
-	if (timeout === undefined) return undefined;
-	if (!Number.isFinite(timeout) || timeout <= 0) {
-		throw new Error("Invalid timeout: must be a finite number of seconds");
-	}
-	const timeoutMs = timeout * 1000;
-	if (timeoutMs > MAX_TIMEOUT_MS) {
-		throw new Error(`Invalid timeout: maximum is ${MAX_TIMEOUT_SECONDS} seconds`);
-	}
-	return timeoutMs;
 }
 
 /** Turn after which the remaining-budget reminder is sent, or undefined for none. */

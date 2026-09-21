@@ -100,7 +100,7 @@ Run `/subagents` for the full inspection panel. See [Inspecting and terminating 
 
 ## 🛠️ Tools
 
-The main Pi session exposes five fixed tools and the `/agents`, `/skills`, and `/subagents` commands:
+The main Pi session exposes six fixed tools and the `/agents`, `/skills`, and `/subagents` commands:
 
 | Tool | Parameters | Purpose |
 | --- | --- | --- |
@@ -108,12 +108,13 @@ The main Pi session exposes five fixed tools and the `/agents`, `/skills`, and `
 | `skill_run` | `name`, `description`, optional `args`, `background`, `tools`, `thinkingLevel`, `maxTurns` | Run one skill inside a subagent and return its `jobId`. |
 | `subagent_inspect` | none | List privacy-filtered retained-job metadata. |
 | `subagent_cancel` | `jobId` | Idempotently cancel one queued or running job. |
-| `subagent_wait` | `jobId`, optional `timeout` | Wait for one job to reach a terminal state. |
+| `subagent_wait` | `jobId` | Wait for one job to reach a terminal state. |
+| `subagent_tail` | `jobId`, optional `lines` | Return one job's newest activity lines, like `tail` on a log. |
 
 A child receives **only** its selected work tools. No `subagent_*` tool is added to a child, so it cannot spawn, cancel, inspect, wait on, or message anything: its final message is its only output.
 
 A job has no execution timeout: a slow model is not a failed job, so the child runs until it exits, is cancelled, the session shuts down, or the Pi process exits.
-The `subagent_wait` timeout uses seconds, accepts finite numbers greater than zero through 2,147,483.647, and has no default. It, like caller cancellation, stops only that wait and does not cancel its job.
+`subagent_wait` has no timeout either: it returns only when the job ends or the caller cancels the wait, and cancelling the wait does not cancel its job. The turn and context budgets below are what bound a job, and a wait that returned early would only cost the main agent another turn to wait again.
 
 Pi retries recognized transient provider failures inside the child. If Pi misses a premature stream disconnect, this extension continues the original task in the same RPC child up to three total retry attempts with 2s, 4s, and 8s backoff. The child keeps its conversation and workspace state instead of restarting the task; cancellation interrupts the backoff, and deterministic failures such as authentication, quota, configuration, tool, and model-limit errors remain terminal.
 
@@ -124,6 +125,7 @@ The context window bounds a job the same way, because a child reading large file
 Tasks are limited to 50 KiB of UTF-8 text.
 The terminal states are `completed`, `partial`, `failed`, `budget_exhausted`, and `cancelled`.
 `subagent_inspect` never returns complete task text, child output, prompts, selected tools, context, credentials, environment variables, or secrets.
+`subagent_tail` returns the newest activity lines of one job — the same redacted, 512-byte-bounded lines the `/subagents` panel shows — so the main agent can confirm a running job is alive without waiting for it. It defaults to 10 lines and accepts up to 50.
 
 See [`docs/tools.md`](./docs/tools.md) for the concise schema reference.
 
@@ -309,7 +311,7 @@ Start one subagent job and return its jobId. Collect the result with subagent_wa
 - State each job's owning files in its task.
 ```
 
-You can override `subagent_spawn`, `subagent_wait`, `subagent_cancel`, `subagent_inspect`, and `skill_run`.
+You can override `subagent_spawn`, `subagent_wait`, `subagent_cancel`, `subagent_inspect`, `subagent_tail`, and `skill_run`.
 A heading naming anything else is reported through `/agents` rather than silently ignored.
 
 Each field is replaced only where your file defines it.
@@ -480,7 +482,7 @@ Each job retains its most recent 200 events, and each event's display text is bo
 Older events are dropped and the panel says how many.
 A job's record is released when the job itself is pruned, under the same 24-hour and 32-job terminal retention limits as the rest of its metadata.
 
-The panel is a human surface. Nothing it displays enters the main agent's context, and `subagent_inspect` remains privacy-filtered as before.
+The panel is a human surface: nothing it displays enters the main agent's context on its own, and `subagent_inspect` remains privacy-filtered as before. The main agent reads the same redacted activity lines only when it asks for them through `subagent_tail`.
 
 ## 🧵 Running jobs in parallel
 
@@ -520,7 +522,7 @@ Version 4.0 removes messaging in both directions. A job is now one-way: start it
 | --- | --- |
 | Main `subagent_send` | Nothing to send. Decide from the child's result, then spawn a new job with the answer in its task. |
 | Child `subagent_send` / `subagent_wait` | A child has no tool to reach you. It ends and states what it needs. |
-| `subagent_wait` returning `reason: "subagent_message"` | `subagent_wait` now returns only on a terminal state, timeout, or cancellation. |
+| `subagent_wait` returning `reason: "subagent_message"` | `subagent_wait` now returns only on a terminal state or cancellation. |
 
 Nothing else changes. `subagent_spawn`, `skill_run`, `subagent_inspect`, `subagent_cancel`, and `subagent_wait` keep their contracts, and `/subagents` keeps the live activity view and termination it had before — those never used the removed channel.
 
@@ -562,7 +564,7 @@ Credentials must be available independently to the child through Pi's stored cre
 
 Only the main session can create jobs, and a child cannot reach the parent. Both follow from the same fact, enforced structurally rather than by instruction.
 
-Children are launched with `--no-extensions`, and no extension is injected in its place, so the extension defining `subagent_spawn`, `skill_run`, `subagent_cancel`, `subagent_inspect`, and `subagent_wait` is never loaded in a child process.
+Children are launched with `--no-extensions`, and no extension is injected in its place, so the extension defining `subagent_spawn`, `skill_run`, `subagent_cancel`, `subagent_inspect`, `subagent_wait`, and `subagent_tail` is never loaded in a child process.
 
 The `tools` list is an allowlist of the eight core work tools — `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`.
 No `subagent_*` name is among them, so none can be requested for a child, and an agent definition that names one has it dropped with a diagnostic rather than honoured.

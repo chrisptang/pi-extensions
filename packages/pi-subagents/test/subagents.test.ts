@@ -61,13 +61,20 @@ afterEach(async () => {
 	vi.restoreAllMocks();
 });
 
-test("registers five fixed main-agent tools with stable schemas and explicit limits", async () => {
+test("registers six fixed main-agent tools with stable schemas and explicit limits", async () => {
 	const { mock, context } = await setup();
 	assert.ok(mock.messageRenderers.has("pi-subagents-completion"));
 	const tools = mock.tools as unknown as RegisteredTool[];
 	assert.deepEqual(
 		tools.map((candidate) => candidate.name),
-		["subagent_spawn", "skill_run", "subagent_inspect", "subagent_cancel", "subagent_wait"],
+		[
+			"subagent_spawn",
+			"skill_run",
+			"subagent_inspect",
+			"subagent_cancel",
+			"subagent_wait",
+			"subagent_tail",
+		],
 	);
 	assert.equal(tools[0]?.parameters.properties?.task?.maxLength, 50 * 1024);
 	assert.equal(tools[0]?.parameters.properties?.tools?.maxItems, 64);
@@ -85,22 +92,22 @@ test("registers five fixed main-agent tools with stable schemas and explicit lim
 		"max",
 	]);
 	assert.deepEqual(Object.keys(tool(mock, "subagent_inspect").parameters.properties ?? {}), []);
-	// Only turns bound a child; there is no execution timeout on spawn or skill_run.
-	for (const name of ["subagent_spawn", "skill_run"] as const) {
+	// Turn and context budgets bound a child; nothing exposes a timeout, and a
+	// wait that could return early would only cost the caller another turn.
+	for (const name of ["subagent_spawn", "skill_run", "subagent_wait"] as const) {
 		assert.equal(Object.hasOwn(tool(mock, name).parameters.properties ?? {}, "timeout"), false);
 	}
-	assert.deepEqual(
-		tool(mock, "subagent_wait").prepareArguments?.({ jobId: "job_old", timeoutMs: 30_000 }),
-		{
-			jobId: "job_old",
-			timeout: 30,
-		},
-	);
 	const waitTool = tool(mock, "subagent_wait");
-	const malformedAlias = { jobId: "job_old", timeoutMs: "30000" };
-	const preparedMalformed = waitTool?.prepareArguments?.(malformedAlias);
-	assert.deepEqual(preparedMalformed, malformedAlias);
-	assert.equal(Check(waitTool?.parameters, preparedMalformed), false);
+	assert.deepEqual(Object.keys(waitTool.parameters.properties ?? {}), ["jobId"]);
+	assert.equal(Check(waitTool.parameters, { jobId: "job_old", timeout: 30 }), false);
+	assert.equal(Check(waitTool.parameters, { jobId: "job_old", timeoutMs: 30_000 }), false);
+	const tailTool = tool(mock, "subagent_tail");
+	assert.deepEqual(Object.keys(tailTool.parameters.properties ?? {}), ["jobId", "lines"]);
+	assert.equal(Check(tailTool.parameters, { jobId: "job_old" }), true);
+	assert.equal(Check(tailTool.parameters, { jobId: "job_old", lines: 50 }), true);
+	assert.equal(Check(tailTool.parameters, { jobId: "job_old", lines: 0 }), false);
+	assert.equal(Check(tailTool.parameters, { jobId: "job_old", lines: 51 }), false);
+	assert.equal(Check(tailTool.parameters, { jobId: "job_old", lines: 1.5 }), false);
 	assert.match(tools[0]?.description ?? "", /task defines.*selected tools define/is);
 	for (const candidate of tools) {
 		assert.doesNotMatch(
@@ -565,7 +572,7 @@ test("publishes cancellation only after child teardown settles", async () => {
 	);
 });
 
-test("wait timeout leaves a job active and cancellation rejects stale output", async () => {
+test("wait blocks until terminal, and cancellation rejects stale output", async () => {
 	let resolveChild!: (result: ChildResult) => void;
 	const { mock, context } = await setup({
 		runChild: ({ signal }) =>
@@ -579,17 +586,39 @@ test("wait timeout leaves a job active and cancellation rejects stale output", a
 	const spawned = await spawnJob(mock, context, "review task");
 	const jobId = String(spawned.details.jobId);
 	await Promise.resolve();
+	// Only cancelling the wait itself returns early; the job stays running.
+	const waitController = new AbortController();
+	const pendingWait = tool(mock, "subagent_wait").execute(
+		"wait",
+		{ jobId },
+		waitController.signal,
+		undefined,
+		context.ctx,
+	);
+	let settled = false;
+	pendingWait.then(
+		() => {
+			settled = true;
+		},
+		() => {
+			settled = true;
+		},
+	);
+	await new Promise<void>((resolve) => setTimeout(resolve, 20));
+	assert.equal(settled, false);
+	waitController.abort();
+	await assert.rejects(pendingWait, { name: "AbortError" });
 	assert.deepEqual(
 		(
-			await tool(mock, "subagent_wait").execute(
-				"wait",
-				{ jobId, timeout: 0.001 },
+			await tool(mock, "subagent_tail").execute(
+				"tail",
+				{ jobId },
 				undefined,
 				undefined,
 				context.ctx,
 			)
-		).details,
-		{ jobId, description: "test job", state: "running", timedOut: true },
+		).details.state,
+		"running",
 	);
 	assert.deepEqual((await cancelJob(mock, context, jobId)).details, {
 		jobId,
@@ -600,6 +629,132 @@ test("wait timeout leaves a job active and cancellation rejects stale output", a
 	const terminal = await waitFor(mock, context, jobId);
 	assert.equal(terminal.details.state, "cancelled");
 	assert.doesNotMatch(JSON.stringify(terminal.details), /stale completion/);
+});
+
+test("tail returns the newest activity lines of a running job without waiting", async () => {
+	let now = 10_000;
+	let report:
+		| ((activity: Parameters<NonNullable<ChildRequest["onActivity"]>>[0]) => void)
+		| undefined;
+	const { mock, context } = await setup({
+		now: () => now,
+		runChild: (request) => {
+			report = (activity) => request.onActivity?.(activity);
+			return waitForCancellation(request);
+		},
+	});
+	const spawned = await spawnJob(mock, context, "survey task");
+	const jobId = String(spawned.details.jobId);
+	await Promise.resolve();
+	assert.ok(report);
+	const empty = await tool(mock, "subagent_tail").execute(
+		"tail",
+		{ jobId },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	assert.deepEqual(empty.details, {
+		jobId,
+		description: "test job",
+		state: "running",
+		elapsedMs: 0,
+		turns: 0,
+		maxTurns: 100,
+		earlierEvents: 0,
+		activity: [],
+	});
+
+	now = 12_500;
+	report({ type: "tool_start", toolCallId: "c1", tool: "read", args: { path: "src/a.ts" } });
+	report({
+		type: "tool_end",
+		toolCallId: "c1",
+		tool: "read",
+		result: "line one\nline two",
+		isError: false,
+	});
+	now = 71_000;
+	report({ type: "output", text: "Found  the\x1b[31m handler" });
+	report({
+		type: "tool_start",
+		toolCallId: "c2",
+		tool: "bash",
+		args: { command: "grep -rn TOKEN=abc123 ." },
+	});
+	report({ type: "turn", turns: 3 });
+	now = 75_000;
+	const tailed = await tool(mock, "subagent_tail").execute(
+		"tail",
+		{ jobId, lines: 2 },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	assert.deepEqual(tailed.details, {
+		jobId,
+		description: "test job",
+		state: "running",
+		elapsedMs: 65_000,
+		turns: 3,
+		maxTurns: 100,
+		sinceLastEventMs: 4_000,
+		earlierEvents: 1,
+		activity: ["+1:01 say Found the handler", "+1:01 bash … grep -rn TOKEN=*** ."],
+	});
+	// The default window shows everything recorded so far, oldest first.
+	const full = await tool(mock, "subagent_tail").execute(
+		"tail",
+		{ jobId },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	assert.deepEqual(full.details.activity, [
+		"+0:02 read ✓ src/a.ts → line one line two",
+		"+1:01 say Found the handler",
+		"+1:01 bash … grep -rn TOKEN=*** .",
+	]);
+	assert.equal(full.details.earlierEvents, 0);
+	await assert.rejects(
+		tool(mock, "subagent_tail").execute(
+			"tail",
+			{ jobId: "job_missing" },
+			undefined,
+			undefined,
+			context.ctx,
+		),
+		/Unknown or expired subagent job/,
+	);
+	await assert.rejects(
+		tool(mock, "subagent_tail").execute(
+			"tail",
+			{ jobId, lines: 51 },
+			undefined,
+			undefined,
+			context.ctx,
+		),
+		/integer from 1 to 50/,
+	);
+	await cancelJob(mock, context, jobId);
+	const terminal = await waitFor(mock, context, jobId);
+	// The wait result carries no `timedOut` flag any more.
+	assert.deepEqual(terminal.details, {
+		jobId,
+		description: "test job",
+		state: "cancelled",
+		error: "Subagent execution was cancelled.",
+	});
+	// A terminal job still answers, ending with its lifecycle notice.
+	const after = await tool(mock, "subagent_tail").execute(
+		"tail",
+		{ jobId, lines: 1 },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	assert.equal(after.details.state, "cancelled");
+	assert.deepEqual(after.details.activity, ["+1:05 note Job cancelled."]);
 });
 
 test("jobs share the eight-job capacity", async () => {

@@ -1,6 +1,6 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { type Static, Type } from "typebox";
+import { Type } from "typebox";
 import type { AgentDefinition } from "./agent-definitions.js";
 import {
 	type ModelCandidateLookup,
@@ -14,7 +14,7 @@ import {
 	loadInstructionOverrides,
 } from "./instruction-overrides.js";
 import { modelVisibleJson } from "./model-output.js";
-import { resolveMaxTurns, resolveTimeoutMs } from "./process.js";
+import { resolveMaxTurns } from "./process.js";
 import { type RuntimeDependencies, SubagentRuntime } from "./runtime.js";
 import type { SkillDefinition } from "./skill-definitions.js";
 import { SkillRegistry } from "./skill-registry.js";
@@ -61,7 +61,11 @@ const BUILTIN_INSTRUCTIONS = {
 	},
 	subagent_wait: {
 		description:
-			"Use subagent_wait to wait for one job to become terminal. An incoming child request or response interrupts the wait without cancelling the job. A timeout or caller cancellation stops only this wait.",
+			"Use subagent_wait to wait for one job to become terminal. It has no timeout: the job's turn and context budgets already bound it, and the wait returns only when the job ends or this wait is cancelled. Cancelling the wait does not cancel the job. To see what a running job is doing without waiting, use subagent_tail.",
+	},
+	subagent_tail: {
+		description:
+			"Use subagent_tail to see the newest activity lines of one job, like tail on a log: each line is a tool call with summarized arguments and outcome, visible assistant text, or a lifecycle note. Use it to confirm a running job is alive and roughly where it is; it returns at once and never waits. Do not poll it in a loop: a running job needs subagent_wait or its background completion, and the lines are progress signals, not results.",
 	},
 } as const satisfies Record<string, { description: string; guidelines?: readonly string[] }>;
 
@@ -72,6 +76,9 @@ const MAX_DESCRIPTION_LENGTH = 60;
 const MAX_DESCRIPTION_INPUT_LENGTH = 1_000;
 const MAX_SKILL_ARGS_BYTES = 50 * 1024;
 const MAX_TOOLS = 64;
+const DEFAULT_TAIL_LINES = 10;
+/** Bounds the tool output: each activity line is at most 512 bytes plus its prefix. */
+const MAX_TAIL_LINES = 50;
 const CHILD_CORE_TOOL_SET = new Set<string>(CHILD_CORE_TOOL_NAMES);
 const THINKING_LEVEL_SET = new Set<string>(SUBAGENT_THINKING_LEVELS);
 
@@ -166,14 +173,26 @@ const CancelParameters = Type.Object(
 const WaitParameters = Type.Object(
 	{
 		jobId: Type.String({ description: "Job to wait for.", maxLength: MAX_IDENTIFIER_LENGTH }),
-		timeout: Type.Optional(
-			Type.Number({ description: "Timeout in seconds (optional, no default timeout)" }),
-		),
 	},
 	{ additionalProperties: false },
 );
 
-type WaitArguments = Static<typeof WaitParameters>;
+const TailParameters = Type.Object(
+	{
+		jobId: Type.String({
+			description: "Job ID returned by subagent_spawn.",
+			maxLength: MAX_IDENTIFIER_LENGTH,
+		}),
+		lines: Type.Optional(
+			Type.Integer({
+				description: `Newest activity lines to return, 1 to ${MAX_TAIL_LINES}; defaults to ${DEFAULT_TAIL_LINES}.`,
+				minimum: 1,
+				maximum: MAX_TAIL_LINES,
+			}),
+		),
+	},
+	{ additionalProperties: false },
+);
 
 export interface SubagentToolsDependencies extends RuntimeDependencies {
 	agents?: AgentRegistry;
@@ -364,13 +383,23 @@ export function registerSubagentTools(
 		name: "subagent_wait",
 		label: "Subagent · Wait",
 		description: instruction("subagent_wait").description,
-		promptSnippet: "Use subagent_wait to wait for one subagent job or incoming message",
+		promptSnippet: "Use subagent_wait to wait for one subagent job to finish",
 		parameters: WaitParameters,
-		prepareArguments: prepareWaitArguments,
 		async execute(_toolCallId, params, signal) {
-			const timeoutMs = resolveTimeoutMs(params.timeout);
+			return toolResult(await runtime.wait(requiredIdentifier(params.jobId, "jobId"), signal));
+		},
+	});
+
+	pi.registerTool({
+		name: "subagent_tail",
+		label: "Subagent · Tail",
+		description: instruction("subagent_tail").description,
+		promptSnippet: "Use subagent_tail to see the newest activity of one subagent job",
+		parameters: TailParameters,
+		async execute(_toolCallId, params, signal) {
+			throwIfAborted(signal, "Subagent tail was cancelled");
 			return toolResult(
-				await runtime.wait(requiredIdentifier(params.jobId, "jobId"), timeoutMs, signal),
+				runtime.tail(requiredIdentifier(params.jobId, "jobId"), resolveTailLines(params.lines)),
 			);
 		},
 	});
@@ -666,18 +695,12 @@ function resolveThinkingLevel(value: unknown): SubagentThinkingLevel {
 	return value as SubagentThinkingLevel;
 }
 
-function prepareWaitArguments(args: unknown): WaitArguments {
-	return prepareTimeoutArguments(args) as WaitArguments;
-}
-
-function prepareTimeoutArguments(args: unknown): Record<string, unknown> {
-	if (!args || typeof args !== "object") return args as Record<string, unknown>;
-	if (!Object.hasOwn(args, "timeoutMs")) return args as Record<string, unknown>;
-	const record = args as Record<string, unknown>;
-	if (typeof record.timeoutMs !== "number") return record;
-	const { timeoutMs, ...prepared } = record;
-	if (prepared.timeout === undefined) return { ...prepared, timeout: timeoutMs / 1000 };
-	return prepared;
+function resolveTailLines(value: number | undefined): number {
+	if (value === undefined) return DEFAULT_TAIL_LINES;
+	if (!Number.isInteger(value) || value < 1 || value > MAX_TAIL_LINES) {
+		throw new Error(`Subagent tail lines must be an integer from 1 to ${MAX_TAIL_LINES}.`);
+	}
+	return value;
 }
 
 function requiredString(value: unknown, field: string): string {
