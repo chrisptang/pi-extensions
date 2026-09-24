@@ -742,6 +742,7 @@ test("tail returns the newest activity lines of a running job without waiting", 
 	assert.deepEqual(terminal.details, {
 		jobId,
 		description: "test job",
+		model: "test-provider/test-model",
 		state: "cancelled",
 		error: "Subagent execution was cancelled.",
 	});

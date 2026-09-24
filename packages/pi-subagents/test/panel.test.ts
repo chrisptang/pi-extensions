@@ -451,6 +451,8 @@ test("a background completion shows its spend without telling the model", async 
 	});
 	assert.equal(message.details.turns, 5);
 	assert.equal(message.details.elapsedMs, 48_000);
+	// The model is part of the result, so the main agent and the renderer both see it.
+	assert.match(message.content, /"model":"test-provider\/test-model"/u);
 
 	const renderer = mock.messageRenderers.get("pi-subagents-completion");
 	assert.ok(renderer);
@@ -462,7 +464,7 @@ test("a background completion shows its spend without telling the model", async 
 		).render(width);
 	assert.match(
 		render(message.details, 200).join("\n"),
-		/Subagent job completion · completed · 48s · 5 turns · cache 98\.4% · in 62k · out 1\.1k · \$0\.042 \(/u,
+		/Subagent job completion · test-provider\/test-model · completed · 48s · 5 turns · cache 98\.4% · in 62k · out 1\.1k · \$0\.042 \(/u,
 	);
 	for (const line of render(message.details, 20)) assert.ok(visibleWidth(line) <= 20);
 	// A completion recorded before usage was reported keeps the plain label.

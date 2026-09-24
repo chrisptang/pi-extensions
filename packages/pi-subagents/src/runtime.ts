@@ -609,6 +609,7 @@ export class SubagentRuntime {
 			jobId: job.jobId,
 			...(job.agent ? { agent: job.agent } : {}),
 			...(job.description ? { description: job.description } : {}),
+			model: job.model,
 			state: job.state,
 			...(job.result ? { result: job.result } : {}),
 			...(job.error ? { error: job.error } : {}),

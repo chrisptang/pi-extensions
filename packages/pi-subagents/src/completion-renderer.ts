@@ -60,17 +60,18 @@ export function registerCompletionRenderer(pi: ExtensionAPI): void {
 }
 
 /**
- * ` · explorer · completed · 48s · 5 turns · cache 81.2% · in 62k · out 1.1k · $0.042`.
+ * ` · explorer · anthropic/claude-haiku · completed · 48s · 5 turns · cache 81.2% · in 62k · out 1.1k · $0.042`.
  *
  * Details come from the session file, where completions recorded before usage
  * was reported lack these fields, so each part appears only when well-formed.
  */
 function summaryOf(details: unknown): string {
 	if (typeof details !== "object" || details === null) return "";
-	const { agent, state, elapsedMs, turns, usage } = details as Record<string, unknown>;
+	const { agent, model, state, elapsedMs, turns, usage } = details as Record<string, unknown>;
 	const parts: string[] = [];
-	if (typeof agent === "string")
-		parts.push(sanitizeTerminalText(agent).replace(/\s+/gu, " ").trim());
+	for (const label of [agent, model])
+		if (typeof label === "string")
+			parts.push(sanitizeTerminalText(label).replace(/\s+/gu, " ").trim());
 	if (typeof state === "string") parts.push(sanitizeTerminalText(state));
 	if (isCount(elapsedMs)) parts.push(formatDuration(elapsedMs / 1_000));
 	if (isCount(turns)) parts.push(`${turns} turns`);
