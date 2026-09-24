@@ -3,9 +3,9 @@ import { defineModule } from "./types.js";
 
 export const costModule = defineModule({
 	name: "cost",
-	variables: ["symbol", "cost", "subscription"],
+	variables: ["symbol", "cost", "tools", "subscription"],
 	defaults: {
-		format: "[ $symbol \\$$cost$subscription ]($style)",
+		format: "[ $symbol \\$$cost$tools$subscription ]($style)",
 		symbol: "",
 		style: "none",
 		disabled: false,
@@ -19,10 +19,15 @@ export const costModule = defineModule({
 	resolveStyleVariables: ({ runtime, display }) => ({
 		style: resolveDisplayStyle(display, runtime.tokenTotals.cost) ?? display[0]?.style ?? "none",
 	}),
-	values: ({ runtime }) => ({
-		cost: runtime.tokenTotals.hasUsage === false ? "—" : formatCost(runtime.tokenTotals.cost),
-		subscription: runtime.usingSubscription ? " estimate" : "",
-	}),
+	values: ({ runtime }) => {
+		const toolCost = runtime.tokenTotals.toolCost ?? 0;
+		return {
+			cost: runtime.tokenTotals.hasUsage === false ? "—" : formatCost(runtime.tokenTotals.cost),
+			// `cost` already includes this share; it is shown so subagent spend is visible.
+			tools: toolCost > 0 ? ` (tools $${formatCost(toolCost)})` : "",
+			subscription: runtime.usingSubscription ? " estimate" : "",
+		};
+	},
 });
 
 function formatCost(value: number): string {

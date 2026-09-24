@@ -1,3 +1,4 @@
+import type { Usage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type ActivityEvent, ActivityLog, formatActivityLine } from "./activity.js";
 import { COMPLETION_MESSAGE_TYPE } from "./completion-renderer.js";
@@ -28,6 +29,8 @@ interface InternalJob extends JobSummary {
 	model: string;
 	contextWindow?: number;
 	usage: JobUsage;
+	/** Share of `usage` already reported to the main session through a tool result. */
+	billed: BilledUsage;
 	notifyOnCompletion: boolean;
 	terminal: Promise<void>;
 	resolveTerminal: () => void;
@@ -72,6 +75,15 @@ export interface JobUsage {
 	contextTokens?: number;
 }
 
+type BilledUsage = Omit<JobUsage, "contextTokens">;
+
+/** What a finished job cost, carried in its completion message for display only. */
+export interface CompletionDetails {
+	elapsedMs: number;
+	turns: number;
+	usage: BilledUsage;
+}
+
 export interface PanelJob {
 	jobId: string;
 	agent?: string;
@@ -107,6 +119,8 @@ export interface ActiveJobDisplay {
 	maxTurns?: number;
 	turns: number;
 	tools: string[];
+	/** Provider cost so far, in USD. */
+	cost: number;
 	/** The child's most recent activity line, so the widget says what it is doing now. */
 	latestActivity?: string;
 }
@@ -190,6 +204,7 @@ export class SubagentRuntime {
 				...(job.maxTurns !== undefined ? { maxTurns: job.maxTurns } : {}),
 				turns: job.turns,
 				tools: [...job.tools],
+				cost: job.usage.cost,
 				...latestActivityOf(job),
 			}));
 	}
@@ -258,6 +273,7 @@ export class SubagentRuntime {
 			model: input.model,
 			...(input.contextWindow !== undefined ? { contextWindow: input.contextWindow } : {}),
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
+			billed: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
 			notifyOnCompletion: input.notifyOnCompletion ?? false,
 			terminal,
 			resolveTerminal,
@@ -351,6 +367,37 @@ export class SubagentRuntime {
 			...(latest ? { sinceLastEventMs: Math.max(0, now - latest.at) } : {}),
 			earlierEvents: job.activity.droppedCount + events.length - shown.length,
 			activity: shown.map((event) => formatActivityLine(event, job.startedAt ?? job.createdAt)),
+		};
+	}
+
+	/**
+	 * Usage every job of this session spent since the last call, marked billed.
+	 *
+	 * Subagent tools attach it to their result's `usage`, which Pi footers add to
+	 * the session totals without counting it as main-agent context. Taking the
+	 * delta, running jobs included, reports each response exactly once however
+	 * often the model waits on or inspects a job. Usage still unbilled when a job
+	 * is pruned or the session ends is not reported.
+	 */
+	takeUnbilledUsage(): Usage | undefined {
+		const delta: BilledUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
+		for (const job of this.jobs.values()) {
+			if (job.generation !== this.generation) continue;
+			for (const key of BILLED_KEYS) {
+				delta[key] += job.usage[key] - job.billed[key];
+				job.billed[key] = job.usage[key];
+			}
+		}
+		const totalTokens = delta.input + delta.output + delta.cacheRead + delta.cacheWrite;
+		if (totalTokens === 0 && delta.cost === 0) return undefined;
+		return {
+			input: delta.input,
+			output: delta.output,
+			cacheRead: delta.cacheRead,
+			cacheWrite: delta.cacheWrite,
+			totalTokens,
+			// Children report only a total cost; Pi footers read nothing else.
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: delta.cost },
 		};
 	}
 
@@ -534,13 +581,19 @@ export class SubagentRuntime {
 		if (!this.deliveryEnabled || job.deliverySent || job.generation !== this.generation) return;
 		job.deliverySent = true;
 		const payload = this.waitResult(job);
+		// Cost stays out of the model-visible content; only the renderer shows it.
+		const cost: CompletionDetails = {
+			elapsedMs: Math.max(0, (job.finishedAt ?? this.now()) - (job.startedAt ?? job.createdAt)),
+			turns: job.turns,
+			usage: billedPart(job.usage),
+		};
 		try {
 			this.pi.sendMessage(
 				{
 					customType: COMPLETION_MESSAGE_TYPE,
 					content: modelVisibleJson(payload, { prefix: "Subagent job completion:\n" }),
 					display: true,
-					details: payload,
+					details: { ...payload, ...cost },
 				},
 				// A background job triggers a turn so the main agent acts on the result
 				// immediately. A blocking caller is already waiting, so it must not.
@@ -625,6 +678,18 @@ function accumulateUsage(totals: JobUsage, usage: ChildUsage): void {
 	totals.cacheWrite += usage.cacheWrite;
 	totals.cost += usage.cost;
 	if (usage.contextTokens !== undefined) totals.contextTokens = usage.contextTokens;
+}
+
+const BILLED_KEYS = ["input", "output", "cacheRead", "cacheWrite", "cost"] as const;
+
+function billedPart(usage: JobUsage): BilledUsage {
+	return {
+		input: usage.input,
+		output: usage.output,
+		cacheRead: usage.cacheRead,
+		cacheWrite: usage.cacheWrite,
+		cost: usage.cost,
+	};
 }
 
 function latestActivityOf(job: InternalJob): { latestActivity?: string } {

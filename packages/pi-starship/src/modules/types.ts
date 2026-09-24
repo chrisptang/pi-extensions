@@ -100,6 +100,7 @@ export interface StarshipRuntimeSnapshot {
 		cacheRead: number;
 		cacheWrite: number;
 		cost: number;
+		toolCost?: number;
 		hasUsage?: boolean;
 		latestCacheHitRate?: number;
 		sessionCacheHitRate?: number;

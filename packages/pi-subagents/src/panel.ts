@@ -7,8 +7,8 @@ import {
 	visibleWidth,
 } from "@earendil-works/pi-tui";
 import type { ActivityEvent } from "./activity.js";
-import type { JobUsage, PanelJob, SubagentRuntime } from "./runtime.js";
-import { formatDuration, formatTokenCount, sanitizeTerminalText } from "./text.js";
+import type { PanelJob, SubagentRuntime } from "./runtime.js";
+import { formatDuration, formatSpend, formatTokenCount, sanitizeTerminalText } from "./text.js";
 import { TERMINAL_JOB_STATES } from "./types.js";
 
 /** Panel repaint cadence, matching the active-jobs widget. */
@@ -446,14 +446,7 @@ function jobLines(job: PanelJob): JobLine[] {
  * activity log below shows the tools that were actually used instead.
  */
 function costLine(job: PanelJob): string {
-	return [
-		sanitizeLabel(job.model),
-		`ctx ${contextText(job)}`,
-		`cache ${cacheText(job.usage)}`,
-		`in ${formatTokenCount(promptTokens(job.usage))}`,
-		`out ${formatTokenCount(job.usage.output)}`,
-		`$${job.usage.cost.toFixed(3)}`,
-	].join(" · ");
+	return [sanitizeLabel(job.model), `ctx ${contextText(job)}`, formatSpend(job.usage)].join(" · ");
 }
 
 /** `49k/1.0m 4.9%`, or just the tokens when the model's window is unknown. */
@@ -464,17 +457,6 @@ function contextText(job: PanelJob): string {
 	if (job.contextWindow === undefined) return compact;
 	const percent = (tokens / job.contextWindow) * 100;
 	return `${compact}/${formatTokenCount(job.contextWindow)} ${percent.toFixed(1)}%`;
-}
-
-/** Share of the child's prompt tokens the provider served from its cache. */
-function cacheText(usage: JobUsage): string {
-	const prompt = promptTokens(usage);
-	return prompt > 0 ? `${((usage.cacheRead / prompt) * 100).toFixed(1)}%` : "—";
-}
-
-/** Everything the provider read as input, cached or not, as Pi's footer counts it. */
-function promptTokens(usage: JobUsage): number {
-	return usage.input + usage.cacheRead + usage.cacheWrite;
 }
 
 function detailLogLines(job: PanelJob, theme: Theme): string[] {

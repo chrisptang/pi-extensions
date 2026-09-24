@@ -63,3 +63,25 @@ export function formatTokenCount(value: number): string {
 	if (whole < 1_000_000) return `${(whole / 1_000).toFixed(whole < 10_000 ? 1 : 0)}k`;
 	return `${(whole / 1_000_000).toFixed(1)}m`;
 }
+
+/**
+ * `cache 81.2% · in 62k · out 1.1k · $0.042`: what a child spent, as the panel
+ * and the completion message both report it.
+ */
+export function formatSpend(usage: {
+	input: number;
+	output: number;
+	cacheRead: number;
+	cacheWrite: number;
+	cost: number;
+}): string {
+	// Everything the provider read as input, cached or not, as Pi's footer counts it.
+	const prompt = usage.input + usage.cacheRead + usage.cacheWrite;
+	const cache = prompt > 0 ? `${((usage.cacheRead / prompt) * 100).toFixed(1)}%` : "—";
+	return [
+		`cache ${cache}`,
+		`in ${formatTokenCount(prompt)}`,
+		`out ${formatTokenCount(usage.output)}`,
+		`$${usage.cost.toFixed(3)}`,
+	].join(" · ");
+}

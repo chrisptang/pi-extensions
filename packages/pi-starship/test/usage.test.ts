@@ -38,6 +38,7 @@ test("footer usage matches Pi totals across every usage-bearing entry branch", (
 	assert.equal(result.latestCacheHitRate, 20);
 	assert.equal(result.sessionCacheHitRate, (55 / 159) * 100);
 	assert.ok(Math.abs(result.cost - 0.2) < Number.EPSILON);
+	assert.equal(result.toolCost, 0.02);
 });
 
 test("latest and session cache rates remain distinct", () => {
@@ -69,6 +70,7 @@ test("measured zero cache differs from unavailable usage", () => {
 		cacheRead: 0,
 		cacheWrite: 0,
 		cost: 0,
+		toolCost: 0,
 		hasUsage: false,
 		sessionCacheHitRate: undefined,
 	});

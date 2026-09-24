@@ -77,8 +77,9 @@ export function renderSubagentWidget(
 	width: number,
 ): string[] {
 	const renderWidth = Math.max(0, width);
+	const cost = jobs.reduce((total, job) => total + job.cost, 0);
 	const lines = [
-		`${theme.fg("muted", `Subagents · ${jobs.length} active`)}${theme.fg("dim", " · /subagents to inspect or terminate")}`,
+		`${theme.fg("muted", `Subagents · ${jobs.length} active · ${formatCost(cost)}`)}${theme.fg("dim", " · /subagents to inspect or terminate")}`,
 		...jobs.map((job) => renderJob(job, theme)),
 	];
 	return lines.map((line) => truncateToWidth(line, renderWidth, "…"));
@@ -104,7 +105,9 @@ function renderJob(job: ActiveJobDisplay, theme: Theme): string {
 	];
 	const parts = [
 		...what,
-		running ? theme.fg("dim", `${elapsed} · ${turns}`) : theme.fg("muted", job.state),
+		running
+			? theme.fg("dim", `${elapsed} · ${turns} · ${formatCost(job.cost)}`)
+			: theme.fg("muted", job.state),
 		// The activity line is already sanitized and redacted by the runtime's log.
 		job.latestActivity === undefined
 			? undefined
@@ -127,9 +130,13 @@ function widgetValue(jobs: readonly ActiveJobDisplay[]): string {
 	return jobs
 		.map(
 			(job) =>
-				`${job.jobId}\0${job.agent ?? ""}\0${job.description ?? ""}\0${job.state}\0${Math.floor(job.elapsedMs / 1_000)}\0${job.turns}\0${job.maxTurns ?? ""}\0${job.tools.join(",")}\0${job.latestActivity ?? ""}`,
+				`${job.jobId}\0${job.agent ?? ""}\0${job.description ?? ""}\0${job.state}\0${Math.floor(job.elapsedMs / 1_000)}\0${job.turns}\0${job.maxTurns ?? ""}\0${job.tools.join(",")}\0${formatCost(job.cost)}\0${job.latestActivity ?? ""}`,
 		)
 		.join("\n");
+}
+
+function formatCost(value: number): string {
+	return `$${value.toFixed(3)}`;
 }
 
 function cloneDisplayJob(job: ActiveJobDisplay): ActiveJobDisplay {

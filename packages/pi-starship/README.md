@@ -100,6 +100,7 @@ The default metrics row uses cumulative session input (`input + cacheRead + cach
 It shows `—` when Pi has not reported usage, but `0.0%` for measured zero cache use.
 `$rate` remains available for the latest assistant-request cache rate; `$total_input` is the new explicit inclusive input variable, while legacy `$input` and `$total` retain their existing meanings.
 Reported cost is an estimate; subscription-backed sessions are labeled `estimate`, not a billing statement.
+The cost includes usage that tools report in their results, such as subagent runs, and the default format shows that share as `(tools $x)` when it is positive.
 
 Use `/starship` for interactive configuration, preview, diagnostics, presets, and recovery.
 Manual file edits load at the next `session_start`, including `/reload`.

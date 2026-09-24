@@ -893,9 +893,10 @@ Accepted style fields:
 
 Reported estimated session cost or subscription state.
 
-- Format variables: `$symbol`, `$cost`, `$subscription`.
+- Format variables: `$symbol`, `$cost`, `$tools`, `$subscription`.
+  `$tools` is ` (tools $x)` when tool results reported cost, such as subagent runs, and empty otherwise; `$cost` already includes it.
 - Style variables in `format`: `$style`.
-- Default `format`: `"[ $symbol \\$$cost$subscription ]($style)"`.
+- Default `format`: `"[ $symbol \\$$cost$tools$subscription ]($style)"`.
 - Default `symbol`: `""`.
 - Default `disabled`: `false`.
 

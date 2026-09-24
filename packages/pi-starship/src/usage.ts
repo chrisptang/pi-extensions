@@ -14,6 +14,8 @@ export interface FooterUsageSummary {
 	cacheRead: number;
 	cacheWrite: number;
 	cost: number;
+	/** Part of `cost` reported by tool results, such as subagents a tool ran. */
+	toolCost: number;
 	hasUsage: boolean;
 	latestCacheHitRate?: number;
 	sessionCacheHitRate?: number;
@@ -26,6 +28,7 @@ export function summarizeFooterUsage(entries: readonly SessionEntry[]): FooterUs
 		cacheRead: 0,
 		cacheWrite: 0,
 		cost: 0,
+		toolCost: 0,
 		hasUsage: false,
 	};
 
@@ -42,6 +45,7 @@ export function summarizeFooterUsage(entries: readonly SessionEntry[]): FooterUs
 			}
 		} else if (entry.type === "message" && entry.message.role === "toolResult") {
 			usage = entry.message.usage;
+			totals.toolCost += usage?.cost?.total ?? 0;
 		} else if (entry.type === "compaction" || entry.type === "branch_summary") {
 			usage = entry.usage;
 		}

@@ -43,7 +43,7 @@ const COST: ModuleInspection = {
 	description: "Reported estimated session cost.",
 	state: "Not in format",
 	preview: "",
-	variables: ["symbol", "cost", "subscription"],
+	variables: ["symbol", "cost", "tools", "subscription"],
 	styleFields: ["style"],
 	displayRules: ["0: hidden", "1: yellow", "5: red"],
 	rootReferenced: false,

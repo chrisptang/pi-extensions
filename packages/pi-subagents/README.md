@@ -92,8 +92,12 @@ Collect the result with `subagent_wait`, or let a `background: true` job interru
 While a job runs you can watch it and stop it, but you cannot talk to it. If a child needs a decision, it ends and reports what it needs; you then decide and, if useful, start a fresh job with the answer written into its task.
 
 Completion messages follow Pi's global tool-output expansion state and the `app.tools.expand` binding (`Ctrl+O` by default).
+A collapsed completion shows the job's agent, state, elapsed time, turns, cache rate, token totals, and cost; the cost is display-only and never reaches the model.
 
-In TUI mode, the above-editor widget shows one line per queued or running job: its agent or ID, description, elapsed time, turns used against its budget, and its most recent activity line.
+Every subagent tool result reports, in Pi's tool-result `usage` field, what the session's jobs spent since the previous subagent tool result, so Pi's footer and compatible footers include subagent tokens and cost in the session totals exactly once without counting them as main-agent context.
+Spend a background job incurs after the model's last subagent tool call is shown in its completion message but not added to the session totals.
+
+In TUI mode, the above-editor widget shows the active jobs' combined cost and one line per queued or running job: its agent or ID, description, elapsed time, turns used against its budget, cost so far, and its most recent activity line.
 The widget disappears when no jobs remain active, and clears when the session ends.
 
 Run `/subagents` for the full inspection panel. See [Inspecting and terminating jobs](#-inspecting-and-terminating-jobs).

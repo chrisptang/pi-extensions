@@ -322,6 +322,33 @@ test("username selects user and root styles without exposing private selector me
 	assert.ok(renderUser("root").startsWith(`${ESC}[95mroot`));
 });
 
+test("cost module shows the tool-reported share only when it is positive", () => {
+	const config = structuredClone(BUILT_IN_CONFIG);
+	config.format = "$cost";
+	config.formatAst = parseFormat(config.format);
+	const render = (toolCost?: number) =>
+		stripAnsi(
+			renderStatusline(
+				config,
+				fixture({
+					tokenTotals: {
+						input: 1,
+						output: 1,
+						cacheRead: 0,
+						cacheWrite: 0,
+						cost: 0.141,
+						...(toolCost === undefined ? {} : { toolCost }),
+						hasUsage: true,
+					},
+				}),
+			).ansi,
+		);
+
+	assert.equal(render(0.058), "  $0.141 (tools $0.058) ");
+	assert.equal(render(0), "  $0.141 ");
+	assert.equal(render(), "  $0.141 ");
+});
+
 test("cache and subscription modules expose session and latest usage semantics", () => {
 	const config = structuredClone(BUILT_IN_CONFIG);
 	config.format = "$cache|$cost";

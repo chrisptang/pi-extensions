@@ -246,6 +246,13 @@ export function registerSubagentTools(
 		return applyOverride(overrides, name, { description: builtin.description, guidelines });
 	};
 	let lifecycle = Promise.resolve();
+	// Every subagent tool result carries the spend no earlier result reported,
+	// so the main session's usage totals include subagents exactly once.
+	const billedResult = <T>(value: T) => {
+		const result = toolResult(value);
+		const usage = runtime.takeUnbilledUsage();
+		return usage ? { ...result, usage } : result;
+	};
 
 	const spawnInstruction = instruction("subagent_spawn");
 	pi.registerTool({
@@ -275,7 +282,7 @@ export function registerSubagentTools(
 			);
 			const maxTurns = resolveMaxTurns(params.maxTurns ?? DEFAULT_MAX_TURNS);
 			const model = selected.model ?? inherited;
-			return toolResult(
+			return billedResult(
 				runtime.start({
 					task,
 					tools,
@@ -303,7 +310,7 @@ export function registerSubagentTools(
 		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			throwIfAborted(signal, "Skill run was cancelled");
 			const skill = requireSkill(skills, params.name);
-			return toolResult(
+			return billedResult(
 				startSkillJob(skill, ctx, {
 					description: validateDescription(params.description),
 					args: params.args === undefined ? undefined : validateSkillArgs(params.args),
@@ -363,7 +370,7 @@ export function registerSubagentTools(
 		async execute(_toolCallId, _params, signal) {
 			throwIfAborted(signal, "Subagent inspection was cancelled");
 			const jobs = runtime.inspectJobs();
-			return toolResult({ jobs: jobs.jobs, omitted: { jobs: jobs.omitted } });
+			return billedResult({ jobs: jobs.jobs, omitted: { jobs: jobs.omitted } });
 		},
 	});
 
@@ -375,7 +382,7 @@ export function registerSubagentTools(
 		parameters: CancelParameters,
 		async execute(_toolCallId, params, signal) {
 			throwIfAborted(signal, "Subagent cancellation was cancelled");
-			return toolResult(await runtime.cancel(requiredIdentifier(params.jobId, "jobId")));
+			return billedResult(await runtime.cancel(requiredIdentifier(params.jobId, "jobId")));
 		},
 	});
 
@@ -386,7 +393,7 @@ export function registerSubagentTools(
 		promptSnippet: "Use subagent_wait to wait for one subagent job to finish",
 		parameters: WaitParameters,
 		async execute(_toolCallId, params, signal) {
-			return toolResult(await runtime.wait(requiredIdentifier(params.jobId, "jobId"), signal));
+			return billedResult(await runtime.wait(requiredIdentifier(params.jobId, "jobId"), signal));
 		},
 	});
 
@@ -398,7 +405,7 @@ export function registerSubagentTools(
 		parameters: TailParameters,
 		async execute(_toolCallId, params, signal) {
 			throwIfAborted(signal, "Subagent tail was cancelled");
-			return toolResult(
+			return billedResult(
 				runtime.tail(requiredIdentifier(params.jobId, "jobId"), resolveTailLines(params.lines)),
 			);
 		},

@@ -21,7 +21,18 @@ interface RegisteredTool {
 		signal: AbortSignal | undefined,
 		onUpdate: ((value: unknown) => void) | undefined,
 		ctx: unknown,
-	) => Promise<{ details: Record<string, unknown> }>;
+	) => Promise<{
+		content: Array<{ type: string; text: string }>;
+		details: Record<string, unknown>;
+		usage?: {
+			input: number;
+			output: number;
+			cacheRead: number;
+			cacheWrite: number;
+			totalTokens: number;
+			cost: { total: number };
+		};
+	}>;
 }
 
 const activeSessions: Array<{ mock: Mock; context: Context }> = [];
@@ -328,6 +339,134 @@ test("a job records what its child spends and the panel reports it", async () =>
 		/^│ test-provider\/test-model · ctx 1\.1k\/200k 0\.5% · cache 49\.3% · in 2\.0k · out 30 · \$0\.012/u,
 	);
 	release?.();
+});
+
+test("subagent tool results report each child response's usage exactly once", async () => {
+	let report: ((activity: ChildActivity) => void) | undefined;
+	let release: (() => void) | undefined;
+	const runChild = async (request: ChildRequest): Promise<ChildResult> => {
+		report = request.onActivity;
+		await new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		return { state: "completed", result: "done", limitations: [], truncated: false };
+	};
+	const { mock, context } = await setup({ runChild });
+	const spawned = await spawnJob(mock, context);
+	const jobId = String(spawned.details.jobId);
+	// Nothing was spent yet, so the spawn result reports no usage at all.
+	assert.equal(spawned.usage, undefined);
+	await Promise.resolve();
+	const spend = (input: number, output: number, cacheRead: number, cost: number) =>
+		report?.({ type: "usage", usage: { input, output, cacheRead, cacheWrite: 0, cost } });
+
+	spend(100, 20, 300, 0.01);
+	const tail = await tool(mock, "subagent_tail").execute(
+		"tail",
+		{ jobId },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	assert.deepEqual(tail.usage, {
+		input: 100,
+		output: 20,
+		cacheRead: 300,
+		cacheWrite: 0,
+		totalTokens: 420,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
+	});
+	// Usage stays out of the model-visible text.
+	assert.doesNotMatch(tail.content[0]?.text ?? "", /cost|cacheRead/u);
+
+	spend(10, 5, 0, 0.002);
+	release?.();
+	const waited = await tool(mock, "subagent_wait").execute(
+		"wait",
+		{ jobId },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	// Only the spend after the tail, not the running total.
+	assert.equal(waited.usage?.input, 10);
+	assert.equal(waited.usage?.output, 5);
+	assert.equal(waited.usage?.cost.total, 0.002);
+
+	const again = await tool(mock, "subagent_wait").execute(
+		"wait-again",
+		{ jobId },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	assert.equal(again.usage, undefined);
+});
+
+test("a background completion shows its spend without telling the model", async () => {
+	let report: ((activity: ChildActivity) => void) | undefined;
+	let release: (() => void) | undefined;
+	let now = 1_000;
+	vi.spyOn(Date, "now").mockImplementation(() => now);
+	const runChild = async (request: ChildRequest): Promise<ChildResult> => {
+		report = request.onActivity;
+		await new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		return { state: "completed", result: "done", limitations: [], truncated: false };
+	};
+	const { mock, context } = await setup({ runChild });
+	await tool(mock, "subagent_spawn").execute(
+		"spawn",
+		{ task: "background work", description: "test job", background: true },
+		undefined,
+		undefined,
+		context.ctx,
+	);
+	await Promise.resolve();
+	report?.({ type: "turn", turns: 5 });
+	report?.({
+		type: "usage",
+		usage: { input: 1_000, output: 1_100, cacheRead: 61_000, cacheWrite: 0, cost: 0.042 },
+	});
+	now = 49_000;
+	release?.();
+	await vi.waitFor(() => {
+		assert.ok(mock.sentMessages.length > 0);
+	});
+	const message = mock.sentMessages[0]?.message as {
+		customType: string;
+		content: string;
+		display: boolean;
+		details: Record<string, unknown>;
+	};
+	assert.equal(message.customType, "pi-subagents-completion");
+	assert.doesNotMatch(message.content, /usage|cost|elapsedMs|turns/u);
+	assert.deepEqual(message.details.usage, {
+		input: 1_000,
+		output: 1_100,
+		cacheRead: 61_000,
+		cacheWrite: 0,
+		cost: 0.042,
+	});
+	assert.equal(message.details.turns, 5);
+	assert.equal(message.details.elapsedMs, 48_000);
+
+	const renderer = mock.messageRenderers.get("pi-subagents-completion");
+	assert.ok(renderer);
+	const render = (details: unknown, width: number) =>
+		(
+			renderer({ ...message, details }, { expanded: false, outputPad: 1 }, identityTheme()) as {
+				render(width: number): string[];
+			}
+		).render(width);
+	assert.match(
+		render(message.details, 200).join("\n"),
+		/Subagent job completion · completed · 48s · 5 turns · cache 98\.4% · in 62k · out 1\.1k · \$0\.042 \(/u,
+	);
+	for (const line of render(message.details, 20)) assert.ok(visibleWidth(line) <= 20);
+	// A completion recorded before usage was reported keeps the plain label.
+	assert.match(render({ result: "done" }, 200).join("\n"), /Subagent job completion \(/u);
 });
 
 test("the cost line degrades when the model's window or usage is unknown", () => {
