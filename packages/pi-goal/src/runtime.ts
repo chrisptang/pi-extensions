@@ -202,6 +202,9 @@ interface PendingNonGoalInput {
 const MAX_CANCELLED_CONTINUATION_PROMPTS = 20;
 const MAX_PENDING_GOAL_PROMPTS = 20;
 const MAX_PENDING_NON_GOAL_INPUTS = 20;
+const MAX_PROVIDER_AUTO_RETRIES = 10;
+const PROVIDER_AUTO_RETRY_BASE_DELAY_MS = 3_000;
+const PROVIDER_AUTO_RETRY_MAX_DELAY_MS = 30_000;
 const BUDGET_WRAP_UP_MESSAGE_TYPE = "goal-budget-wrap-up";
 const BUDGET_WRAP_UP_PROMPT =
 	"The active /goal token budget is exhausted. Stop substantive work and do not call substantive tools. Summarize progress, verified results, remaining work, and blockers concisely. Treat completion as unproven. Do not call goal_complete unless authoritative, requirement-by-requirement evidence already proves every requirement is complete. Weak, indirect, or missing evidence is not enough. Budget exhaustion is not completion.";
@@ -239,6 +242,8 @@ export class GoalRuntime {
 	continuationIntent?: ContinuationTicket;
 	continuationDelivery?: ContinuationTicket;
 	goalRecovery?: GoalRecovery;
+	/** Consecutive automatic retries after Pi exhausted its own provider retries. */
+	private providerAutoRetry?: { goalId: string; attempts: number };
 	budgetWrapUp?: BudgetWrapUp;
 	/** `null` marks a run that must not be charged to the active goal. */
 	agentRunGoalId?: string | null;
@@ -924,6 +929,28 @@ export class GoalRuntime {
 		}
 		const details = recovery.errorMessage ? `: ${truncateNotification(recovery.errorMessage)}` : "";
 		if (recovery.kind === "provider_retry") {
+			const previous =
+				this.providerAutoRetry?.goalId === goal.id ? this.providerAutoRetry.attempts : 0;
+			if (previous < MAX_PROVIDER_AUTO_RETRIES) {
+				const attempt = previous + 1;
+				const delayMs = Math.min(
+					PROVIDER_AUTO_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+					PROVIDER_AUTO_RETRY_MAX_DELAY_MS,
+				);
+				const waitingGoal = this.enterGoalWait(ctx, goal.id, {
+					reason: `Provider auto-retry ${attempt}/${MAX_PROVIDER_AUTO_RETRIES}${details}`,
+					resumeAt: Date.now() + delayMs,
+				});
+				if (!waitingGoal) return false;
+				this.providerAutoRetry = { goalId: goal.id, attempts: attempt };
+				notifyTerminal(
+					ctx.ui,
+					`Goal auto-retrying in ${delayMs / 1_000}s after provider error (attempt ${attempt}/${MAX_PROVIDER_AUTO_RETRIES})${details}`,
+					"warning",
+				);
+				return true;
+			}
+			this.providerAutoRetry = undefined;
 			const waitingGoal = this.enterGoalWait(ctx, goal.id, {
 				reason: `Provider retries exhausted${details}`,
 			});
@@ -959,6 +986,10 @@ export class GoalRuntime {
 
 	clearGoalRecoveryForGoal(goalId: string) {
 		if (this.goalRecovery?.goalId === goalId) this.goalRecovery = undefined;
+	}
+
+	resetProviderAutoRetry() {
+		this.providerAutoRetry = undefined;
 	}
 
 	isPiOwnedCompactionRetry(event: unknown, goalId: string) {

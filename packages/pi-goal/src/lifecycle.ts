@@ -575,6 +575,7 @@ export function registerGoalLifecycle(
 		}
 
 		runtime.clearGoalRecoveryForGoal(goalId);
+		runtime.resetProviderAutoRetry();
 
 		if (runtime.limitActiveGoalForBudget(ctx, false)) return;
 		if (!runtime.goalToolsAvailable()) {

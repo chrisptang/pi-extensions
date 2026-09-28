@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { test, vi } from "vitest";
 import {
 	findFinalAssistantMessage,
 	isRetryableGoalInterruption,
@@ -300,12 +300,12 @@ test("agent_end keeps retryable interruptions recoverable and stops on non-retry
 	assert.equal(retryable.mock.sentUserMessages.length, 1);
 	const waitingGoal = requireLastGoal(retryable.mock);
 	assert.equal(waitingGoal.status, "active");
-	assert.match(waitingGoal.waiting?.reason ?? "", /provider retries exhausted/i);
-	assert.equal(waitingGoal.waiting?.resumeAt, undefined);
+	assert.match(waitingGoal.waiting?.reason ?? "", /provider auto-retry 1\/10/i);
+	assert.equal(typeof waitingGoal.waiting?.resumeAt, "number");
 	assert.equal(waitingGoal.activeStartedAt, undefined);
 	assert.match(
 		retryable.notifications.at(-1)?.message ?? "",
-		/Goal waiting after provider retries were exhausted.*follow-up.*\/goal resume/is,
+		/Goal auto-retrying in 3s after provider error \(attempt 1\/10\)/,
 	);
 	assert.equal(
 		retryable.mock.events.get("tool_call")?.[0]?.(
@@ -345,6 +345,64 @@ test("agent_end keeps retryable interruptions recoverable and stops on non-retry
 		),
 		{ block: true, reason: STALE_GOAL_TOOL_REASON },
 	);
+});
+
+test("provider errors auto-retry with capped backoff before waiting indefinitely", async () => {
+	vi.useFakeTimers();
+	try {
+		const retrying = await startGoalForTest();
+		const expectedDelays = [3, 6, 12, 24, 30, 30, 30, 30, 30, 30].map((s) => s * 1_000);
+		for (const [index, delayMs] of expectedDelays.entries()) {
+			const attempt = index + 1;
+			await exhaustProviderRetries(retrying);
+			const waitingGoal = requireLastGoal(retrying.mock);
+			assert.equal(waitingGoal.status, "active");
+			assert.match(waitingGoal.waiting?.reason ?? "", new RegExp(`auto-retry ${attempt}/10`));
+			assert.equal(waitingGoal.waiting?.resumeAt, Date.now() + delayMs);
+
+			const sentBefore = retrying.mock.sentUserMessages.length;
+			await vi.advanceTimersByTimeAsync(delayMs - 1);
+			assert.equal(retrying.mock.sentUserMessages.length, sentBefore);
+			await vi.advanceTimersByTimeAsync(1);
+			assert.equal(retrying.mock.sentUserMessages.length, sentBefore + 1);
+			assert.equal(requireLastGoal(retrying.mock).waiting, undefined);
+		}
+
+		await exhaustProviderRetries(retrying);
+		const exhaustedGoal = requireLastGoal(retrying.mock);
+		assert.match(exhaustedGoal.waiting?.reason ?? "", /provider retries exhausted/i);
+		assert.equal(exhaustedGoal.waiting?.resumeAt, undefined);
+		assert.match(
+			retrying.notifications.at(-1)?.message ?? "",
+			/Goal waiting after provider retries were exhausted.*follow-up.*\/goal resume/is,
+		);
+	} finally {
+		vi.useRealTimers();
+	}
+});
+
+test("a successful turn resets provider auto-retry attempts", async () => {
+	vi.useFakeTimers();
+	try {
+		const retrying = await startGoalForTest();
+		await exhaustProviderRetries(retrying);
+		await vi.advanceTimersByTimeAsync(3_000);
+		await exhaustProviderRetries(retrying);
+		assert.match(requireLastGoal(retrying.mock).waiting?.reason ?? "", /auto-retry 2\/10/);
+		await vi.advanceTimersByTimeAsync(6_000);
+
+		await retrying.mock.events.get("agent_end")?.[0]?.(
+			{ messages: [{ role: "assistant", stopReason: "stop" }] },
+			retrying.ctx,
+		);
+		await retrying.mock.events.get("agent_settled")?.[0]?.({}, retrying.ctx);
+		await exhaustProviderRetries(retrying);
+		const waitingGoal = requireLastGoal(retrying.mock);
+		assert.match(waitingGoal.waiting?.reason ?? "", /auto-retry 1\/10/);
+		assert.equal(waitingGoal.waiting?.resumeAt, Date.now() + 3_000);
+	} finally {
+		vi.useRealTimers();
+	}
 });
 
 test("provider retry waiting state restores without dispatching work", async () => {
