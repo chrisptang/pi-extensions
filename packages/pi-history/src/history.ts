@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { appendHistory, DEFAULT_MAX_ENTRIES, historyFilePath, loadHistory } from "./store.js";
+import { appendHistory, DEFAULT_MAX_ENTRIES, historyDatabasePath, loadHistory } from "./store.js";
 
 /**
  * Pi's editor keeps its in-memory prompt history capped at 100 entries and drops
@@ -18,11 +18,11 @@ export default function history(pi: ExtensionAPI): void {
 
 	pi.on("session_start", async (_event, ctx) => {
 		appendFailureReported = false;
-		// The editor exists only in TUI mode; other modes still append to the file.
+		// The editor exists only in TUI mode; other modes still append to the database.
 		if (ctx.mode !== "tui") return;
 
-		const { entries } = loadHistory(ctx.cwd, (message) => warn(ctx, message));
-		if (entries.length === 0) return;
+		const { entries, malformed } = loadHistory(ctx.cwd, (message) => warn(ctx, message));
+		if (malformed || entries.length === 0) return;
 		const seed = entries.slice(-EDITOR_HISTORY_LIMIT);
 
 		// Installing an editor factory is the only supported way to reach the
@@ -57,10 +57,13 @@ export default function history(pi: ExtensionAPI): void {
 				return;
 			}
 			if (!ctx.hasUI) return;
-			const path = historyFilePath(ctx.cwd);
+			const path = historyDatabasePath();
 			const { entries, malformed } = loadHistory(ctx.cwd, (message) => warn(ctx, message));
 			if (malformed) {
-				ctx.ui.notify(`pi-history: ${path} is unreadable; prompts are not recorded.`, "error");
+				ctx.ui.notify(
+					`pi-history: cannot read history for this project in ${path}; prompts are not recorded.`,
+					"error",
+				);
 				return;
 			}
 			const browsable = Math.min(entries.length, EDITOR_HISTORY_LIMIT);

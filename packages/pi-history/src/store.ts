@@ -1,86 +1,152 @@
-import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
+import { createHash } from "node:crypto";
+import {
+	chmodSync,
+	closeSync,
+	existsSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	rmSync,
+} from "node:fs";
+import { basename, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 
-/** Default number of prompts retained on disk; the oldest are dropped past this. */
 export const DEFAULT_MAX_ENTRIES = 1000;
 
-/**
- * Persisted shape. Entries are ordered oldest first so an append is a push and
- * trimming the oldest is a shift, matching how the file reads chronologically.
- */
-export interface HistoryFile {
-	entries: string[];
-	/** Unrecognized fields are preserved so an older version cannot erase newer data. */
-	[key: string]: unknown;
+export function historyDatabasePath(): string {
+	return join(getAgentDir(), "pi-history.db");
 }
 
-/** The project-scoped history path for a workspace. */
-export function historyFilePath(cwd: string): string {
+export function legacyHistoryPath(cwd: string): string {
 	return join(cwd, CONFIG_DIR_NAME, "pi-history.json");
 }
 
-/**
- * Read the stored prompts, oldest first.
- *
- * A missing file means "no history" rather than an error, and reading never
- * creates the file or its parent directory. A malformed file is reported through
- * `warn` and treated as empty, but is left on disk rather than overwritten, so a
- * later append fails loudly instead of silently discarding the user's history.
- */
+function projectName(cwd: string): string {
+	return basename(resolve(cwd));
+}
+
+function openDatabase(): DatabaseSync {
+	const path = historyDatabasePath();
+	mkdirSync(getAgentDir(), { recursive: true });
+	try {
+		closeSync(openSync(path, "wx", 0o600));
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+	}
+	const db = new DatabaseSync(path, { timeout: 5000 });
+	try {
+		chmodSync(path, 0o600);
+		db.exec(`CREATE TABLE IF NOT EXISTS entries (
+			id INTEGER PRIMARY KEY, project TEXT NOT NULL, prompt TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS entries_project_id ON entries(project, id);
+		CREATE TABLE IF NOT EXISTS migrated (source TEXT PRIMARY KEY, digest TEXT NOT NULL);`);
+		return db;
+	} catch (error) {
+		db.close();
+		throw error;
+	}
+}
+
+function entriesFor(db: DatabaseSync, project: string): string[] {
+	return (
+		db.prepare("SELECT prompt FROM entries WHERE project = ? ORDER BY id").all(project) as {
+			prompt: string;
+		}[]
+	).map((row) => row.prompt);
+}
+
+function trimEntries(db: DatabaseSync, project: string, maxEntries: number): void {
+	db.prepare(`DELETE FROM entries WHERE project = ? AND id NOT IN (
+		SELECT id FROM entries WHERE project = ? ORDER BY id DESC LIMIT ?
+	)`).run(project, project, Math.max(1, maxEntries));
+}
+
+function parseLegacy(raw: string, path: string): string[] {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		throw new Error(`malformed history at ${path}`);
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+		throw new Error(`malformed history at ${path}: expected a JSON object`);
+	const entries = (parsed as Record<string, unknown>).entries;
+	if (entries !== undefined && !Array.isArray(entries))
+		throw new Error(`malformed history at ${path}: "entries" must be an array`);
+	return (entries ?? []).filter(
+		(entry): entry is string => typeof entry === "string" && entry.trim() !== "",
+	);
+}
+
+function migrateLegacy(cwd: string): void {
+	const source = resolve(legacyHistoryPath(cwd));
+	let raw: string;
+	try {
+		raw = readFileSync(source, "utf8");
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+		throw error;
+	}
+	const entries = parseLegacy(raw, source);
+	const digest = createHash("sha256").update(raw).digest("hex");
+	const db = openDatabase();
+	try {
+		db.exec("BEGIN IMMEDIATE");
+		try {
+			const migrated = db.prepare("SELECT digest FROM migrated WHERE source = ?").get(source) as
+				| { digest: string }
+				| undefined;
+			if (migrated) {
+				if (migrated.digest !== digest)
+					throw new Error(`legacy history changed after migration at ${source}`);
+			} else {
+				const insert = db.prepare("INSERT INTO entries(project, prompt) VALUES (?, ?)");
+				for (const entry of entries) insert.run(projectName(cwd), entry);
+				trimEntries(db, projectName(cwd), DEFAULT_MAX_ENTRIES);
+				db.prepare("INSERT INTO migrated(source, digest) VALUES (?, ?)").run(source, digest);
+			}
+			if (readFileSync(source, "utf8") !== raw)
+				throw new Error(`legacy history changed during migration at ${source}`);
+			db.exec("COMMIT");
+		} catch (error) {
+			db.exec("ROLLBACK");
+			throw error;
+		}
+	} finally {
+		db.close();
+	}
+	// Only remove the exact bytes imported. A changed source needs manual resolution,
+	// rather than silently losing prompts added by an older running Pi process.
+	try {
+		if (readFileSync(source, "utf8") !== raw)
+			throw new Error(`legacy history changed after migration at ${source}`);
+		rmSync(source);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+}
+
 export function loadHistory(
 	cwd: string,
 	warn?: (message: string) => void,
 ): { entries: string[]; malformed: boolean } {
-	const path = historyFilePath(cwd);
-	let raw: string;
 	try {
-		raw = readFileSync(path, "utf8");
+		migrateLegacy(cwd);
+		if (!existsSync(historyDatabasePath())) return { entries: [], malformed: false };
+		const db = openDatabase();
+		try {
+			return { entries: entriesFor(db, projectName(cwd)), malformed: false };
+		} finally {
+			db.close();
+		}
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT")
-			return { entries: [], malformed: false };
-		warn?.(`pi-history: could not read ${path}: ${describe(error)}`);
+		warn?.(`pi-history: could not read history: ${describe(error)}`);
 		return { entries: [], malformed: true };
 	}
-
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(raw);
-	} catch (error) {
-		warn?.(`pi-history: ignoring malformed ${path}: ${describe(error)}`);
-		return { entries: [], malformed: true };
-	}
-
-	if (!isRecord(parsed)) {
-		warn?.(`pi-history: ignoring ${path}: expected a JSON object`);
-		return { entries: [], malformed: true };
-	}
-
-	const entries = parsed.entries;
-	if (entries !== undefined && !Array.isArray(entries)) {
-		warn?.(`pi-history: ignoring ${path}: "entries" must be an array`);
-		return { entries: [], malformed: true };
-	}
-
-	// Drop non-string and blank rows rather than rejecting the whole file, so one
-	// bad row cannot cost the user the rest of their history.
-	return {
-		entries: (entries ?? []).filter(
-			(entry): entry is string => typeof entry === "string" && entry.trim() !== "",
-		),
-		malformed: false,
-	};
 }
 
-/**
- * Append one prompt and publish the trimmed list atomically.
- *
- * The write starts from the latest file on disk so a concurrent Pi process's
- * entries are not lost, skips a consecutive duplicate the way shell history does,
- * and drops the oldest entries once the list exceeds `maxEntries`. Returns the
- * entries that were written, or `undefined` when nothing needed to be written.
- */
 export function appendHistory(
 	cwd: string,
 	prompt: string,
@@ -88,45 +154,31 @@ export function appendHistory(
 ): string[] | undefined {
 	const trimmed = prompt.trim();
 	if (!trimmed) return undefined;
-
-	const path = historyFilePath(cwd);
-	// Re-read rather than trusting an in-memory copy: another Pi process in the
-	// same workspace may have appended since this session started.
-	const { entries, malformed } = loadHistory(cwd);
-	if (malformed) {
-		// Refuse to publish over a file we could not understand; the caller reports it.
-		throw new Error(`refusing to overwrite malformed history at ${path}`);
-	}
-	if (entries[entries.length - 1] === trimmed) return undefined;
-
-	entries.push(trimmed);
-	const overflow = entries.length - Math.max(1, maxEntries);
-	if (overflow > 0) entries.splice(0, overflow);
-
-	writeAtomically(path, `${JSON.stringify({ entries }, undefined, "\t")}\n`);
-	return entries;
-}
-
-/**
- * Publish through a temporary file in the destination directory followed by a
- * rename, so a crashed or concurrent write cannot leave a truncated file behind.
- * Rename is used rather than a hard link because Android SELinux denies hard-link
- * creation to Termux's `untrusted_app` domain.
- */
-function writeAtomically(path: string, contents: string): void {
-	mkdirSync(dirname(path), { recursive: true });
-	const temporaryPath = `${path}.${randomUUID()}.tmp`;
+	migrateLegacy(cwd);
+	const db = openDatabase();
 	try {
-		writeFileSync(temporaryPath, contents, "utf8");
-		renameSync(temporaryPath, path);
-	} catch (error) {
-		rmSync(temporaryPath, { force: true });
-		throw error;
+		const project = projectName(cwd);
+		db.exec("BEGIN IMMEDIATE");
+		try {
+			const last = db
+				.prepare("SELECT prompt FROM entries WHERE project = ? ORDER BY id DESC LIMIT 1")
+				.get(project) as { prompt: string } | undefined;
+			if (last?.prompt === trimmed) {
+				db.exec("COMMIT");
+				return undefined;
+			}
+			db.prepare("INSERT INTO entries(project, prompt) VALUES (?, ?)").run(project, trimmed);
+			trimEntries(db, project, maxEntries);
+			const entries = entriesFor(db, project);
+			db.exec("COMMIT");
+			return entries;
+		} catch (error) {
+			db.exec("ROLLBACK");
+			throw error;
+		}
+	} finally {
+		db.close();
 	}
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function describe(error: unknown): string {

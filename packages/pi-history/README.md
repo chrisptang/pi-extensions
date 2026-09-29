@@ -2,16 +2,16 @@
 
 [![npm](https://img.shields.io/npm/v/@chrisptang/pi-history)](https://www.npmjs.com/package/@chrisptang/pi-history) [![Pi extension](https://img.shields.io/badge/Pi-extension-blue)](https://pi.dev) [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](./LICENSE)
 
-Pi already lets you press Up to browse the prompts you typed, but that history lives in memory and disappears when the session ends. This extension writes each typed prompt to a per-project file and restores it into the editor at startup, so Up reaches yesterday's prompts the way a shell history does.
+Pi already lets you press Up to browse the prompts you typed, but that history lives in memory and disappears when the session ends. This extension writes each typed prompt to a user-local SQLite database and restores it into the editor at startup, so Up reaches yesterday's prompts the way a shell history does.
 
 ## ✨ Features
 
-- Records every prompt you type into a project-local history file, keeping the most recent 1000 and dropping the oldest past that.
+- Records every prompt you type into a user-local SQLite database, keeping the most recent 1000 per project name.
 - Restores stored prompts into the editor at session start, so Up and Down browse across sessions and restarts.
-- Keeps one history per project, so prompts from unrelated workspaces never mix.
+- Groups history by project directory name; different paths with the same directory name share prompts.
 - Skips blank prompts and consecutive duplicates, matching familiar shell-history behavior.
 - Leaves Up, Down, and every other key exactly as Pi defines them, including any custom keybindings.
-- Re-reads the file on each append, so two Pi sessions in one project do not overwrite each other's prompts.
+- Uses SQLite transactions so concurrent Pi sessions do not overwrite each other's prompts.
 
 ## 📦 Install
 
@@ -43,27 +43,21 @@ Run `/history` to see how many prompts are stored and where.
 
 ## 💬 Commands
 
-`/history` reports the number of stored prompts, the file holding them, and how many are reachable with Up. It takes no arguments and rejects any that are given. In print and JSON modes it produces no output, because those modes have no channel for it.
+`/history` reports the number of stored prompts for the current project name, the database path, and how many are reachable with Up. It takes no arguments and rejects any that are given. In print and JSON modes it produces no output, because those modes have no channel for it.
 
 ## 🗃️ Storage
 
-Prompts are stored as JSON at `<workspace>/.pi/pi-history.json`, oldest first:
+Prompts are stored in `<getAgentDir()>/pi-history.db` (normally `~/.pi/agent/pi-history.db`). The database is created on the first recorded prompt or migration, not on an empty read. Its file is restricted to the current user on POSIX. SQLite write transactions serialize concurrent appends, consecutive-duplicate checks, and trimming to the most recent 1000 prompts per project directory name. Projects named `app` share history even when they live at different paths.
 
-```json
-{
-	"entries": ["first prompt", "second prompt"]
-}
-```
-
-The file is written through a temporary file in the same directory followed by a rename, so an interrupted write cannot truncate your history. Each append re-reads the file first, so a second Pi session running in the same project keeps its prompts too. Ordering between simultaneous writers is not coordinated beyond that: this is per-process sequencing, not a cross-process lock.
+On first access from a workspace with `<workspace>/.pi/pi-history.json`, its entries are imported into the database in order, after any existing entries for that name. The legacy file is removed only after the import commits. If migration fails or the old JSON is malformed, it is kept and that workspace stops recording until the problem is fixed; an already imported file that reappears with different contents is kept and reported instead of silently duplicating or deleting data. Only workspaces opened after upgrading are migrated. Back up the old file before upgrading if it contains important prompts. A previously tracked legacy file must be removed from Git separately.
 
 Only prompts you type are recorded. Messages injected by other extensions and prompts arriving over RPC are skipped, since they are not things you would page back to.
 
-If the file cannot be parsed, the extension reports it once and stops recording for that session rather than replacing it, so a hand-edit mistake never costs you the stored prompts. Fix or delete the file to resume; deleting it simply starts an empty history.
+If the database cannot be read, the extension reports the error and stops recording for that session rather than overwriting stored history.
 
 ## 🔒 Security and privacy
 
-Everything your prompts contain is written in plain text to a file inside the project. Nothing is sent anywhere. Treat the file the way you would a shell history: if you paste a secret into a prompt, it lands on disk. Add `.pi/pi-history.json` to `.gitignore` if the project's `.pi` directory is tracked, and delete the file to clear what was stored.
+Everything your prompts contain is stored as plain text in the user-local SQLite database. Nothing is sent anywhere. Treat it like shell history: pasted secrets land on disk. No new project-local history file is created. Delete the database to clear all stored history; existing legacy JSON files are removed only after migration succeeds.
 
 ## 🚧 Limitations
 
@@ -79,7 +73,7 @@ packages/pi-history/
 ├── src/                               # Authoritative implementation and helpers
 │   ├── index.ts                       # Thin Pi entrypoint
 │   ├── history.ts                     # Lifecycle wiring, capture, and the command
-│   ├── store.ts                       # File loading, trimming, and atomic writes
+│   ├── store.ts                       # SQLite storage, retention, and legacy migration
 │   └── editor.ts                      # Editor subclass that seeds stored prompts
 ├── dist/                              # Generated Jiti runtime
 ├── scripts/build-runtime.mjs          # Runtime builder

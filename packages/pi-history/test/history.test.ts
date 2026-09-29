@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, test } from "vitest";
+import { afterAll, afterEach, test } from "vitest";
 import { createMockContext, createMockPi } from "../../../test/support.js";
 import history from "../src/history.js";
-import { historyFilePath } from "../src/store.js";
+import { historyDatabasePath, legacyHistoryPath, loadHistory } from "../src/store.js";
+
+const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+const agentDir = mkdtempSync(path.join(os.tmpdir(), "pi-history-agent-"));
+process.env.PI_CODING_AGENT_DIR = agentDir;
 
 const temporaryDirectories: string[] = [];
 
@@ -16,19 +20,24 @@ afterEach(() => {
 	}
 });
 
+afterAll(() => {
+	if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+	else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	rmSync(agentDir, { force: true, recursive: true });
+});
+
 function workspace(entries?: string[]): string {
 	const directory = mkdtempSync(path.join(os.tmpdir(), "pi-history-ext-"));
 	temporaryDirectories.push(directory);
 	if (entries) {
-		const file = historyFilePath(directory);
+		const file = legacyHistoryPath(directory);
 		mkdirSync(path.dirname(file), { recursive: true });
 		writeFileSync(file, JSON.stringify({ entries }), "utf8");
 	}
 	return directory;
 }
 
-const stored = (cwd: string): string[] =>
-	JSON.parse(readFileSync(historyFilePath(cwd), "utf8")).entries;
+const stored = (cwd: string): string[] => loadHistory(cwd).entries;
 
 type Harness = ReturnType<typeof createMockPi>;
 
@@ -85,13 +94,13 @@ test("non-interactive input is not recorded", async () => {
 	const { ctx } = createMockContext({ cwd, hasUI: true, mode: "tui" });
 	await sendInput(harness, "from an extension", ctx, "extension");
 	await sendInput(harness, "from rpc", ctx, "rpc");
-	assert.throws(() => stored(cwd));
+	assert.deepEqual(stored(cwd), []);
 });
 
 test("a malformed history file warns once instead of on every prompt", async () => {
 	const cwd = workspace();
-	mkdirSync(path.dirname(historyFilePath(cwd)), { recursive: true });
-	writeFileSync(historyFilePath(cwd), "{ broken", "utf8");
+	mkdirSync(path.dirname(legacyHistoryPath(cwd)), { recursive: true });
+	writeFileSync(legacyHistoryPath(cwd), "{ broken", "utf8");
 	const harness = createMockPi();
 	history(harness.pi);
 	const { ctx, notifications } = createMockContext({ cwd, hasUI: true, mode: "tui" });
@@ -101,7 +110,7 @@ test("a malformed history file warns once instead of on every prompt", async () 
 	assert.equal(warnings.length, 1);
 	assert.match(warnings[0]?.message ?? "", /not recording prompts/);
 	// The unreadable file is left exactly as it was found.
-	assert.equal(readFileSync(historyFilePath(cwd), "utf8"), "{ broken");
+	assert.equal(readFileSync(legacyHistoryPath(cwd), "utf8"), "{ broken");
 });
 
 test("session start installs an editor factory when history exists", async () => {
@@ -163,7 +172,8 @@ test("/history reports the stored count and path", async () => {
 	await harness.commands.get("history")?.handler("", ctx);
 	assert.match(notifications[0]?.message ?? "", /2 prompt\(s\)/);
 	assert.match(notifications[0]?.message ?? "", /max 1000/);
-	assert.match(notifications[0]?.message ?? "", /pi-history\.json/);
+	assert.match(notifications[0]?.message ?? "", /pi-history\.db/);
+	assert.ok(notifications[0]?.message?.includes(historyDatabasePath()));
 });
 
 test("/history rejects arguments instead of ignoring them", async () => {
@@ -178,8 +188,8 @@ test("/history rejects arguments instead of ignoring them", async () => {
 
 test("/history reports an unreadable file as an error", async () => {
 	const cwd = workspace();
-	mkdirSync(path.dirname(historyFilePath(cwd)), { recursive: true });
-	writeFileSync(historyFilePath(cwd), "{ broken", "utf8");
+	mkdirSync(path.dirname(legacyHistoryPath(cwd)), { recursive: true });
+	writeFileSync(legacyHistoryPath(cwd), "{ broken", "utf8");
 	const harness = createMockPi();
 	history(harness.pi);
 	const { ctx, notifications } = createMockContext({ cwd, hasUI: true, mode: "tui" });

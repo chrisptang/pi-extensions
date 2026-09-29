@@ -3,149 +3,161 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
-	readdirSync,
 	readFileSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, test } from "vitest";
-import { appendHistory, DEFAULT_MAX_ENTRIES, historyFilePath, loadHistory } from "../src/store.js";
+import { DatabaseSync } from "node:sqlite";
+import { afterAll, test } from "vitest";
 
-const temporaryDirectories: string[] = [];
+const root = mkdtempSync(path.join(os.tmpdir(), "pi-history-test-"));
+const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+process.env.PI_CODING_AGENT_DIR = path.join(root, "agent");
+const { appendHistory, DEFAULT_MAX_ENTRIES, historyDatabasePath, legacyHistoryPath, loadHistory } =
+	await import("../src/store.js");
 
-afterEach(() => {
-	while (temporaryDirectories.length > 0) {
-		const directory = temporaryDirectories.pop();
-		if (directory) rmSync(directory, { force: true, recursive: true });
-	}
+afterAll(() => {
+	if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+	else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+	rmSync(root, { recursive: true, force: true });
 });
 
-/** A workspace directory, optionally seeded with raw history file contents. */
-function workspace(contents?: string): string {
-	const directory = mkdtempSync(path.join(os.tmpdir(), "pi-history-"));
-	temporaryDirectories.push(directory);
-	if (contents !== undefined) {
-		const file = historyFilePath(directory);
-		mkdirSync(path.dirname(file), { recursive: true });
-		writeFileSync(file, contents, "utf8");
-	}
-	return directory;
+function workspace(name = "project", entries?: unknown): string {
+	const cwd = path.join(root, String(Math.random()), name);
+	mkdirSync(cwd, { recursive: true });
+	if (entries !== undefined) legacy(cwd, JSON.stringify({ entries }));
+	return cwd;
 }
 
-const stored = (cwd: string): string[] =>
-	JSON.parse(readFileSync(historyFilePath(cwd), "utf8")).entries;
+function legacy(cwd: string, contents: string): void {
+	const file = legacyHistoryPath(cwd);
+	mkdirSync(path.dirname(file), { recursive: true });
+	writeFileSync(file, contents);
+}
 
-test("history lives under the project config directory", () => {
-	assert.equal(
-		historyFilePath("/tmp/project"),
-		path.join("/tmp/project", ".pi", "pi-history.json"),
-	);
-});
-
-test("a missing file loads as empty without creating anything", () => {
+test("missing history does not create files; first append creates only the private database", () => {
 	const cwd = workspace();
 	assert.deepEqual(loadHistory(cwd), { entries: [], malformed: false });
-	assert.equal(existsSync(path.join(cwd, ".pi")), false);
-});
-
-test("entries load oldest first", () => {
-	const cwd = workspace(JSON.stringify({ entries: ["first", "second"] }));
-	assert.deepEqual(loadHistory(cwd).entries, ["first", "second"]);
-});
-
-test("malformed JSON is reported and never overwritten", () => {
-	const cwd = workspace("{ not json");
-	const warnings: string[] = [];
-	assert.deepEqual(
-		loadHistory(cwd, (message) => warnings.push(message)),
-		{
-			entries: [],
-			malformed: true,
-		},
-	);
-	assert.equal(warnings.length, 1);
-	assert.throws(() => appendHistory(cwd, "hello"), /refusing to overwrite/);
-	assert.equal(readFileSync(historyFilePath(cwd), "utf8"), "{ not json");
-});
-
-test("a non-object document is rejected rather than treated as empty", () => {
-	const cwd = workspace(JSON.stringify(["a", "b"]));
-	assert.equal(loadHistory(cwd).malformed, true);
-});
-
-test("a non-array entries field is rejected", () => {
-	const cwd = workspace(JSON.stringify({ entries: "nope" }));
-	assert.equal(loadHistory(cwd).malformed, true);
-});
-
-test("individual unusable rows are dropped without losing the file", () => {
-	const cwd = workspace(JSON.stringify({ entries: ["keep", 42, "  ", null, "also"] }));
-	const loaded = loadHistory(cwd);
-	assert.equal(loaded.malformed, false);
-	assert.deepEqual(loaded.entries, ["keep", "also"]);
-});
-
-test("appending creates the file and stores the prompt", () => {
-	const cwd = workspace();
-	assert.deepEqual(appendHistory(cwd, "first prompt"), ["first prompt"]);
-	assert.deepEqual(stored(cwd), ["first prompt"]);
-});
-
-test("prompts are trimmed and blank input is ignored", () => {
-	const cwd = workspace();
+	assert.equal(existsSync(historyDatabasePath()), false);
 	assert.equal(appendHistory(cwd, "   "), undefined);
-	assert.equal(appendHistory(cwd, "\n\t"), undefined);
-	assert.equal(existsSync(historyFilePath(cwd)), false);
-	appendHistory(cwd, "  padded  ");
-	assert.deepEqual(stored(cwd), ["padded"]);
+	assert.equal(existsSync(historyDatabasePath()), false);
+	assert.deepEqual(appendHistory(cwd, " first "), ["first"]);
+	assert.equal(existsSync(legacyHistoryPath(cwd)), false);
+	assert.equal(loadHistory(cwd).entries[0], "first");
+	if (process.platform !== "win32") {
+		assert.equal(statSync(historyDatabasePath()).mode & 0o777, 0o600);
+	}
 });
 
-test("a consecutive duplicate is skipped but a repeat after another prompt is kept", () => {
-	const cwd = workspace();
+test("same-named projects share history; different names stay isolated", () => {
+	const first = workspace("shared");
+	const second = workspace("shared");
+	const other = workspace("other");
+	appendHistory(first, "one");
+	appendHistory(second, "two");
+	assert.deepEqual(loadHistory(first).entries, ["one", "two"]);
+	assert.deepEqual(loadHistory(other).entries, []);
+});
+
+test("consecutive duplicates, whitespace, and retention", () => {
+	const cwd = workspace("retention");
 	appendHistory(cwd, "same");
 	assert.equal(appendHistory(cwd, "same"), undefined);
-	assert.deepEqual(stored(cwd), ["same"]);
-	appendHistory(cwd, "other");
-	appendHistory(cwd, "same");
-	assert.deepEqual(stored(cwd), ["same", "other", "same"]);
+	appendHistory(cwd, "next");
+	assert.deepEqual(appendHistory(cwd, "same", 2), ["next", "same"]);
+	assert.equal(appendHistory(cwd, "\t"), undefined);
+	assert.equal(DEFAULT_MAX_ENTRIES, 1000);
 });
 
-test("the oldest entry is dropped once the cap is exceeded", () => {
-	const cwd = workspace();
-	for (const prompt of ["a", "b", "c", "d"]) appendHistory(cwd, prompt, 3);
-	assert.deepEqual(stored(cwd), ["b", "c", "d"]);
+test("migration also enforces the thousand-prompt cap", () => {
+	const cwd = workspace(
+		"import-limit",
+		Array.from({ length: 1001 }, (_, i) => `p${i}`),
+	);
+	const entries = loadHistory(cwd).entries;
+	assert.equal(entries.length, DEFAULT_MAX_ENTRIES);
+	assert.equal(entries[0], "p1");
 });
 
-test("an over-long existing file is trimmed back to the cap on the next append", () => {
-	const existing = Array.from({ length: 8 }, (_value, index) => `p${index}`);
-	const cwd = workspace(JSON.stringify({ entries: existing }));
-	appendHistory(cwd, "new", 3);
-	assert.deepEqual(stored(cwd), ["p6", "p7", "new"]);
+test("default retention keeps the newest thousand prompts", () => {
+	const cwd = workspace(
+		"limit",
+		Array.from({ length: DEFAULT_MAX_ENTRIES }, (_, i) => `p${i}`),
+	);
+	const entries = appendHistory(cwd, "newest");
+	assert.equal(entries?.length, DEFAULT_MAX_ENTRIES);
+	assert.equal(entries?.[0], "p1");
+	assert.equal(entries?.at(-1), "newest");
 });
 
-test("the default cap keeps one thousand entries", () => {
-	const existing = Array.from({ length: DEFAULT_MAX_ENTRIES }, (_value, index) => `p${index}`);
-	const cwd = workspace(JSON.stringify({ entries: existing }));
-	const written = appendHistory(cwd, "newest");
-	assert.equal(written?.length, DEFAULT_MAX_ENTRIES);
-	assert.equal(written?.[DEFAULT_MAX_ENTRIES - 1], "newest");
-	assert.equal(written?.[0], "p1");
+test("migrates legacy rows once and removes the original only after import", () => {
+	const cwd = workspace("migration", ["old", 12, " ", "second"]);
+	assert.deepEqual(loadHistory(cwd), { entries: ["old", "second"], malformed: false });
+	assert.equal(existsSync(legacyHistoryPath(cwd)), false);
+	assert.deepEqual(appendHistory(cwd, "new"), ["old", "second", "new"]);
+	assert.deepEqual(loadHistory(cwd).entries, ["old", "second", "new"]);
 });
 
-test("appending re-reads the file so a concurrent writer's entries survive", () => {
-	const cwd = workspace();
-	appendHistory(cwd, "mine");
-	// Simulate another Pi process in the same workspace appending meanwhile.
-	writeFileSync(historyFilePath(cwd), JSON.stringify({ entries: ["mine", "theirs"] }), "utf8");
-	appendHistory(cwd, "later");
-	assert.deepEqual(stored(cwd), ["mine", "theirs", "later"]);
+test("same-named legacy projects each import once, without overwriting existing rows", () => {
+	const a = workspace("legacy", ["a"]);
+	const b = workspace("legacy", ["b"]);
+	appendHistory(a, "new");
+	assert.deepEqual(loadHistory(b).entries, ["a", "new", "b"]);
+	assert.deepEqual(loadHistory(a).entries, ["a", "new", "b"]);
 });
 
-test("no temporary files are left behind", () => {
-	const cwd = workspace();
-	appendHistory(cwd, "one");
-	appendHistory(cwd, "two");
-	assert.deepEqual(readdirSync(path.join(cwd, ".pi")), ["pi-history.json"]);
+test("malformed legacy JSON is retained and prevents append", () => {
+	const cwd = workspace("broken");
+	legacy(cwd, "{ broken");
+	const warnings: string[] = [];
+	assert.equal(loadHistory(cwd, (message) => warnings.push(message)).malformed, true);
+	assert.match(warnings[0] ?? "", /malformed/);
+	assert.throws(() => appendHistory(cwd, "new"), /malformed/);
+	assert.equal(readFileSync(legacyHistoryPath(cwd), "utf8"), "{ broken");
+});
+
+test("invalid legacy shape is retained", () => {
+	const cwd = workspace("invalid");
+	legacy(cwd, JSON.stringify({ entries: "not an array" }));
+	assert.equal(loadHistory(cwd).malformed, true);
+	assert.equal(existsSync(legacyHistoryPath(cwd)), true);
+});
+
+test("a failed legacy import rolls back and leaves its source untouched", () => {
+	const cwd = workspace("failure", ["old"]);
+	const db = new DatabaseSync(historyDatabasePath());
+	try {
+		db.exec(
+			"CREATE TRIGGER block_import BEFORE INSERT ON entries BEGIN SELECT RAISE(FAIL, 'blocked'); END",
+		);
+	} finally {
+		db.close();
+	}
+	assert.equal(loadHistory(cwd).malformed, true);
+	assert.equal(existsSync(legacyHistoryPath(cwd)), true);
+	const check = new DatabaseSync(historyDatabasePath());
+	try {
+		assert.equal(
+			check.prepare("SELECT count(*) AS n FROM entries WHERE project = ?").get("failure")?.n,
+			0,
+		);
+		check.exec("DROP TRIGGER block_import");
+	} finally {
+		check.close();
+	}
+	assert.deepEqual(loadHistory(cwd).entries, ["old"]);
+});
+
+test("an imported source left behind after a crash is not imported twice", () => {
+	const cwd = workspace("retry", ["once"]);
+	loadHistory(cwd);
+	legacy(cwd, JSON.stringify({ entries: ["once"] }));
+	assert.deepEqual(loadHistory(cwd).entries, ["once"]);
+	assert.equal(existsSync(legacyHistoryPath(cwd)), false);
+	legacy(cwd, JSON.stringify({ entries: ["changed"] }));
+	assert.equal(loadHistory(cwd).malformed, true);
+	assert.equal(existsSync(legacyHistoryPath(cwd)), true);
 });
