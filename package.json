@@ -11,6 +11,7 @@
 		"extensions": [
 			"./packages/pi-accounts/src/index.ts",
 			"./packages/pi-analytics/src/index.ts",
+			"./packages/pi-auto-title/src/index.ts",
 			"./packages/pi-btw/src/index.ts",
 			"./packages/pi-caffeinate/src/index.ts",
 			"./packages/pi-chat/src/index.ts",

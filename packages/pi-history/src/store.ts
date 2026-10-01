@@ -80,7 +80,7 @@ function parseLegacy(raw: string, path: string): string[] {
 	);
 }
 
-function migrateLegacy(cwd: string): void {
+function migrateLegacy(cwd: string, warn?: (message: string) => void): void {
 	const source = resolve(legacyHistoryPath(cwd));
 	let raw: string;
 	try {
@@ -124,7 +124,12 @@ function migrateLegacy(cwd: string): void {
 			throw new Error(`legacy history changed after migration at ${source}`);
 		rmSync(source);
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code !== "ENOENT") {
+			const message = `pi-history: could not remove migrated legacy file at ${source}: ${describe(error)}`;
+			if (warn) warn(message);
+			else console.warn(message);
+		}
 	}
 }
 
@@ -133,7 +138,7 @@ export function loadHistory(
 	warn?: (message: string) => void,
 ): { entries: string[]; malformed: boolean } {
 	try {
-		migrateLegacy(cwd);
+		migrateLegacy(cwd, warn);
 		if (!existsSync(historyDatabasePath())) return { entries: [], malformed: false };
 		const db = openDatabase();
 		try {
@@ -151,10 +156,11 @@ export function appendHistory(
 	cwd: string,
 	prompt: string,
 	maxEntries: number = DEFAULT_MAX_ENTRIES,
+	warn?: (message: string) => void,
 ): string[] | undefined {
 	const trimmed = prompt.trim();
 	if (!trimmed) return undefined;
-	migrateLegacy(cwd);
+	migrateLegacy(cwd, warn);
 	const db = openDatabase();
 	try {
 		const project = projectName(cwd);

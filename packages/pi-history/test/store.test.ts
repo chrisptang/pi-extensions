@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -160,4 +161,35 @@ test("an imported source left behind after a crash is not imported twice", () =>
 	legacy(cwd, JSON.stringify({ entries: ["changed"] }));
 	assert.equal(loadHistory(cwd).malformed, true);
 	assert.equal(existsSync(legacyHistoryPath(cwd)), true);
+});
+
+test("legacy file deletion failure warns but does not block loading or prompt appends", () => {
+	if (process.platform === "win32") return;
+	const cwd = workspace("perm-failure", ["old"]);
+	const legacyDir = path.dirname(legacyHistoryPath(cwd));
+	chmodSync(legacyDir, 0o555);
+	try {
+		const warnings: string[] = [];
+		const result = loadHistory(cwd, (message) => warnings.push(message));
+		assert.equal(result.malformed, false);
+		assert.deepEqual(result.entries, ["old"]);
+		assert.equal(warnings.length, 1);
+		assert.match(warnings[0] ?? "", /could not remove migrated legacy file/);
+		assert.equal(existsSync(legacyHistoryPath(cwd)), true);
+
+		// Subsequent appendHistory must not throw even if the legacy file still cannot be removed
+		const appended = appendHistory(cwd, "new prompt");
+		assert.deepEqual(appended, ["old", "new prompt"]);
+		assert.deepEqual(loadHistory(cwd).entries, ["old", "new prompt"]);
+
+		// Consecutive appends continue to work normally
+		const appendedSecond = appendHistory(cwd, "second prompt");
+		assert.deepEqual(appendedSecond, ["old", "new prompt", "second prompt"]);
+	} finally {
+		chmodSync(legacyDir, 0o755);
+	}
+
+	// After restoring permissions, subsequent access cleanly removes the file
+	assert.deepEqual(loadHistory(cwd).entries, ["old", "new prompt", "second prompt"]);
+	assert.equal(existsSync(legacyHistoryPath(cwd)), false);
 });

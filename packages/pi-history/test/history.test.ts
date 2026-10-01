@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, test } from "vitest";
@@ -204,4 +204,33 @@ test("/history is silent in modes with no UI", async () => {
 	const { ctx, notifications } = createMockContext({ cwd, mode: "print", hasUI: false });
 	await harness.commands.get("history")?.handler("", ctx);
 	assert.equal(notifications.length, 0);
+});
+
+test("legacy file deletion failure warns at session start but continues recording prompts", async () => {
+	if (process.platform === "win32") return;
+	const cwd = workspace(["first"]);
+	const legacyDir = path.dirname(legacyHistoryPath(cwd));
+	chmodSync(legacyDir, 0o555);
+	try {
+		const harness = createMockPi();
+		history(harness.pi);
+		const recorded = recordingContext(cwd);
+		await startSession(harness, recorded.ctx);
+
+		assert.ok(recorded.editorFactory !== undefined);
+		assert.ok(
+			recorded.notifications.some(
+				(n) => n.level === "warning" && n.message.includes("could not remove migrated legacy file"),
+			),
+		);
+
+		await sendInput(harness, "second", recorded.ctx);
+		assert.deepEqual(stored(cwd), ["first", "second"]);
+		assert.ok(!recorded.notifications.some((n) => n.message.includes("not recording prompts")));
+
+		await sendInput(harness, "third", recorded.ctx);
+		assert.deepEqual(stored(cwd), ["first", "second", "third"]);
+	} finally {
+		chmodSync(legacyDir, 0o755);
+	}
 });
