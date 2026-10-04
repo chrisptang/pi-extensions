@@ -41,6 +41,11 @@ test("seeds the built-in definitions and parses them back", () => {
 	const builder = agents.get("builder");
 	assert.equal(builder?.model, "sonnet");
 	assert.ok(builder?.tools.includes("edit"));
+	assert.match(builder?.description ?? "", /complete available spec, task list, and goal/u);
+	assert.match(builder?.description ?? "", /preferably as local files/u);
+	assert.match(builder?.body ?? "", /goal in full before editing; continue reading/u);
+	assert.match(builder?.body ?? "", /context is missing, unreadable, or contradictory, stop/u);
+	assert.match(builder?.body ?? "", /Do not update shared task or goal status unless explicitly/u);
 	// The architect describes the main session: no child model, no child tools.
 	const architect = agents.get("architect");
 	assert.equal(architect?.role, "main");
@@ -51,6 +56,11 @@ test("seeds the built-in definitions and parses them back", () => {
 	assert.match(architect?.body ?? "", /One explorer answers one question/u);
 	assert.match(architect?.body ?? "", /Never send explorer to compare designs/u);
 	assert.match(architect?.body ?? "", /The completion condition/u);
+	assert.match(architect?.body ?? "", /complete available spec, task list, and goal/u);
+	assert.match(architect?.body ?? "", /Prefer local file paths and require full reading/u);
+	assert.match(architect?.body ?? "", /Do not create documents solely for delegation/u);
+	assert.match(architect?.body ?? "", /Global context does not expand ownership/u);
+	assert.doesNotMatch(architect?.body ?? "", /paste the relevant Design and Task text/u);
 	assert.equal(explorer?.role, "subagent");
 });
 

@@ -45,6 +45,7 @@ const BUILTIN_INSTRUCTIONS = {
 			"Never delegate planning, the critical path, integration, deterministic checks, authorization decisions, or the final answer to the user. Keep those here even when subagents are doing other work.",
 			"Batch multiple subagent_spawn calls only for mutually independent tasks. A task that needs another task's result is not independent and must wait for that job's completion.",
 			"Give each parallel writer disjoint file ownership. Concurrent writes to one file are not serialized or merged.",
+			"For implementation jobs, hand off the complete available spec, task list, and goal, preferably as local file paths for full reading before editing; otherwise include the full text, not excerpts. Include unrecorded approved decisions; do not create documents solely for delegation. State the assigned task, owned files, dependency readiness, and verification command. Global context does not expand ownership; unresolved decisions stay here.",
 		],
 	},
 	skill_run: {

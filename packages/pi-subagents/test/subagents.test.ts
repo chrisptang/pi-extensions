@@ -20,6 +20,7 @@ interface RegisteredTool {
 	label: string;
 	description: string;
 	promptSnippet?: string;
+	promptGuidelines?: string[];
 	parameters: {
 		properties?: Record<
 			string,
@@ -124,16 +125,28 @@ test("registers six fixed main-agent tools with stable schemas and explicit limi
 		true,
 	);
 	assert.deepEqual([...mock.commands.keys()], ["skills", "subagents", "agents"]);
-	const definitions = JSON.stringify(
-		tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
+	const handoff = tools[0]?.promptGuidelines?.find((text) =>
+		text.startsWith("For implementation jobs"),
 	);
-	await tool(mock, "subagent_inspect").execute("inspect", {}, undefined, undefined, context.ctx);
-	assert.equal(
+	assert.ok(handoff);
+	assert.match(handoff, /complete available spec, task list, and goal/u);
+	assert.match(handoff, /local file paths for full reading before editing/u);
+	assert.match(handoff, /full text, not excerpts/u);
+	assert.match(handoff, /do not create documents solely for delegation/u);
+	assert.match(handoff, /Global context does not expand ownership/u);
+	const modelVisibleDefinitions = () =>
 		JSON.stringify(
-			tools.map(({ name, description, parameters }) => ({ name, description, parameters })),
-		),
-		definitions,
-	);
+			tools.map(({ name, description, parameters, promptSnippet, promptGuidelines }) => ({
+				name,
+				description,
+				parameters,
+				promptSnippet,
+				promptGuidelines,
+			})),
+		);
+	const definitions = modelVisibleDefinitions();
+	await tool(mock, "subagent_inspect").execute("inspect", {}, undefined, undefined, context.ctx);
+	assert.equal(modelVisibleDefinitions(), definitions);
 });
 
 test("completion renderer follows Pi's tool-output expansion state", async () => {
