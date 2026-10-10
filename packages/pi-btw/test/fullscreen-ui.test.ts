@@ -279,6 +279,7 @@ class InputHandoffTerminal implements Terminal {
 	clearScreen(): void {}
 	setTitle(): void {}
 	setProgress(): void {}
+	setProgramStatus(): void {}
 }
 
 class MainInput implements Component, Focusable {

@@ -19,8 +19,8 @@ const PROVIDER_MODULES = {
 		compactUrl: "https://api.openai.com/v1/responses/compact",
 	},
 	"azure-openai-responses": {
-		specifier: "@earendil-works/pi-ai/providers/azure-openai-responses",
-		factory: "azureOpenAIResponsesProvider",
+		specifier: "@earendil-works/pi-ai/providers/azure",
+		factory: "azureProvider",
 		provider: "azure-openai-responses",
 		baseUrl: "https://example.openai.azure.com/openai/v1",
 		compactUrl: "https://example.openai.azure.com/openai/v1/responses/compact?api-version=v1",

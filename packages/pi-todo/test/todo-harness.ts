@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { JsonValue } from "@earendil-works/pi-ai";
 import type {
 	ContextEvent,
 	ExtensionAPI,
@@ -158,7 +159,7 @@ export function todoToolResultMessage(
 		toolCallId: "todo-call",
 		toolName,
 		content: [{ type: "text", text: "updated" }],
-		details,
+		details: details as JsonValue,
 		isError,
 		timestamp: 0,
 	};
@@ -176,7 +177,7 @@ export function todoToolCallMessage(
 				type: "toolCall",
 				id: "todo-call",
 				name: toolName,
-				arguments: { [argumentName]: todos },
+				arguments: { [argumentName]: todos as JsonValue },
 			},
 		],
 		api: "openai-responses",

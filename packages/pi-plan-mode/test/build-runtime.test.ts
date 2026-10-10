@@ -296,14 +296,15 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
 		await command.handler("start", runner.createCommandContext());
 		const complete = runner.getToolDefinition("plan_mode_complete");
 		assert.ok(complete);
+		const signal = new AbortController().signal;
 		await complete.execute(
 			"complete-generated-plan",
 			{ plan: "# Plan\n\nImplement the generated-runtime fix." },
-			new AbortController().signal,
+			signal,
 			undefined,
-			runner.createContext(),
+			runner.createToolContext("complete-generated-plan", signal),
 		);
-		await runner.emit({ type: "agent_settled" });
+		await runner.emit({ type: "agent_settled", aborted: false });
 		assert.deepEqual(errors, []);
 	} finally {
 		if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;

@@ -50,6 +50,8 @@ export interface GenerationRecord {
 	model?: string;
 	thinkingLevel?: string;
 	startedAtMs: number;
+	/** First parsed provider stream event, the earliest observable approximation of first token. */
+	firstTokenAtMs?: number;
 	finishedAtMs?: number;
 	durationMs?: number;
 	stopReason?: string;

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { type TestContext, test } from "vitest";
 import { resolveTimeRange } from "../src/storage/queries.js";
 import { AnalyticsStore } from "../src/storage/store.js";
@@ -281,6 +282,158 @@ test("token usage survives a round trip and aggregates per model", async (t) => 
 		})),
 		[{ provider: "anthropic", model: "claude-b", calls: 2, tokens: 270 }],
 	);
+});
+
+test("first-token timestamps round-trip and drive per-model TTFT and tok/s", async (t) => {
+	const store = await fixture(t);
+	const started = 1_000;
+	await store.recordRun(
+		run("perf-1", started, {
+			generations: [
+				{
+					id: "g1",
+					ordinal: 0,
+					provider: "openai",
+					model: "gpt-a",
+					startedAtMs: started,
+					firstTokenAtMs: started + 50,
+					finishedAtMs: started + 150,
+					durationMs: 150,
+					outcome: "stop",
+					usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, cost: 0 },
+					responses: [],
+				},
+				{
+					id: "g2",
+					ordinal: 1,
+					provider: "openai",
+					model: "gpt-a",
+					startedAtMs: started + 1_000,
+					firstTokenAtMs: started + 1_200,
+					finishedAtMs: started + 1_400,
+					durationMs: 400,
+					outcome: "stop",
+					usage: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0 },
+					responses: [],
+				},
+				// No stream event recorded: counted as a call but excluded from both metrics.
+				{
+					id: "g3",
+					ordinal: 2,
+					provider: "anthropic",
+					model: "claude-b",
+					startedAtMs: started + 2_000,
+					outcome: "stop",
+					responses: [],
+				},
+			],
+		}),
+	);
+
+	const snapshot = await store.getSnapshot({ fromMs: 0, toMs: 10_000 });
+	assert.equal(snapshot.performance.length, 2);
+	const gpt = snapshot.performance.find(({ model }) => model === "gpt-a");
+	assert.ok(gpt);
+	assert.equal(gpt.calls, 2);
+	// TTFT samples: 50 and 200 ms.
+	assert.deepEqual(gpt.timeToFirstToken, { measured: 2, average: 125, p95: 200, maximum: 200 });
+	// Output rates: 10/0.1s = 100 and 20/0.2s = 100 tok/s.
+	assert.deepEqual(gpt.outputTokensPerSecond, {
+		measured: 2,
+		average: 100,
+		p95: 100,
+		maximum: 100,
+	});
+	const claude = snapshot.performance.find(({ model }) => model === "claude-b");
+	assert.ok(claude);
+	assert.equal(claude.calls, 1);
+	assert.equal(claude.timeToFirstToken.measured, 0);
+	assert.equal(claude.outputTokensPerSecond.measured, 0);
+});
+
+test("a pre-v3 database gains the first-token column and keeps its rows", async (t) => {
+	const directory = await mkdtemp(path.join(tmpdir(), "pi-analytics-migrate-"));
+	t.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+	const root = path.join(directory, "pi-analytics.db");
+	const legacy = new DatabaseSync(root);
+	// The v2 generations shape, before first_token_at_ms existed.
+	legacy.exec(`
+		CREATE TABLE runs (
+			id TEXT PRIMARY KEY,
+			started_at_ms INTEGER NOT NULL,
+			finished_at_ms INTEGER NOT NULL,
+			duration_ms INTEGER NOT NULL,
+			trigger_source TEXT NOT NULL,
+			initial_provider TEXT,
+			initial_model TEXT,
+			outcome TEXT NOT NULL,
+			attempt_count INTEGER NOT NULL,
+			tool_error_count INTEGER NOT NULL,
+			provider_error_count INTEGER NOT NULL,
+			recovered_error_count INTEGER NOT NULL,
+			input INTEGER NOT NULL DEFAULT 0,
+			output INTEGER NOT NULL DEFAULT 0,
+			cache_read INTEGER NOT NULL DEFAULT 0,
+			cache_write INTEGER NOT NULL DEFAULT 0,
+			cost REAL NOT NULL DEFAULT 0
+		) STRICT;
+		CREATE TABLE generations (
+			run_id TEXT NOT NULL REFERENCES runs (id) ON DELETE CASCADE,
+			id TEXT NOT NULL,
+			ordinal INTEGER NOT NULL,
+			provider TEXT,
+			model TEXT,
+			thinking_level TEXT,
+			started_at_ms INTEGER NOT NULL,
+			finished_at_ms INTEGER,
+			duration_ms INTEGER,
+			stop_reason TEXT,
+			outcome TEXT NOT NULL,
+			has_usage INTEGER NOT NULL DEFAULT 0,
+			input INTEGER NOT NULL DEFAULT 0,
+			output INTEGER NOT NULL DEFAULT 0,
+			cache_read INTEGER NOT NULL DEFAULT 0,
+			cache_write INTEGER NOT NULL DEFAULT 0,
+			cost REAL NOT NULL DEFAULT 0,
+			PRIMARY KEY (run_id, id)
+		) STRICT;
+		INSERT INTO runs (
+			id, started_at_ms, finished_at_ms, duration_ms, trigger_source,
+			outcome, attempt_count, tool_error_count, provider_error_count, recovered_error_count
+		) VALUES ('legacy', 1, 2, 1, 'interactive', 'success', 1, 0, 0, 0);
+		INSERT INTO generations (
+			run_id, id, ordinal, provider, model, started_at_ms, finished_at_ms, duration_ms, outcome
+		) VALUES ('legacy', 'g1', 0, 'openai', 'gpt-old', 1, 2, 1, 'stop');
+		PRAGMA user_version = 2;
+	`);
+	legacy.close();
+
+	const store = new AnalyticsStore(root);
+	t.onTestFinished(() => store.close().catch(() => undefined));
+	const before = await store.getSnapshot({ fromMs: 0, toMs: 10 });
+	assert.equal(before.overview.responseCycles, 1);
+	assert.equal(before.performance[0]?.calls, 1);
+	assert.equal(before.performance[0]?.timeToFirstToken.measured, 0);
+
+	await store.recordRun(
+		run("fresh", 5, {
+			generations: [
+				{
+					id: "g1",
+					ordinal: 0,
+					startedAtMs: 5,
+					firstTokenAtMs: 6,
+					finishedAtMs: 7,
+					durationMs: 2,
+					outcome: "stop",
+					responses: [],
+				},
+			],
+		}),
+	);
+	const after = await store.getSnapshot({ fromMs: 0, toMs: 10 });
+	assert.equal(after.overview.responseCycles, 2);
+	assert.ok(after.performance.some((item) => item.timeToFirstToken.measured === 1));
 });
 
 test("time ranges use local Today and rolling windows", () => {

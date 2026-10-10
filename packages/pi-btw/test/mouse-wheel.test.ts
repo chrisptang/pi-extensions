@@ -199,7 +199,7 @@ test("mouse wheel and history keys scroll the native side-thread viewport", asyn
 	assert.match(wheelFrame, /btw · side thread/);
 	assert.match(wheelFrame, /Ctrl\+C/);
 	assert.match(wheelFrame, /PgUp\/PgDn/);
-	assert.match(wheelFrame, /↓ Jump to latest message · End/u);
+	assert.match(wheelFrame, /↓ Jump to latest message · Ctrl\+End/u);
 	assert.ok(harness.themeCalls.includes("fg:text"));
 	assert.ok(harness.themeCalls.includes("fg:muted"));
 	assert.ok(harness.themeCalls.includes("bg:selectedBg"));
@@ -268,7 +268,7 @@ test("mouse wheel scrolls transcript history while an answer and composer stay v
 	assert.match(wheelFrame, /btw · side thread/);
 	assert.match(wheelFrame, /Answering…/);
 	assert.match(wheelFrame, /Ctrl\+C/);
-	assert.match(wheelFrame, /↓ Jump to latest message · End/u);
+	assert.match(wheelFrame, /↓ Jump to latest message · Ctrl\+End/u);
 
 	const indicator = findJumpIndicator(harness.writes);
 	harness.writes.length = 0;

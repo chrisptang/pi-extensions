@@ -80,6 +80,15 @@ const snapshot: AnalyticsSnapshot = {
 		maximum: 9,
 		distribution: { one: 31, twoToThree: 34, fourToSix: 15, sevenPlus: 3 },
 	},
+	performance: [
+		{
+			provider: "openai",
+			model: "gpt-test",
+			calls: 192,
+			timeToFirstToken: { measured: 190, average: 420, p95: 980, maximum: 2_400 },
+			outputTokensPerSecond: { measured: 190, average: 62, p95: 95, maximum: 120 },
+		},
+	],
 	tokens: {
 		input: 120_000,
 		output: 38_000,
@@ -169,17 +178,18 @@ function withRpcUi(
 	return { ...base, ui: { ...base.ui, ...rpc.ui } } as never;
 }
 
-test("dashboard exposes nine primary rows and concise settled metrics", async () => {
+test("dashboard exposes ten primary rows and concise settled metrics", async () => {
 	const controller = createAnalyticsMenu(source());
 	const screen = resolveMenuScreen(controller.menu, "main", await state(controller));
 	assert.equal(screen.kind, "actions");
 	if (screen.kind !== "actions") return;
-	assert.equal(screen.items.length, 9);
+	assert.equal(screen.items.length, 10);
 	assert.deepEqual(
 		screen.items.map(({ label }) => label),
 		[
 			"Change time range",
 			"Response cycles",
+			"Model performance",
 			"Tools",
 			"Skills",
 			"Provider reliability",
@@ -649,7 +659,7 @@ test.each(["r", "R", "\u001b[114u", "\u001b[114;2u"])(
 		await vi.waitFor(() => assert.match(tui.render().join("\n"), /range 7D\/30D\/ALL/));
 		assert.doesNotMatch(tui.render().join("\n"), /Change time range/);
 		assert.match(tui.render().join("\n"), /Input \(uncached\)/);
-		for (let index = 0; index < 5; index += 1) tui.send("\u001b[C");
+		for (let index = 0; index < 6; index += 1) tui.send("\u001b[C");
 		for (const label of ["Analytics · 30D", "Analytics · ALL", "Analytics · 7D"]) {
 			tui.send(key);
 			await vi.waitFor(() => assert.match(tui.render().join("\n"), new RegExp(label)));
@@ -676,11 +686,12 @@ test("tabs show ordered read-only metrics, wrap safely, scroll, and close direct
 	const frame = stripVTControlCharacters(tui.render().join("\n"));
 	assert.match(
 		frame,
-		/Tokens & cost.*Response cycles.*Tools.*Skills.*Provider reliability.*Sessions & activity/,
+		/Tokens & cost.*Response cycles.*Model performance.*Tools.*Skills.*Provider reliability.*Sessions & activity/,
 	);
 	assert.doesNotMatch(frame, /Data & privacy|enter select|→ /);
 	for (const metric of [
 		/Calls per response/,
+		/TTFT avg \/ p95 \/ max/,
 		/Average duration/,
 		/Model initiated/,
 		/HTTP 429/,
@@ -769,6 +780,17 @@ test("sessions screen reports streaks, a heatmap and per-project totals", async 
 	assert.match(lines, /pi-extensions\s+8 sessions · 900k · \$3\.50/);
 	assert.match(lines, /demo\s+4 sessions · 180k · \$0\.63/);
 	assert.match(lines, /Session length is wall-clock time/);
+});
+
+test("performance screen reports TTFT and output rate per model", async () => {
+	const controller = createAnalyticsMenu(source());
+	const screen = resolveMenuScreen(controller.menu, "performance", await state(controller));
+	assert.equal(screen.kind, "detail");
+	const lines = screen.lines?.join("\n") ?? "";
+	assert.match(lines, /first provider stream event/);
+	assert.match(lines, /openai\/gpt-test · 192 calls/);
+	assert.match(lines, /TTFT avg \/ p95 \/ max\s+420 \/ 980 \/ 2400 ms · 190 samples/);
+	assert.match(lines, /tok\/s avg \/ p95 \/ max\s+62 \/ 95 \/ 120 · 190 samples/);
 });
 
 test("sessions screen points at the backfill script when nothing is imported", async () => {

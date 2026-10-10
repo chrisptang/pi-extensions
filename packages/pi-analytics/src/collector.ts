@@ -83,6 +83,12 @@ export class ResponseCollector {
 		});
 	}
 
+	recordFirstToken(input: { now: number }): void {
+		const generation = this.latestGeneration();
+		if (generation?.outcome !== "pending" || generation.firstTokenAtMs !== undefined) return;
+		generation.firstTokenAtMs = input.now;
+	}
+
 	recordProviderResponse(input: { status: number; now: number }): void {
 		const generation = this.latestGeneration();
 		if (generation?.outcome !== "pending") return;

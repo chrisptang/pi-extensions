@@ -609,7 +609,7 @@ test("built generated entries share one Pi bus and stale invalidation removes bo
 			},
 			undefined,
 			undefined,
-			runner.createContext(),
+			runner.createToolContext("confirm", undefined),
 		);
 		const active = workflowAttempt(sessionManager);
 		eventBus.emit(WORKFLOW_MUTEX_CHANNEL, active);

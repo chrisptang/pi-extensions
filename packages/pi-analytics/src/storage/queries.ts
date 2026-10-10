@@ -76,6 +76,25 @@ export interface ModelTokenStats extends TokenTotals {
 	tokens: number;
 }
 
+export interface DistributionSummary {
+	/** Samples that contributed to this metric; others lacked the required timestamps or usage. */
+	measured: number;
+	average: number;
+	p95: number;
+	maximum: number;
+}
+
+export interface ModelPerformance {
+	provider?: string;
+	model?: string;
+	/** LLM calls attributed to this model in the range. */
+	calls: number;
+	/** Milliseconds from request start to the first provider stream event. */
+	timeToFirstToken: DistributionSummary;
+	/** Output tokens per second during the stream after the first event. */
+	outputTokensPerSecond: DistributionSummary;
+}
+
 export interface TokenStats extends TokenTotals {
 	/** Prompt tokens billed at full rate, excluding cache reads and writes. */
 	tokens: number;
@@ -129,6 +148,7 @@ export interface AnalyticsSnapshot {
 	tools: ToolStats[];
 	reliability: ReliabilityStats;
 	responses: ResponseStats;
+	performance: ModelPerformance[];
 	tokens: TokenStats;
 	sessions: SessionStats;
 }
@@ -174,6 +194,10 @@ export async function querySnapshot(
 	let http5xx = 0;
 	let terminal = 0;
 	const tokenModels = new Map<string, ModelTokenStats>();
+	const performanceModels = new Map<
+		string,
+		{ provider?: string; model?: string; calls: number; firstTokens: number[]; rates: number[] }
+	>();
 	const tokenTotals: TokenTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 };
 	let measuredCalls = 0;
 	let unmeasuredCalls = 0;
@@ -241,6 +265,25 @@ export async function querySnapshot(
 				if (response.status === 429) http429 += 1;
 				if (response.status >= 500 && response.status < 600) http5xx += 1;
 			}
+			const performanceKey = `${generation.provider ?? ""}/${generation.model ?? ""}`;
+			const performance = performanceModels.get(performanceKey) ?? {
+				provider: generation.provider,
+				model: generation.model,
+				calls: 0,
+				firstTokens: [],
+				rates: [],
+			};
+			performance.calls += 1;
+			if (generation.firstTokenAtMs !== undefined) {
+				performance.firstTokens.push(
+					Math.max(0, generation.firstTokenAtMs - generation.startedAtMs),
+				);
+				const decodeMs = (generation.finishedAtMs ?? 0) - generation.firstTokenAtMs;
+				if (generation.usage && decodeMs > 0) {
+					performance.rates.push((generation.usage.output * 1_000) / decodeMs);
+				}
+			}
+			performanceModels.set(performanceKey, performance);
 			const usage = generation.usage;
 			if (!usage) {
 				unmeasuredCalls += 1;
@@ -302,6 +345,21 @@ export async function querySnapshot(
 			categories,
 		},
 		responses,
+		performance: [...performanceModels.values()]
+			.map((item) => ({
+				provider: item.provider,
+				model: item.model,
+				calls: item.calls,
+				timeToFirstToken: summarize(item.firstTokens),
+				outputTokensPerSecond: summarize(item.rates),
+			}))
+			.sort(
+				(left, right) =>
+					right.calls - left.calls ||
+					`${left.provider ?? ""}/${left.model ?? ""}`.localeCompare(
+						`${right.provider ?? ""}/${right.model ?? ""}`,
+					),
+			),
 		sessions: sessionStatistics(sessions, range),
 		tokens: {
 			...tokenTotals,
@@ -463,6 +521,18 @@ function responseStatistics(generationCounts: number[]): ResponseStats {
 			fourToSix: sorted.filter((value) => value >= 4 && value <= 6).length,
 			sevenPlus: sorted.filter((value) => value >= 7).length,
 		},
+	};
+}
+
+/** Nearest-rank percentiles over measured samples, matching responseStatistics. */
+function summarize(values: readonly number[]): DistributionSummary {
+	const sorted = [...values].sort((left, right) => left - right);
+	const measured = sorted.length;
+	return {
+		measured,
+		average: measured > 0 ? sum(sorted) / measured : 0,
+		p95: measured > 0 ? (sorted[Math.max(0, Math.ceil(0.95 * measured) - 1)] ?? 0) : 0,
+		maximum: sorted.at(-1) ?? 0,
 	};
 }
 

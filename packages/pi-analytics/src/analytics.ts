@@ -173,6 +173,12 @@ export function createAnalyticsExtension(
 			});
 		});
 
+		// Handlers are awaited in stream order, so this stays a synchronous timestamp write;
+		// any slower work here would delay token delivery to the user.
+		pi.on("provider_stream_event", () => {
+			collector.recordFirstToken({ now: deps.now() });
+		});
+
 		pi.on("after_provider_response", (event) => {
 			collector.recordProviderResponse({ status: event.status, now: deps.now() });
 		});

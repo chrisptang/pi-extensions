@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import type {
-	Api,
-	AssistantMessageEventStream,
-	Model,
-	Provider,
-	Usage,
+import {
+	type Api,
+	type AssistantMessageEventStream,
+	type Model,
+	normalizeContext,
+	type Provider,
+	type Usage,
 } from "@earendil-works/pi-ai";
 import { describe, test } from "vitest";
 
@@ -20,8 +21,8 @@ const PROVIDER_MODULES = {
 		credentialHeader: "authorization",
 	},
 	"azure-openai-responses": {
-		specifier: "@earendil-works/pi-ai/providers/azure-openai-responses",
-		factory: "azureOpenAIResponsesProvider",
+		specifier: "@earendil-works/pi-ai/providers/azure",
+		factory: "azureProvider",
 		provider: "azure-openai-responses",
 		baseUrl: "https://example.openai.azure.com/openai/v1",
 		expectedUrl: "https://example.openai.azure.com/openai/v1/responses?api-version=v1",
@@ -146,7 +147,7 @@ async function collectFailure(stream: AssistantMessageEventStream): Promise<stri
 }
 
 function context() {
-	return {
+	return normalizeContext({
 		systemPrompt: "system",
 		messages: [
 			{
@@ -156,7 +157,7 @@ function context() {
 			},
 		],
 		tools: [],
-	};
+	});
 }
 
 for (const api of Object.keys(PROVIDER_MODULES) as SupportedApi[]) {
@@ -167,39 +168,28 @@ for (const api of Object.keys(PROVIDER_MODULES) as SupportedApi[]) {
 			const model = modelFor(api);
 			let payload: Record<string, unknown> | undefined;
 			let fetches = 0;
-			const stream = provider.stream(
-				model,
-				{
-					systemPrompt: "system",
-					messages: [{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: 1 }],
-					tools: [],
+			const stream = provider.stream(model, context(), {
+				apiKey: apiKey(api),
+				transport: "sse",
+				cacheRetention: "none",
+				maxRetries: 0,
+				onPayload(value) {
+					assert.ok(typeof value === "object" && value !== null && !Array.isArray(value));
+					payload = value as Record<string, unknown>;
+					assert.ok(Array.isArray(payload.input));
+					return {
+						...payload,
+						input: [...payload.input, { type: "compaction_trigger" }],
+					};
 				},
-				{
-					apiKey: apiKey(api),
-					transport: "sse",
-					cacheRetention: "none",
-					maxRetries: 0,
-					onPayload(value) {
-						assert.ok(typeof value === "object" && value !== null && !Array.isArray(value));
-						payload = value as Record<string, unknown>;
-						assert.ok(Array.isArray(payload.input));
-						return {
-							...payload,
-							input: [...payload.input, { type: "compaction_trigger" }],
-						};
-					},
-					fetch: async (input, init) => {
-						fetches += 1;
-						assert.equal(String(input), fixture.expectedUrl);
-						assert.equal(typeof init?.body, fixture.bodyKind);
-						assert.equal(
-							new Headers(init?.headers).get("content-encoding"),
-							fixture.contentEncoding,
-						);
-						return responseSse([COMPACTION_ITEM]);
-					},
+				fetch: async (input, init) => {
+					fetches += 1;
+					assert.equal(String(input), fixture.expectedUrl);
+					assert.equal(typeof init?.body, fixture.bodyKind);
+					assert.equal(new Headers(init?.headers).get("content-encoding"), fixture.contentEncoding);
+					return responseSse([COMPACTION_ITEM]);
 				},
-			);
+			});
 
 			const usage = await collectDone(stream);
 			assert.equal(fetches, 1);
@@ -213,36 +203,28 @@ for (const api of Object.keys(PROVIDER_MODULES) as SupportedApi[]) {
 			let payload: Record<string, unknown> | undefined;
 			let rewrittenUrl: string | undefined;
 			let compactHeaders: Headers | undefined;
-			const stream = provider.stream(
-				model,
-				{
-					systemPrompt: "system",
-					messages: [{ role: "user", content: [{ type: "text", text: "hello" }], timestamp: 1 }],
-					tools: [],
+			const stream = provider.stream(model, context(), {
+				apiKey: apiKey(api),
+				transport: "sse",
+				cacheRetention: "none",
+				maxRetries: 0,
+				onPayload(value) {
+					assert.ok(typeof value === "object" && value !== null && !Array.isArray(value));
+					payload = value as Record<string, unknown>;
+					return value;
 				},
-				{
-					apiKey: apiKey(api),
-					transport: "sse",
-					cacheRetention: "none",
-					maxRetries: 0,
-					onPayload(value) {
-						assert.ok(typeof value === "object" && value !== null && !Array.isArray(value));
-						payload = value as Record<string, unknown>;
-						return value;
-					},
-					fetch: async (input, init) => {
-						const original = new URL(String(input));
-						const compact = new URL(original);
-						compact.pathname = `${compact.pathname.replace(/\/$/, "")}/compact`;
-						assert.equal(compact.origin, original.origin);
-						rewrittenUrl = compact.toString();
-						compactHeaders = new Headers(init?.headers);
-						compactHeaders.delete("content-encoding");
-						compactHeaders.delete("content-length");
-						return responseSse([]);
-					},
+				fetch: async (input, init) => {
+					const original = new URL(String(input));
+					const compact = new URL(original);
+					compact.pathname = `${compact.pathname.replace(/\/$/, "")}/compact`;
+					assert.equal(compact.origin, original.origin);
+					rewrittenUrl = compact.toString();
+					compactHeaders = new Headers(init?.headers);
+					compactHeaders.delete("content-encoding");
+					compactHeaders.delete("content-length");
+					return responseSse([]);
 				},
-			);
+			});
 
 			const usage = await collectDone(stream);
 			assert.ok(payload);

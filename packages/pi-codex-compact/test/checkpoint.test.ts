@@ -224,9 +224,11 @@ test("projects resumed repeated compaction when Pi interleaves an older summary"
 	];
 
 	const resumed = buildSessionContext(entries, "later").messages;
+	// Pi 1.1 keeps only the newest compaction entry's summary in the rebuilt context; the older
+	// interleaved summary is dropped even though its raw ID lies inside the retained range.
 	assert.deepEqual(
 		resumed.map((message) => message.role),
-		["compactionSummary", "user", "user", "compactionSummary", "user", "user", "user"],
+		["compactionSummary", "user", "user", "user", "user", "user"],
 	);
 	const projected = project(resumed, secondDetails);
 	assert.ok(projected);

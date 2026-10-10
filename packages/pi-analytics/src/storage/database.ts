@@ -11,7 +11,7 @@ import type {
 	UsageRecord,
 } from "../types.js";
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 // Written as one statement batch so a fresh database reaches the current shape atomically.
 const SCHEMA = `
@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS generations (
 	model TEXT,
 	thinking_level TEXT,
 	started_at_ms INTEGER NOT NULL,
+	first_token_at_ms INTEGER,
 	finished_at_ms INTEGER,
 	duration_ms INTEGER,
 	stop_reason TEXT,
@@ -217,6 +218,10 @@ export class AnalyticsDatabase {
 		database.exec("PRAGMA synchronous = NORMAL");
 		database.exec("PRAGMA foreign_keys = ON");
 		database.exec(SCHEMA);
+		// CREATE TABLE IF NOT EXISTS leaves pre-v3 databases without the added columns, so each
+		// additive column is ensured explicitly; a concurrent opener losing the ALTER race still
+		// ends with the column present.
+		ensureColumn(database, "generations", "first_token_at_ms", "INTEGER");
 		database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 		// The database and its WAL sidecars carry analytics history; keep them owner-only.
 		if (process.platform !== "win32") {
@@ -224,6 +229,27 @@ export class AnalyticsDatabase {
 		}
 		this.database = database;
 		return database;
+	}
+}
+
+function ensureColumn(
+	database: DatabaseSync,
+	table: string,
+	column: string,
+	definition: string,
+): void {
+	const existing = database.prepare(`PRAGMA table_info(${table})`).all() as {
+		name?: unknown;
+	}[];
+	if (existing.some(({ name }) => name === column)) return;
+	try {
+		database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+	} catch (error) {
+		// Another process may have added the column between the check and the ALTER.
+		const after = database.prepare(`PRAGMA table_info(${table})`).all() as {
+			name?: unknown;
+		}[];
+		if (!after.some(({ name }) => name === column)) throw error;
 	}
 }
 
@@ -264,9 +290,9 @@ function insertRun(database: DatabaseSync, run: SettledRun): void {
 		const generation = database.prepare(
 			`INSERT INTO generations (
 				run_id, id, ordinal, provider, model, thinking_level,
-				started_at_ms, finished_at_ms, duration_ms, stop_reason, outcome,
+				started_at_ms, first_token_at_ms, finished_at_ms, duration_ms, stop_reason, outcome,
 				has_usage, input, output, cache_read, cache_write, cost
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		);
 		const response = database.prepare(
 			`INSERT INTO provider_responses (run_id, generation_id, ordinal, occurred_at_ms, status)
@@ -281,6 +307,7 @@ function insertRun(database: DatabaseSync, run: SettledRun): void {
 				item.model ?? null,
 				item.thinkingLevel ?? null,
 				item.startedAtMs,
+				item.firstTokenAtMs ?? null,
 				item.finishedAtMs ?? null,
 				item.durationMs ?? null,
 				item.stopReason ?? null,
@@ -453,6 +480,7 @@ function selectRuns(database: DatabaseSync, fromMs: number, toMs: number): Settl
 			model: text(row.model),
 			thinkingLevel: text(row.thinking_level),
 			startedAtMs: integer(row.started_at_ms),
+			firstTokenAtMs: optionalInteger(row.first_token_at_ms),
 			finishedAtMs: optionalInteger(row.finished_at_ms),
 			durationMs: optionalInteger(row.duration_ms),
 			stopReason: text(row.stop_reason),

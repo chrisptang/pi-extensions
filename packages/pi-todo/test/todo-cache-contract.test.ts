@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { JsonValue } from "@earendil-works/pi-ai";
 import type { ContextEvent, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { convertToLlm } from "@earendil-works/pi-coding-agent";
 import { test } from "vitest";
@@ -69,7 +70,7 @@ function todoToolCallMessage(todos: readonly Todo[]): ContextEvent["messages"][n
 				type: "toolCall",
 				id: `todo-call-${todos.length}`,
 				name: TOOL_NAME,
-				arguments: { todos },
+				arguments: { todos: todos as unknown as JsonValue },
 			},
 		],
 		"toolUse",
@@ -105,7 +106,7 @@ function todoToolResultMessage(todos: readonly Todo[]): ContextEvent["messages"]
 		toolCallId: `todo-call-${todos.length}`,
 		toolName: TOOL_NAME,
 		content: [{ type: "text", text: todos.length === 0 ? "cleared" : "updated" }],
-		details: { version: TODO_DETAILS_VERSION, todos },
+		details: { version: TODO_DETAILS_VERSION, todos: todos as unknown as JsonValue },
 		isError: false,
 		timestamp: 0,
 	};

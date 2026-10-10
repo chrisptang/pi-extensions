@@ -9,7 +9,7 @@ export class LspSessionScope {
 		if (this.#closing) throw new Error("LSP session is closing; request aborted.");
 	}
 
-	context(ctx: ExtensionContext): ExtensionContext {
+	context<T extends ExtensionContext>(ctx: T): T {
 		// Keep Pi's lazy context getters. Never reach an old UI getter once shutdown starts.
 		return Object.create(ctx, {
 			ui: {

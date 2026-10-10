@@ -44,6 +44,7 @@ type Screen =
 	| "tools"
 	| "reliability"
 	| "responses"
+	| "performance"
 	| "privacy";
 type Action = "setRange" | "clearData";
 
@@ -80,6 +81,7 @@ export function createAnalyticsMenu(
 				items: [
 					{ id: "range", label: "Change time range", to: "range" },
 					{ id: "responses", label: "Response cycles", to: "responses" },
+					{ id: "performance", label: "Model performance", to: "performance" },
 					{ id: "tools", label: "Tools", to: "tools" },
 					{ id: "skills", label: "Skills", to: "skills" },
 					{ id: "reliability", label: "Provider reliability", to: "reliability" },
@@ -126,6 +128,12 @@ export function createAnalyticsMenu(
 				kind: "detail",
 				title: `Response cycles · ${RANGE_LABELS[state.rangeId]}`,
 				lines: responseLines(state.result),
+				hint: "back",
+			}),
+			performance: ({ state }) => ({
+				kind: "detail",
+				title: `Model performance · ${RANGE_LABELS[state.rangeId]}`,
+				lines: performanceLines(state.result),
 				hint: "back",
 			}),
 			privacy: ({ state }) => ({
@@ -609,6 +617,36 @@ function responseLines(result: AnalyticsLoadResult): string[] {
 		metric("4–6 calls", value.distribution.fourToSix),
 		metric("7+ calls", value.distribution.sevenPlus),
 	];
+}
+
+function performanceLines(result: AnalyticsLoadResult): string[] {
+	if (result.kind === "unavailable") return [result.message];
+	const models = result.snapshot.performance;
+	if (models.length === 0) {
+		return ["No model calls recorded in this range."];
+	}
+	const lines = [
+		"TTFT spans request start to the first provider stream event;",
+		"tok/s divides output tokens by the stream time after that event.",
+		"",
+	];
+	for (const item of models) {
+		lines.push(`${modelLabel(item)} · ${formatCount(item.calls, "call")}`);
+		lines.push(
+			metric(
+				"  TTFT avg / p95 / max",
+				`${formatDecimal(item.timeToFirstToken.average)} / ${formatDecimal(item.timeToFirstToken.p95)} / ${formatDecimal(item.timeToFirstToken.maximum)} ms · ${formatCount(item.timeToFirstToken.measured, "sample")}`,
+			),
+		);
+		lines.push(
+			metric(
+				"  tok/s avg / p95 / max",
+				`${formatDecimal(item.outputTokensPerSecond.average)} / ${formatDecimal(item.outputTokensPerSecond.p95)} / ${formatDecimal(item.outputTokensPerSecond.maximum)} · ${formatCount(item.outputTokensPerSecond.measured, "sample")}`,
+			),
+		);
+		lines.push("");
+	}
+	return lines;
 }
 
 function privacyLines(state: AnalyticsMenuState): string[] {

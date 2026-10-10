@@ -15,6 +15,7 @@ import { pathToFileURL } from "node:url";
 import {
 	DefaultResourceLoader,
 	type ExtensionContext,
+	type ExtensionToolContext,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { test } from "vitest";
@@ -193,7 +194,7 @@ test("generated runtime is loadable by Pi's Jiti resource loader", async () => {
 					widgets.push({ key, content });
 				},
 			},
-		} as unknown as ExtensionContext;
+		} as unknown as ExtensionToolContext;
 		await emit(extension.handlers, "session_start", ctx);
 		assert.deepEqual(widgets.at(-1), { key: "todo", content: undefined });
 

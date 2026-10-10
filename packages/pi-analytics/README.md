@@ -9,6 +9,7 @@ Measure local model, skill, tool, and provider reliability activity without stor
 - Collects content-free metrics automatically after installation.
 - Counts settled response cycles, logical LLM calls, skill activations, tool calls, and observed provider errors.
 - Reports tool failures and duration, model attribution, and per-response call distributions.
+- Reports per-model time to first token and output tokens per second with average, p95, and maximum.
 - Separates recovered provider errors from terminal failures.
 - Reports sessions, active days, streaks, an activity heatmap, and per-project totals from imported session history.
 - Provides Today, rolling 7-day, rolling 30-day, and all-time views through `/analytics`.
@@ -53,7 +54,7 @@ The terminal dashboard opens **Tokens & cost** for the last seven rolling days:
 ```text
 Analytics · 7D
 
-[Tokens & cost]  Response cycles  Tools  Skills  Provider reliability  Sessions & activity
+[Tokens & cost]  Response cycles  Model performance  Tools  Skills  Provider reliability  Sessions & activity
 
 Input (uncached)          120k
 Cache read               880k
@@ -94,6 +95,16 @@ Retries, overflow-compaction recovery, tool follow-ups, and queued continuations
 
 An **LLM call** is one logical provider generation.
 A provider can make several HTTP attempts within it, so `429 → 429 → 200` counts as one LLM call, three observed HTTP responses, two provider errors, and one recovered generation.
+
+### Model performance
+
+**Model performance** groups completed LLM calls per provider/model and reports two distributions with average, p95, and maximum:
+
+- **TTFT** is the time from request start to the first provider stream event Pi parses. That event can precede visible content—for example Anthropic's `message_start`—so it approximates rather than exactly matches the first rendered token; the approximation is uniform across providers.
+- **tok/s** divides the call's reported output tokens by the stream time after that first event, approximating decode speed.
+
+Calls recorded before first-token collection, calls without provider usage counters, and calls that ended before any stream event are excluded from the distributions but still counted in the call total.
+Stream timing requires Pi 1.1 or newer, which introduced the `provider_stream_event` hook; on older hosts the distributions stay unmeasured while all other analytics continue to work.
 
 ### Skills
 

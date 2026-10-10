@@ -19,6 +19,7 @@ function wrapMetrics(text: string, width: number): string[] {
 export const ANALYTICS_TABS = [
 	{ id: "tokens", label: "Tokens & cost" },
 	{ id: "responses", label: "Response cycles" },
+	{ id: "performance", label: "Model performance" },
 	{ id: "tools", label: "Tools" },
 	{ id: "skills", label: "Skills" },
 	{ id: "reliability", label: "Provider reliability" },

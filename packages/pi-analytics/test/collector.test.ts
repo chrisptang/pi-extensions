@@ -98,6 +98,23 @@ test("skill activation is deduplicated and explicit user use takes precedence", 
 	);
 });
 
+test("collector keeps only the first stream event of a pending generation", () => {
+	const collector = new ResponseCollector();
+	collector.recordFirstToken({ now: 1 });
+	collector.begin({ id: "run-ft", now: 0, triggerSource: "interactive", model });
+	collector.beginGeneration({ id: "gen-1", now: 10, model });
+	collector.recordFirstToken({ now: 15 });
+	collector.recordFirstToken({ now: 16 });
+	collector.finishGeneration({ now: 20, stopReason: "stop" });
+	collector.recordFirstToken({ now: 21 });
+	collector.beginGeneration({ id: "gen-2", now: 30, model });
+	collector.recordFirstToken({ now: 35 });
+
+	const run = collector.settle(40);
+	assert.equal(run?.generations[0]?.firstTokenAtMs, 15);
+	assert.equal(run?.generations[1]?.firstTokenAtMs, 35);
+});
+
 test("collector ignores duplicate or out-of-run events", () => {
 	const collector = new ResponseCollector();
 	assert.equal(collector.settle(1), undefined);

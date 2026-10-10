@@ -65,7 +65,7 @@ for (const kind of ["diagnostics", "fix"] as const) {
 					{ root: f.root, path: "main.go", paths: ["main.go"], write: true },
 					f.controller.signal,
 					undefined,
-					ctx,
+					runner.createToolContext("test", f.controller.signal),
 				),
 			);
 			await f.ready(kind === "fix" ? "textDocument/codeAction" : "initialize");

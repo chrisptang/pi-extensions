@@ -48,6 +48,7 @@ const emptySnapshot: AnalyticsSnapshot = {
 		maximum: 0,
 		distribution: { one: 0, twoToThree: 0, fourToSix: 0, sevenPlus: 0 },
 	},
+	performance: [],
 	tokens: {
 		input: 0,
 		output: 0,
@@ -168,6 +169,7 @@ test("factory registers lifecycle hooks without constructing or opening storage"
 		"before_provider_request",
 		"input",
 		"message_end",
+		"provider_stream_event",
 		"session_shutdown",
 		"session_start",
 		"tool_execution_end",
@@ -418,6 +420,33 @@ test("store construction failures are content-free and keep the command availabl
 	assert.match(message ?? "", /No analytics are being collected/);
 	assert.doesNotMatch(message ?? "", /private\/user/);
 	assert.ok(mock.commands.has("analytics"));
+});
+
+test("the first provider stream event timestamp reaches the recorded generation", async () => {
+	const store = new FakeStore();
+	const mock = createMockPi();
+	createAnalyticsExtension({ createStore: () => store })(mock.pi);
+	const { ctx } = lifecycleContext();
+	await emit(mock, "session_start", { reason: "startup" }, ctx);
+	await emit(
+		mock,
+		"before_agent_start",
+		{ prompt: "run", systemPromptOptions: { skills: [] } },
+		ctx,
+	);
+	await emit(mock, "before_provider_request", { payload: {} }, ctx);
+	await emit(
+		mock,
+		"provider_stream_event",
+		{ provider: "openai", api: "openai-responses", model: "gpt-test", data: {} },
+		ctx,
+	);
+	await emit(mock, "message_end", { message: { role: "assistant", stopReason: "stop" } }, ctx);
+	await emit(mock, "agent_settled", {}, ctx);
+
+	const generation = store.runs.at(-1)?.generations[0];
+	assert.equal(typeof generation?.firstTokenAtMs, "number");
+	assert.ok((generation?.firstTokenAtMs ?? 0) >= (generation?.startedAtMs ?? 0));
 });
 
 test("assistant usage from message_end reaches the recorded run", async () => {

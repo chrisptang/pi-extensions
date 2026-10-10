@@ -143,11 +143,10 @@ test("installed extension filters actual Pi prompt/completion, keeps files reada
 		const filtered = await runner.emitBeforeAgentStart(
 			"test",
 			undefined,
-			ctx.getSystemPrompt(),
 			ctx.getSystemPromptOptions(),
 		);
-		assert.ok(filtered?.systemPrompt?.includes("<name>keep</name>"));
-		assert.ok(!filtered?.systemPrompt?.includes("<name>hide</name>"));
+		assert.ok(filtered.systemPromptOptions.forceSystemPrompt?.includes("<name>keep</name>"));
+		assert.ok(!filtered.systemPromptOptions.forceSystemPrompt?.includes("<name>hide</name>"));
 		assert.equal(
 			loader.getSkills().skills.length,
 			3,
@@ -209,11 +208,10 @@ test("installed extension filters actual Pi prompt/completion, keeps files reada
 			const next = await reloaded.extensionRunner.emitBeforeAgentStart(
 				"test",
 				undefined,
-				reloadCtx.getSystemPrompt(),
 				reloadCtx.getSystemPromptOptions(),
 			);
-			assert.ok(next?.systemPrompt?.includes("<name>hide</name>"));
-			assert.ok(!next?.systemPrompt?.includes("<name>keep</name>"));
+			assert.ok(next.systemPromptOptions.forceSystemPrompt?.includes("<name>hide</name>"));
+			assert.ok(!next.systemPromptOptions.forceSystemPrompt?.includes("<name>keep</name>"));
 		} finally {
 			reloaded.dispose();
 		}

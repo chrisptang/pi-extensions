@@ -263,6 +263,9 @@ function sanitizeEntryForDisplay(entry: SessionEntry): SessionEntry {
 				...entry,
 				name: entry.name === undefined ? undefined : sanitizeSingleLine(entry.name),
 			};
+		default:
+			// Usage and context-edit entries carry no display text to sanitize.
+			return entry;
 	}
 }
 
