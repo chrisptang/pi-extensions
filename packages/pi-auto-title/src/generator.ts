@@ -10,7 +10,10 @@ RULES:
 4. Specificity: Focus on the specific task or topic (e.g. "Fix Redis connection timeout", "Add JWT auth middleware"), avoid generic phrases like "Code discussion" or "Help with issue".`;
 
 const PREFIX_REGEX = /^(title|subject|topic|session|标题|主题|会话)\s*[:：]\s*/i;
-const SURROUNDING_QUOTES_REGEX = /^["'“”«»`]+|["'“”«»`]+$/g;
+// Edge characters models like to wrap or leak around titles: quotes plus
+// ASCII and CJK brackets (e.g. a stray "】【" left by bracket-quoted drafts).
+const SURROUNDING_MARKS_REGEX =
+	/^["'“”«»`「」『』【】〈〉《》〔〕〖〗()[\]（）［］]+|["'“”«»`「」『』【】〈〉《》〔〕〖〗()[\]（）［］]+$/g;
 const TRAILING_PUNCTUATION_REGEX = /[.。!！;；,，]+$/;
 
 export function cleanTitle(raw: string, maxLength = 40): string {
@@ -23,12 +26,12 @@ export function cleanTitle(raw: string, maxLength = 40): string {
 	// Remove prefixes like "Title:"
 	text = text.replace(PREFIX_REGEX, "").trim();
 
-	// Remove quotes
-	text = text.replace(SURROUNDING_QUOTES_REGEX, "").trim();
+	// Remove quotes and surrounding brackets
+	text = text.replace(SURROUNDING_MARKS_REGEX, "").trim();
 
 	// Remove any remaining prefix if repeatedly present
 	text = text.replace(PREFIX_REGEX, "").trim();
-	text = text.replace(SURROUNDING_QUOTES_REGEX, "").trim();
+	text = text.replace(SURROUNDING_MARKS_REGEX, "").trim();
 
 	// Collapse internal whitespace
 	text = text.replace(/\s+/g, " ");

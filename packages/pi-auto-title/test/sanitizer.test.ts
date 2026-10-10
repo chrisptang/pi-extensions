@@ -9,6 +9,14 @@ test("cleanTitle removes surrounding quotes and prefixes", () => {
 	assert.equal(cleanTitle("`session: Fix Auth Middleware`"), "Fix Auth Middleware");
 });
 
+test("cleanTitle removes surrounding CJK and ASCII brackets", () => {
+	assert.equal(cleanTitle("解释缓存与 CDN】【"), "解释缓存与 CDN");
+	assert.equal(cleanTitle("【灰度发布设计】"), "灰度发布设计");
+	assert.equal(cleanTitle("(Fix Login Bug)"), "Fix Login Bug");
+	assert.equal(cleanTitle("《优化方案讨论》"), "优化方案讨论");
+	assert.equal(cleanTitle("「Deploy Pipelines」"), "Deploy Pipelines");
+});
+
 test("cleanTitle removes markdown formatting and fences", () => {
 	assert.equal(cleanTitle("**Fix Memory Leak**"), "Fix Memory Leak");
 	assert.equal(cleanTitle("```\nOptimize Query Performance\n```"), "Optimize Query Performance");

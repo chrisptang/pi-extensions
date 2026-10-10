@@ -8,7 +8,7 @@ Pi defaults to un-named sessions that fall back to raw message previews. `pi-aut
 
 ## ✨ Features
 
-- **Turn 2 Trigger**: Waits until the second user turn settles before naming, avoiding noisy or premature titles from exploratory first prompts.
+- **Turn 2 Trigger**: Names the session at the first idle settle once the second user turn has happened, avoiding noisy or premature titles from exploratory first prompts.
 - **Model Alias Integration**: Defaults to resolving the `haiku` alias from `~/.pi/agent/model-alias.json`, with robust multi-tier fallback (catalog search, fast models, or current model).
 - **Silent & Non-intrusive**: Executes asynchronously during idle boundaries (`agent_settled`), updating the UI title bar and session list with zero toast interruptions.
 - **Manual Intent Respected**: Never overwrites user-specified names set via `--name`, `/name`, or RPC.
@@ -70,7 +70,7 @@ Configure preferences in `~/.pi/agent/pi-auto-title.json` or project-local `<wor
 | --- | --- | --- | --- |
 | `enabled` | `boolean` | `true` | Enable or disable automatic session naming. |
 | `model` | `string` | `"haiku"` | Model alias or `provider/model-id` used for title generation. |
-| `triggerTurn` | `number` | `2` | User interaction round on which to trigger titling (1-indexed). |
+| `triggerTurn` | `number` | `2` | Minimum user interaction rounds before titling triggers at the next idle settle (1-indexed). |
 | `maxTitleLength` | `number` | `40` | Maximum character length for generated titles. |
 | `fallbackToCurrentModel` | `boolean` | `true` | Fallback to active session model if alias resolution fails. |
 

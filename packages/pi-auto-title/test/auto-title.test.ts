@@ -122,6 +122,88 @@ test("auto-title triggers on turn 2 agent_settled and sets session name silently
 	assert.equal(completeCalledWith, null);
 });
 
+test("auto-title counts real user turns, not agent runs", async () => {
+	const mock = createMockPi();
+	autoTitle(mock.pi);
+
+	const entries: SessionEntry[] = [
+		{
+			type: "message",
+			id: "m1",
+			parentId: null,
+			timestamp: "2026-10-01T00:00:01Z",
+			message: { role: "user", content: "Implement gray rollout" },
+		} as unknown as SessionEntry,
+		{
+			type: "message",
+			id: "m2",
+			parentId: "m1",
+			timestamp: "2026-10-01T00:00:02Z",
+			message: { role: "assistant", content: "Working on it." },
+		} as unknown as SessionEntry,
+	];
+
+	let completeCalled = false;
+	const mockModel = { provider: "anthropic", id: "haiku" } as unknown as Model<Api>;
+	const mockRegistry = {
+		find: () => mockModel,
+		hasConfiguredAuth: () => true,
+		getAvailable: () => [mockModel],
+		complete: async () => {
+			completeCalled = true;
+			return { role: "assistant", content: [{ type: "text", text: "Gray Rollout" }] };
+		},
+	};
+
+	const mockContext = createMockContext({
+		model: mockModel,
+		sessionManager: {
+			getSessionId: () => "sess-overshoot",
+			getSessionName: () => mock.rawPi.getSessionName(),
+			getBranch: () => entries,
+			getEntries: () => entries,
+		} as unknown as ExtensionCommandContext["sessionManager"],
+		modelRegistry: mockRegistry as unknown as ExtensionCommandContext["modelRegistry"],
+	});
+
+	emit(mock, "session_start", { type: "session_start", reason: "new" }, mockContext.ctx);
+
+	// Injected turns (e.g. subagent completions) start agent runs but are not
+	// user turns; several of them must not satisfy or overshoot the trigger.
+	emit(mock, "agent_start", { type: "agent_start" }, mockContext.ctx);
+	emit(mock, "agent_settled", { type: "agent_settled" }, mockContext.ctx);
+	emit(mock, "agent_start", { type: "agent_start" }, mockContext.ctx);
+	emit(mock, "agent_start", { type: "agent_start" }, mockContext.ctx);
+	emit(mock, "agent_settled", { type: "agent_settled" }, mockContext.ctx);
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	assert.equal(completeCalled, false);
+
+	// The second real user turn triggers titling at its settle.
+	entries.push(
+		{
+			type: "message",
+			id: "m3",
+			parentId: "m2",
+			timestamp: "2026-10-01T00:00:03Z",
+			message: { role: "user", content: "Also verify the contract" },
+		} as unknown as SessionEntry,
+		{
+			type: "message",
+			id: "m4",
+			parentId: "m3",
+			timestamp: "2026-10-01T00:00:04Z",
+			message: { role: "assistant", content: "Done." },
+		} as unknown as SessionEntry,
+	);
+	emit(mock, "agent_start", { type: "agent_start" }, mockContext.ctx);
+	emit(mock, "agent_settled", { type: "agent_settled" }, mockContext.ctx);
+
+	await new Promise((resolve) => setTimeout(resolve, 50));
+
+	assert.equal(completeCalled, true);
+	assert.equal(mock.rawPi.getSessionName(), "Gray Rollout");
+});
+
 test("auto-title does not overwrite an existing session name", async () => {
 	const mock = createMockPi();
 	mock.rawPi.setSessionName("Manual User Name");

@@ -1,8 +1,4 @@
-import type {
-	ExtensionAPI,
-	ExtensionCommandContext,
-	ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { resolveTitleModel } from "./alias.js";
 import { buildTitleGenerationContext, extractCompactTurns } from "./context.js";
 import { generateSessionTitle } from "./generator.js";
@@ -10,30 +6,25 @@ import { loadSettings } from "./settings.js";
 
 interface SessionTitlingState {
 	named: boolean;
-	userTurnCount: number;
 	inFlightController?: AbortController;
 }
 
 export default function autoTitle(pi: ExtensionAPI): void {
 	let state: SessionTitlingState = {
 		named: false,
-		userTurnCount: 0,
 	};
 
-	const resetState = (ctx: ExtensionContext) => {
+	const resetState = () => {
 		state.inFlightController?.abort();
 		const currentName = pi.getSessionName();
-		const existingEntries = ctx.sessionManager?.getEntries ? ctx.sessionManager.getEntries() : [];
-		const existingTurns = extractCompactTurns(existingEntries).length;
 
 		state = {
 			named: currentName !== undefined && currentName.trim().length > 0,
-			userTurnCount: existingTurns,
 		};
 	};
 
-	pi.on("session_start", (_event, ctx) => {
-		resetState(ctx);
+	pi.on("session_start", () => {
+		resetState();
 	});
 
 	pi.on("session_info_changed", (event) => {
@@ -42,10 +33,6 @@ export default function autoTitle(pi: ExtensionAPI): void {
 		} else {
 			state.named = false;
 		}
-	});
-
-	pi.on("agent_start", () => {
-		state.userTurnCount++;
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
@@ -61,7 +48,11 @@ export default function autoTitle(pi: ExtensionAPI): void {
 			return;
 		}
 
-		if (state.userTurnCount !== settings.triggerTurn) {
+		// Count real user turns from the session, not agent runs: queued
+		// messages and injected turns (e.g. subagent completions) also start
+		// runs and must not satisfy or overshoot the trigger.
+		const entries = ctx.sessionManager.getEntries();
+		if (extractCompactTurns(entries).length < settings.triggerTurn) {
 			return;
 		}
 
@@ -82,7 +73,6 @@ export default function autoTitle(pi: ExtensionAPI): void {
 
 			if (!model) return;
 
-			const entries = ctx.sessionManager.getEntries();
 			const contextText = buildTitleGenerationContext(entries);
 			if (!contextText) return;
 
@@ -188,11 +178,12 @@ export default function autoTitle(pi: ExtensionAPI): void {
 
 			// Default status view
 			const currentName = pi.getSessionName() ?? "(none)";
+			const userTurns = extractCompactTurns(cmdCtx.sessionManager.getEntries()).length;
 			const info = [
 				`Auto-Title Status:`,
 				`  • Current title: ${currentName}`,
 				`  • Configured model: ${settings.model}`,
-				`  • Trigger turn: ${settings.triggerTurn} (Current user turns: ${state.userTurnCount})`,
+				`  • Trigger turn: ${settings.triggerTurn} (Current user turns: ${userTurns})`,
 				`  • Enabled: ${settings.enabled}`,
 				``,
 				`Usage:`,
