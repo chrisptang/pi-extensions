@@ -82,6 +82,7 @@ export interface StarshipRuntimeSnapshot {
 	cwd: string;
 	homeDir?: string;
 	gitRoot?: string;
+	sessionName?: string;
 	model?: { provider: string; id: string };
 	thinkingLevel: string;
 	turnCount: number;

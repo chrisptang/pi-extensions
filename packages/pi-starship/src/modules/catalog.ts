@@ -21,6 +21,7 @@ import { languageModules } from "./languages.js";
 import { modelModule } from "./model.js";
 import { packageModule } from "./package.js";
 import { providerModule } from "./provider.js";
+import { sessionNameModule } from "./session-name.js";
 import { thinkingModule } from "./thinking.js";
 import { timeModule } from "./time.js";
 import { tokensModule } from "./tokens.js";
@@ -33,6 +34,7 @@ const MODULE_IMPLEMENTATIONS = [
 	modelModule,
 	thinkingModule,
 	directoryModule,
+	sessionNameModule,
 	gitWorktreeModule,
 	gitBranchModule,
 	githubPrModule,
@@ -100,6 +102,7 @@ const MODULE_DESCRIPTIONS = {
 	provider: "Current Pi model provider.",
 	python: "Python version, virtual environment, and pyenv state.",
 	rust: "Rust toolchain detected in the current workspace.",
+	session_name: "Current session display name.",
 	terraform: "Active Terraform workspace and version.",
 	thinking: "Current Pi thinking level or streaming state.",
 	time: "Current local time.",

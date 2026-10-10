@@ -166,12 +166,15 @@ test("unreadable Starship settings report an I/O diagnostic instead of appearing
 	}
 });
 
-test("built-in example is a palette-free nine-module Starship document", () => {
+test("built-in example is a palette-free ten-module Starship document", () => {
 	const root = mkdtempSync(join(tmpdir(), "pi-starship-config-"));
 	const path = join(root, CONFIG_FILE_NAME);
 	try {
 		assert.match(BUILT_IN_EXAMPLE, /^format = """/mu);
-		assert.match(BUILT_IN_EXAMPLE, /\$brand\\\n\$model\\\n\$thinking\\\n\$directory/u);
+		assert.match(
+			BUILT_IN_EXAMPLE,
+			/\$brand\\\n\$model\\\n\$thinking\\\n\$directory\\\n\$session_name/u,
+		);
 		assert.match(
 			BUILT_IN_EXAMPLE,
 			/\$activity\\\n\\n\\\n\$tokens\\\n\$cache\\\n\$context\\\n\$cost/u,
@@ -186,6 +189,7 @@ test("built-in example is a palette-free nine-module Starship document", () => {
 				"$model",
 				"$thinking",
 				"$directory",
+				"$session_name",
 				"$git_branch",
 				"$git_status",
 				"$activity\n",

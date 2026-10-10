@@ -651,6 +651,7 @@ test("turn module counts user messages instead of repeated LLM turns", async () 
 					{ type: "message", message: { role: "user" } },
 				],
 				getEntries: () => [],
+				getSessionName: () => undefined,
 			},
 		});
 		await emit(mock.events, "session_start", {}, context.ctx);
@@ -723,7 +724,11 @@ test("TUI footer uses all-entry usage totals and marks subscription-backed cost"
 			mode: "tui",
 			model: { provider: "openai", id: "gpt-5" },
 			modelRegistry: { isUsingOAuth: () => oauth },
-			sessionManager: { getEntries: () => entries, getBranch: () => [latest] },
+			sessionManager: {
+				getEntries: () => entries,
+				getBranch: () => [latest],
+				getSessionName: () => undefined,
+			},
 		});
 		await emit(mock.events, "session_start", {}, context.ctx);
 		const footer = (context.footer as FooterFactory)(

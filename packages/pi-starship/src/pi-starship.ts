@@ -447,6 +447,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 	});
 
 	pi.on("model_select", () => refresh());
+	pi.on("session_info_changed", () => refresh());
 	pi.on("thinking_level_select", (event) => {
 		runtime.thinkingLevel = event.level;
 		refresh();
@@ -583,6 +584,7 @@ function runtimeSnapshot(
 		cwd: ctx.cwd,
 		homeDir: homedir(),
 		gitRoot: runtime.git?.root,
+		sessionName: ctx.sessionManager.getSessionName(),
 		model: ctx.model ? { provider: ctx.model.provider, id: ctx.model.id } : undefined,
 		thinkingLevel: runtime.thinkingLevel,
 		turnCount: userTurnCount(ctx),

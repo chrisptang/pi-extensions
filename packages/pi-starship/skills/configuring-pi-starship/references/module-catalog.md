@@ -26,7 +26,7 @@ All enum values are case-sensitive.
 
 ## Catalog order
 
-`brand` → `provider` → `model` → `thinking` → `directory` → `git_worktree` → `git_branch` → `github_pr` → `git_commit` → `git_state` → `git_metrics` → `git_status` → `package` → `nodejs` → `python` → `rust` → `golang` → `bun` → `deno` → `mise` → `direnv` → `conda` → `pixi` → `nix_shell` → `guix_shell` → `docker_context` → `kubernetes` → `terraform` → `aws` → `gcloud` → `azure` → `openstack` → `os` → `container` → `hostname` → `username` → `activity` → `context` → `tokens` → `cache` → `cost` → `time` → `turn` → `fill` → `extension_status`
+`brand` → `provider` → `model` → `thinking` → `directory` → `session_name` → `git_worktree` → `git_branch` → `github_pr` → `git_commit` → `git_state` → `git_metrics` → `git_status` → `package` → `nodejs` → `python` → `rust` → `golang` → `bun` → `deno` → `mise` → `direnv` → `conda` → `pixi` → `nix_shell` → `guix_shell` → `docker_context` → `kubernetes` → `terraform` → `aws` → `gcloud` → `azure` → `openstack` → `os` → `container` → `hostname` → `username` → `activity` → `context` → `tokens` → `cache` → `cost` → `time` → `turn` → `fill` → `extension_status`
 
 ## Module schemas
 
@@ -143,6 +143,22 @@ Additional options:
 | `home_symbol` | string | `"~"` | May be empty. Replacement for the current user's home-directory prefix. |
 | `use_os_path_sep` | boolean | `true` | Uses the platform path separator instead of always rendering `/`. |
 | `substitutions` | string-to-string table | `{}` | Keys and values are strings. Ordered literal replacements applied to the home- or repository-contracted display path before component truncation. |
+
+### `session_name`
+
+Current session display name.
+
+- Format variables: `$symbol`, `$name`.
+- Style variables in `format`: `$style`.
+- Default `format`: `"[ $symbol $name ]($style)"`.
+- Default `symbol`: `"✎"`.
+- Default `disabled`: `false`.
+
+Accepted style fields:
+
+| Field | Default |
+| --- | --- |
+| `style` | `"white"` |
 
 ### `git_worktree`
 

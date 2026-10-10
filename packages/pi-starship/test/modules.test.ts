@@ -764,6 +764,30 @@ test("directory preserves POSIX backslashes and strips terminal controls", {
 	);
 });
 
+test("session name renders when set, hides when unnamed, and strips terminal controls", () => {
+	const config = structuredClone(BUILT_IN_CONFIG);
+	config.format = "$session_name";
+	config.formatAst = parseFormat(config.format);
+	config.modules.session_name.format = "$name";
+	config.modules.session_name.formatAst = parseFormat(config.modules.session_name.format);
+
+	assert.equal(
+		stripAnsi(renderStatusline(config, fixture({ sessionName: "灰度登录切换" })).ansi),
+		"灰度登录切换",
+	);
+	assert.equal(stripAnsi(renderStatusline(config, fixture({ sessionName: undefined })).ansi), "");
+	assert.equal(stripAnsi(renderStatusline(config, fixture({ sessionName: "   " })).ansi), "");
+	assert.equal(
+		stripAnsi(
+			renderStatusline(
+				config,
+				fixture({ sessionName: "name\x1b]8;;https://evil.example\x07click\x1b]8;;\x07\u202e" }),
+			).ansi,
+		),
+		"nameclick",
+	);
+});
+
 test("Git branch and commit honor Starship truncation options", () => {
 	const config = structuredClone(BUILT_IN_CONFIG);
 	config.format = "$git_branch|$git_commit";

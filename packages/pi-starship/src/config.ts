@@ -78,6 +78,7 @@ $brand\
 $model\
 $thinking\
 $directory\
+$session_name\
 $git_branch\
 $git_status\
 $activity\
@@ -88,7 +89,7 @@ $context\
 $cost"""`;
 
 const BUILT_IN_FORMAT =
-	"$brand$model$thinking$directory$git_branch$git_status$activity\n$tokens$cache$context$cost";
+	"$brand$model$thinking$directory$session_name$git_branch$git_status$activity\n$tokens$cache$context$cost";
 
 const BUILT_IN_MODULES = Object.fromEntries(
 	MODULE_DEFINITIONS.map(({ name, defaults, styleDefaults, displayDefaults, options }) => [

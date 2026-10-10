@@ -11,6 +11,7 @@ Use this authoritative public reference whenever a question or change involves a
 | `model` | `$symbol`, `$model` | Current model name |
 | `thinking` | `$symbol`, `$level` | Thinking level |
 | `directory` | `$symbol`, `$path`, `$full_path` | Current working directory |
+| `session_name` | `$symbol`, `$name` | Current session display name |
 | `git_worktree` | `$symbol`, `$name`, `$path` | Linked worktree name and top-level path |
 | `git_branch` | `$symbol`, `$branch`, `$remote_name`, `$remote_branch` | Local branch and upstream |
 | `github_pr` | `$symbol`, `$number`, `$link`, `$state`, `$checks`, `$review`, `$status` | Current-branch GitHub pull request |
