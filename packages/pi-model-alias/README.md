@@ -13,6 +13,7 @@ Give your models short names, switch with `/ma sonnet` instead of a full `provid
 - Runs a skill on its own model: `/skill:<name>` switches before expansion and restores the previous model once the agent settles.
 - Attaches an optional thinking level to an alias, either as a field or as a `:high` suffix.
 - Keeps the current model and thinking level across `/new`, where Pi alone would fall back to the settings default.
+- Uses the optional `compact` alias for context summaries without switching the session model.
 - Reloads definitions from disk with `/model-alias-reload`, no restart required.
 - Warns and keeps going on a malformed config rather than failing the session.
 
@@ -154,6 +155,27 @@ The `skills` map gives a skill its own model, keyed by skill name:
 A skill target may be a model reference, a candidate pool, or the name of an alias defined above.
 An alias name is accepted only as a lone target — mixing an alias name into a candidate list is rejected, because the intended semantics are ambiguous.
 
+### Compaction model
+
+Set the exact alias name `compact` to choose a model for manual `/compact`, automatic compaction, and overflow recovery:
+
+```json
+{
+  "aliases": {
+    "compact": {
+      "models": ["provider/model-id"],
+      "thinkingLevel": "off"
+    }
+  }
+}
+```
+
+The existing string and candidate-pool forms also work. A successful pick is held using the same alias state as `/ma compact`. Its thinking level applies only to the summary; when omitted, the summary inherits the session's current level. The main session model and thinking level stay unchanged, and Pi still controls the trigger, retained history, and summary format.
+
+Without `compact`, Pi's default compaction runs unchanged. If the alias is unavailable or its request fails, the extension warns in TUI/RPC mode and hands compaction back to Pi's current-model path. Cancellation stops the operation without a fallback request. The alias attempt does not add session-level retries or try each candidate in turn; Pi's normal retry behavior remains on the fallback path.
+
+Choose a model with enough context capacity and reliable summarization. Configuring another provider sends the history being summarized to that provider. Edit the existing alias file and run `/model-alias-reload` to apply changes; no additional setting or command is required.
+
 ## 💬 Commands
 
 | Command | Description |
@@ -163,6 +185,8 @@ An alias name is accepted only as a lone target — mixing an alias name into a 
 | `/model-alias-reload` | Re-reads `model-alias.json` and reports how many aliases loaded. |
 
 ## 🚧 Limitations
+
+- Custom compaction handlers do not compose automatically: Pi uses the last non-empty handler result. Another extension that returns a compaction result can replace the `compact` alias result, or be replaced by it, depending on registration order.
 
 - A per-skill model changes **which model** runs the skill, not **where** it runs. Pi skills are inline prompt expansion, so the skill still shares the main session's conversation and context; this is not isolated execution. Use `pi-subagents` when you need a separate context.
 - Switching models invalidates the provider's prompt cache, so a per-skill override or a rate-limit rotation trades cache hits for model choice. Holding a pick means a pool pays this only on the first switch.
@@ -180,7 +204,7 @@ An alias name is accepted only as a lone target — mixing an alias name into a 
 packages/pi-model-alias/
 ├── src/                               # Authoritative implementation and helpers
 │   ├── index.ts                       # Thin Pi entrypoint
-│   ├── model-alias.ts                 # Commands, skill interception, and restore
+│   ├── model-alias.ts                 # Commands, skill models, compaction, and restore
 │   ├── aliases.ts                     # Config loading, parsing, and resolution
 │   ├── cli-model.ts                   # Reads the startup `--model` value from argv
 │   └── cooldown.ts                    # Rate-limit cooldowns and retry-after parsing

@@ -1,6 +1,7 @@
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import {
+	compact,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
@@ -71,6 +72,8 @@ export default function modelAlias(pi: ExtensionAPI): void {
 	 * a status but not a model, so this is what a rate limit gets attributed to.
 	 */
 	let inFlight: { alias: string; model: Model<Api> } | undefined;
+	/** Reload emits shutdown without aborting Pi's compaction signal. */
+	let pendingCompaction: AbortController | undefined;
 
 	const aliases = (warn?: (message: string) => void): LoadedAliases => {
 		loaded ??= loadAliases(getAgentDir(), warn);
@@ -166,6 +169,106 @@ export default function modelAlias(pi: ExtensionAPI): void {
 			inFlight = undefined;
 			ctx.ui.notify(`Loaded ${reloaded.aliases.size} aliases.`, "info");
 		},
+	});
+
+	pi.on("session_before_compact", async (event, ctx) => {
+		if (event.signal.aborted) return { cancel: true };
+		const operation = new AbortController();
+		pendingCompaction = operation;
+		const signal = AbortSignal.any([event.signal, operation.signal]);
+		const registry = ctx.modelRegistry;
+		const thinkingLevel = ctx.thinkingLevel;
+		const notify = ctx.hasUI ? ctx.ui.notify.bind(ctx.ui) : undefined;
+		try {
+			const definitions = aliases();
+			const definition = definitions.aliases.get("compact");
+			if (!definition) return;
+			const resolved = resolveAlias(definition, registryLookup(ctx, "compact"));
+			if (!resolved) throw new Error("No usable compact candidate");
+			const provider = registry.getProvider(resolved.model.provider);
+			if (!provider) throw new Error("No compact provider");
+
+			// Native preparation already carries non-hook details, but skips hook entries.
+			const preparation = {
+				...event.preparation,
+				fileOps: {
+					read: new Set(event.preparation.fileOps.read),
+					written: new Set(event.preparation.fileOps.written),
+					edited: new Set(event.preparation.fileOps.edited),
+				},
+			};
+			const previous = event.branchEntries
+				.slice()
+				.reverse()
+				.find((entry) => entry.type === "compaction");
+			if (previous?.type === "compaction" && previous.fromHook) {
+				const details = previous.details as
+					| { readFiles?: unknown; modifiedFiles?: unknown }
+					| undefined;
+				if (
+					Array.isArray(details?.readFiles) &&
+					details.readFiles.every((file) => typeof file === "string") &&
+					Array.isArray(details.modifiedFiles) &&
+					details.modifiedFiles.every((file) => typeof file === "string")
+				) {
+					for (const file of details.readFiles) preparation.fileOps.read.add(file);
+					for (const file of details.modifiedFiles) preparation.fileOps.edited.add(file);
+				}
+			}
+			const customInstructions = event.customInstructions;
+			// This compatibility auth API cannot be cancelled; discard its result on abort.
+			const auth = await registry.getApiKeyAndHeaders(resolved.model);
+			if (signal.aborted) return { cancel: true };
+			if (!auth.ok) throw new Error("Compact authentication failed");
+			const requestModel = auth.baseUrl
+				? { ...resolved.model, baseUrl: auth.baseUrl }
+				: resolved.model;
+			// Pi 0.85's registry lacks streamSimple. Preserve null header deletions at
+			// the provider boundary; compact's header parameter only accepts strings.
+			const streamFn: StreamFn = async (model, context, options) => {
+				if (signal.aborted) throw new Error("Compaction cancelled");
+				const stream = provider.streamSimple(model, context, { ...options, headers: auth.headers });
+				const response = await stream.result();
+				if (signal.aborted) throw new Error("Compaction cancelled");
+				// Native validation handles error, length and tool calls, but not aborted
+				// or blank text. Reject before file lists or split separators mask it.
+				if (
+					response.stopReason === "aborted" ||
+					!response.content
+						.filter((block) => block.type === "text")
+						.map((block) => block.text)
+						.join("\n")
+						.trim()
+				) {
+					throw new Error("Invalid compact response");
+				}
+				return stream;
+			};
+			const result = await compact(
+				preparation,
+				requestModel,
+				auth.apiKey,
+				undefined,
+				customInstructions,
+				signal,
+				resolved.thinkingLevel ?? thinkingLevel,
+				streamFn,
+				auth.env,
+			);
+			if (signal.aborted) return { cancel: true };
+			if (loaded === definitions) sticky.set("compact", resolved.model);
+			return { compaction: result };
+		} catch {
+			if (signal.aborted) return { cancel: true };
+			notify?.("Compact alias unavailable or failed; using the current model.", "warning");
+			return;
+		} finally {
+			if (pendingCompaction === operation) pendingCompaction = undefined;
+		}
+	});
+
+	pi.on("session_shutdown", async () => {
+		pendingCompaction?.abort();
 	});
 
 	// ---------------------------------------------------------------------------
@@ -311,6 +414,7 @@ export default function modelAlias(pi: ExtensionAPI): void {
 	// A replaced session invalidates the restore point, the held picks, and the
 	// cooldowns, all of which are scoped to one session by design.
 	pi.on("session_start", async (event, ctx) => {
+		pendingCompaction?.abort();
 		pendingRestore = undefined;
 		sticky.clear();
 		cooldowns.clear();
