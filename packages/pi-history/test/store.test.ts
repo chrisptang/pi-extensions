@@ -11,8 +11,8 @@ import {
 } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { afterAll, test } from "vitest";
+import { DatabaseSync } from "../src/sqlite.js";
 
 const root = mkdtempSync(path.join(os.tmpdir(), "pi-history-test-"));
 const previousAgentDir = process.env.PI_CODING_AGENT_DIR;

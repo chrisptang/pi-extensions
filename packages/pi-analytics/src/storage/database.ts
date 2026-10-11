@@ -1,6 +1,5 @@
 import { chmod, mkdir } from "node:fs/promises";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type {
 	GenerationRecord,
 	ProviderErrorRecord,
@@ -10,6 +9,7 @@ import type {
 	ToolCallRecord,
 	UsageRecord,
 } from "../types.js";
+import { DatabaseSync } from "./sqlite.js";
 
 const SCHEMA_VERSION = 3;
 
@@ -213,22 +213,27 @@ export class AnalyticsDatabase {
 		const directory = path.dirname(this.path);
 		await mkdir(directory, { recursive: true, mode: 0o700 });
 		const database = new DatabaseSync(this.path);
-		database.exec(`PRAGMA busy_timeout = ${Math.max(1, this.options.busyTimeoutMs ?? 5_000)}`);
-		database.exec("PRAGMA journal_mode = WAL");
-		database.exec("PRAGMA synchronous = NORMAL");
-		database.exec("PRAGMA foreign_keys = ON");
-		database.exec(SCHEMA);
-		// CREATE TABLE IF NOT EXISTS leaves pre-v3 databases without the added columns, so each
-		// additive column is ensured explicitly; a concurrent opener losing the ALTER race still
-		// ends with the column present.
-		ensureColumn(database, "generations", "first_token_at_ms", "INTEGER");
-		database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-		// The database and its WAL sidecars carry analytics history; keep them owner-only.
-		if (process.platform !== "win32") {
-			await chmod(this.path, 0o600).catch(() => undefined);
+		try {
+			database.exec(`PRAGMA busy_timeout = ${Math.max(1, this.options.busyTimeoutMs ?? 5_000)}`);
+			database.exec("PRAGMA journal_mode = WAL");
+			database.exec("PRAGMA synchronous = NORMAL");
+			database.exec("PRAGMA foreign_keys = ON");
+			database.exec(SCHEMA);
+			// CREATE TABLE IF NOT EXISTS leaves pre-v3 databases without the added columns, so each
+			// additive column is ensured explicitly; a concurrent opener losing the ALTER race still
+			// ends with the column present.
+			ensureColumn(database, "generations", "first_token_at_ms", "INTEGER");
+			database.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+			// The database and its WAL sidecars carry analytics history; keep them owner-only.
+			if (process.platform !== "win32") {
+				await chmod(this.path, 0o600).catch(() => undefined);
+			}
+			this.database = database;
+			return database;
+		} catch (error) {
+			database.close();
+			throw error;
 		}
-		this.database = database;
-		return database;
 	}
 }
 

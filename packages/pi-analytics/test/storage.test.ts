@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { type TestContext, test } from "vitest";
+import { type TestContext, test, vi } from "vitest";
+import { AnalyticsDatabase } from "../src/storage/database.js";
 import { resolveTimeRange } from "../src/storage/queries.js";
+import { DatabaseSync } from "../src/storage/sqlite.js";
 import { AnalyticsStore } from "../src/storage/store.js";
 import type { SessionRecord, SettledRun } from "../src/types.js";
 
@@ -434,6 +435,29 @@ test("a pre-v3 database gains the first-token column and keeps its rows", async 
 	const after = await store.getSnapshot({ fromMs: 0, toMs: 10 });
 	assert.equal(after.overview.responseCycles, 2);
 	assert.ok(after.performance.some((item) => item.timeToFirstToken.measured === 1));
+});
+
+test("failed database initialization closes its connection and shutdown remains safe", async (t) => {
+	const directory = await mkdtemp(path.join(tmpdir(), "pi-analytics-init-failure-"));
+	t.onTestFinished(() => rm(directory, { recursive: true, force: true }));
+	const file = path.join(directory, "test.db");
+	const incompatible = new DatabaseSync(file);
+	try {
+		incompatible.exec("CREATE TABLE runs (id TEXT PRIMARY KEY)");
+	} finally {
+		incompatible.close();
+	}
+	const close = vi.spyOn(DatabaseSync.prototype, "close");
+	try {
+		const database = new AnalyticsDatabase(file);
+		await assert.rejects(database.readRuns(0, 10), /started_at_ms/);
+		assert.equal(close.mock.calls.length, 1);
+		await database.close();
+		await database.close();
+		assert.equal(close.mock.calls.length, 1);
+	} finally {
+		close.mockRestore();
+	}
 });
 
 test("time ranges use local Today and rolling windows", () => {

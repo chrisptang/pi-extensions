@@ -14,10 +14,14 @@
  *                                      [--include <substring>] [--exclude <substring>]
  */
 import { chmod, mkdir, readdir, readFile, stat } from "node:fs/promises";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
+
+const isBun = Boolean(process.versions.bun);
+const sqliteModule = isBun ? "bun:sqlite" : "node:sqlite";
+const native = createRequire(import.meta.url)(sqliteModule);
 
 const HOME = os.homedir();
 const SCHEMA_VERSION = 2;
@@ -153,7 +157,9 @@ function matches(session, { include, exclude }) {
 }
 
 function writeSessions(databasePath, sessions, schema) {
-	const database = new DatabaseSync(databasePath);
+	const database = isBun
+		? new native.Database(databasePath, { create: true })
+		: new native.DatabaseSync(databasePath);
 	try {
 		database.exec("PRAGMA busy_timeout = 5000");
 		database.exec("PRAGMA journal_mode = WAL");

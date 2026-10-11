@@ -9,8 +9,8 @@ import {
 	rmSync,
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { DatabaseSync } from "./sqlite.js";
 
 export const DEFAULT_MAX_ENTRIES = 1000;
 
