@@ -238,9 +238,9 @@ The extension writes `explorer.md`, `builder.md`, and `architect.md` into `~/.pi
 | --- | --- | --- | --- | --- |
 | `explorer` | subagent | `haiku` | `read`, `grep`, `find`, `ls`, `bash` | Read-only exploration that reports findings with `path:line` citations. |
 | `builder` | subagent | `sonnet` | `read`, `grep`, `find`, `ls`, `edit`, `write`, `bash` | Implements one specified change and verifies it before reporting. |
-| `architect` | main | inherits | n/a | Runs the main session: answers the user, designs concrete architecture, writes `docs/specs/<feature>.md`, and sends `explorer` and `builder` the wide or heavy work. |
+| `architect` | main | inherits | n/a | Runs the main session: answers the user, designs concrete architecture, writes `docs/specs/<feature>.md` only for large multi-session work, and sends `explorer` and `builder` the wide or heavy work. |
 
-`architect` is the one that pairs the other two. It is not a child — a child cannot spawn anything — but the persona the main session runs under when you start with `--agent architect` or set it as `mainAgent`. Its body tells the session to answer small requests directly, to design down to signatures and file boundaries before delegating, to keep a spec file per feature, and to verify every subagent report against the diff and a real check before ticking a task.
+`architect` is the one that pairs the other two. It is not a child — a child cannot spawn anything — but the persona the main session runs under when you start with `--agent architect` or set it as `mainAgent`. Its body tells the session to answer small requests directly, to design down to signatures and file boundaries before delegating, to write a spec file only when asked or for large multi-session work, and to verify every subagent report against the diff and a real check before ticking a task.
 
 `explorer` holds `bash` so the full read-only shell toolbox — `rg`, `sed -n`, `tree`, `git log` — is available to it; its body, not the tool list, is what keeps it read-only.
 
