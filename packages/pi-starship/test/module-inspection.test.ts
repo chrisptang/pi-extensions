@@ -95,7 +95,11 @@ test("inspection distinguishes disabled modules and $all reachability", () => {
 test("unavailable inspection preserves config-derived disabled and reachability states", () => {
 	const inspection = inspectUnavailableModules(BUILT_IN_CONFIG);
 	assert.equal(inspection.showing.length, 0);
-	assert.equal(inspection.modules.find((module) => module.name === "brand")?.state, "Unavailable");
+	assert.equal(
+		inspection.modules.find((module) => module.name === "brand")?.state,
+		"Not in format",
+	);
+	assert.equal(inspection.modules.find((module) => module.name === "tokens")?.state, "Unavailable");
 	assert.equal(inspection.modules.find((module) => module.name === "os")?.state, "Disabled");
 	assert.equal(
 		inspection.modules.find((module) => module.name === "github_pr")?.state,

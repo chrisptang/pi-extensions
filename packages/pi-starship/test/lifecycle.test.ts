@@ -51,7 +51,7 @@ function useLifecycleConfig(
 
 type FooterFactory = (
 	tui: { requestRender(): void },
-	theme: unknown,
+	theme: { fg(role: string, text: string): string },
 	data: {
 		getGitBranch(): string | null;
 		getExtensionStatuses(): ReadonlyMap<string, string>;
@@ -121,7 +121,11 @@ test("the footer honors the effective true-color capability", async (t) => {
 			getExtensionStatuses: () => new Map<string, string>(),
 			onBranchChange: () => () => undefined,
 		};
-		footer = (context.footer as FooterFactory)({ requestRender() {} }, {}, footerData);
+		footer = (context.footer as FooterFactory)(
+			{ requestRender() {} },
+			{ fg: (_role, text) => text },
+			footerData,
+		);
 		const rendered = footer.render(80).join("\n");
 		assert.equal(rendered.includes("\u001b[38;2;"), false);
 		assert.equal(rendered.includes("\u001b[48;2;"), false);
@@ -149,7 +153,11 @@ test("UI prompt waiting state restores activity and rejects stale session events
 		getExtensionStatuses: () => new Map<string, string>(),
 		onBranchChange: () => () => undefined,
 	};
-	const oldFooter = (oldContext.footer as FooterFactory)({ requestRender() {} }, {}, footerData);
+	const oldFooter = (oldContext.footer as FooterFactory)(
+		{ requestRender() {} },
+		{ fg: (_role, text) => text },
+		footerData,
+	);
 	try {
 		await emit(mock.events, "agent_start", {}, oldContext.ctx);
 		await emit(mock.events, "tool_execution_start", { toolName: "read" }, oldContext.ctx);
@@ -174,7 +182,11 @@ test("UI prompt waiting state restores activity and rejects stale session events
 
 		await emit(mock.events, "ui_prompt_start", { kind: "editor" }, oldContext.ctx);
 		await emit(mock.events, "session_start", {}, newContext.ctx);
-		const newFooter = (newContext.footer as FooterFactory)({ requestRender() {} }, {}, footerData);
+		const newFooter = (newContext.footer as FooterFactory)(
+			{ requestRender() {} },
+			{ fg: (_role, text) => text },
+			footerData,
+		);
 		try {
 			assert.match(stripAnsi(newFooter.render(200).join("\n")), /idle/u);
 			await emit(mock.events, "ui_prompt_end", { kind: "editor" }, oldContext.ctx);
@@ -290,7 +302,7 @@ test("native PR refresh clears branch state, aborts stale work, and stops on foo
 	let branchChange: (() => void) | undefined;
 	const footer = (context.footer as FooterFactory)(
 		{ requestRender() {} },
-		{},
+		{ fg: (_role, text) => text },
 		{
 			getGitBranch: () => "feature",
 			getExtensionStatuses: () => new Map(),
@@ -366,7 +378,7 @@ test("accepted settings disable and re-enable native PR refresh immediately", as
 		await flushAsync();
 		const footer = (context.footer as FooterFactory)(
 			{ requestRender() {} },
-			{},
+			{ fg: (_role, text) => text },
 			{
 				getGitBranch: () => "feature",
 				getExtensionStatuses: () => new Map(),
@@ -465,7 +477,7 @@ test("same-cwd session replacement aborts and rejects stale native PR publicatio
 	let staleBranchChange: (() => void) | undefined;
 	const oldFooter = (oldContext.footer as FooterFactory)(
 		{ requestRender() {} },
-		{},
+		{ fg: (_role, text) => text },
 		{
 			getGitBranch: () => "feature",
 			getExtensionStatuses: () => new Map(),
@@ -482,7 +494,7 @@ test("same-cwd session replacement aborts and rejects stale native PR publicatio
 	await flushAsync();
 	const footer = (newContext.footer as FooterFactory)(
 		{ requestRender() {} },
-		{},
+		{ fg: (_role, text) => text },
 		{
 			getGitBranch: () => "feature",
 			getExtensionStatuses: () => new Map(),
@@ -536,7 +548,7 @@ test("reachable native PR refresh uses its own 60-second fallback", async (t) =>
 	assert.equal(prCalls, 2);
 	const footer = (context.footer as FooterFactory)(
 		{ requestRender() {} },
-		{},
+		{ fg: (_role, text) => text },
 		{
 			getGitBranch: () => "feature",
 			getExtensionStatuses: () => new Map(),
@@ -570,7 +582,7 @@ test("terminal native PR snapshots clear at their lifecycle expiry", async (t) =
 	await flushAsync();
 	const footer = (context.footer as FooterFactory)(
 		{ requestRender() {} },
-		{},
+		{ fg: (_role, text) => text },
 		{
 			getGitBranch: () => "feature",
 			getExtensionStatuses: () => new Map(),
@@ -611,7 +623,7 @@ test("terminal native PR expiry revalidates the wall clock before clearing", asy
 	await flushAsync();
 	const footer = (context.footer as FooterFactory)(
 		{ requestRender() {} },
-		{},
+		{ fg: (_role, text) => text },
 		{
 			getGitBranch: () => "feature",
 			getExtensionStatuses: () => new Map(),
@@ -660,7 +672,7 @@ test("turn module counts user messages instead of repeated LLM turns", async () 
 		await emit(mock.events, "turn_start", {}, context.ctx);
 		const footer = (context.footer as FooterFactory)(
 			{ requestRender() {} },
-			{},
+			{ fg: (_role, text) => text },
 			{
 				getGitBranch: () => null,
 				getExtensionStatuses: () => new Map(),
@@ -733,7 +745,7 @@ test("TUI footer uses all-entry usage totals and marks subscription-backed cost"
 		await emit(mock.events, "session_start", {}, context.ctx);
 		const footer = (context.footer as FooterFactory)(
 			{ requestRender() {} },
-			{},
+			{ fg: (_role, text) => text },
 			{
 				getGitBranch: () => null,
 				getExtensionStatuses: () => new Map(),
@@ -795,7 +807,7 @@ test("TUI footer renders cached state and parallel tool activity without executi
 	let branchChange: (() => void) | undefined;
 	const footer = (context.footer as FooterFactory)(
 		{ requestRender() {} },
-		{},
+		{ fg: (_role, text) => text },
 		{
 			getGitBranch: () => "main",
 			getExtensionStatuses: () => new Map(),
@@ -857,7 +869,7 @@ test("stale Git results from a replaced session cannot overwrite the new footer"
 	await flushAsync();
 	const footer = (newContext.footer as FooterFactory)(
 		{ requestRender() {} },
-		{},
+		{ fg: (_role, text) => text },
 		{
 			getGitBranch: () => "new",
 			getExtensionStatuses: () => new Map(),
@@ -865,8 +877,8 @@ test("stale Git results from a replaced session cannot overwrite the new footer"
 		},
 	);
 	const output = stripAnsi(footer.render(300).join("\n"));
-	assert.doesNotMatch(output, /!1/);
-	assert.match(output, /\?1/);
+	assert.doesNotMatch(output, /1 modified/);
+	assert.match(output, /1 untracked/);
 	footer.dispose();
 	await emit(mock.events, "session_shutdown", {}, newContext.ctx);
 });
@@ -904,7 +916,7 @@ test("stale worktree identity from a replaced session cannot overwrite the new f
 
 	const footer = (newContext.footer as FooterFactory)(
 		{ requestRender() {} },
-		{},
+		{ fg: (_role, text) => text },
 		{
 			getGitBranch: () => "main",
 			getExtensionStatuses: () => new Map(),
@@ -947,7 +959,7 @@ test("installed packages do not affect extension status presentation or produce 
 		);
 		const footer = (context.footer as FooterFactory)(
 			{ requestRender() {} },
-			{},
+			{ fg: (_role, text) => text },
 			{
 				getGitBranch: () => null,
 				getExtensionStatuses: () => new Map([["foo:server", "running"]]),

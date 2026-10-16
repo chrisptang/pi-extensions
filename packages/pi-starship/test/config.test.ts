@@ -166,39 +166,20 @@ test("unreadable Starship settings report an I/O diagnostic instead of appearing
 	}
 });
 
-test("built-in example is a palette-free ten-module Starship document", () => {
+test("built-in example restores the quiet defaults without a palette", () => {
 	const root = mkdtempSync(join(tmpdir(), "pi-starship-config-"));
 	const path = join(root, CONFIG_FILE_NAME);
 	try {
-		assert.match(BUILT_IN_EXAMPLE, /^format = """/mu);
-		assert.match(
-			BUILT_IN_EXAMPLE,
-			/\$brand\\\n\$model\\\n\$thinking\\\n\$directory\\\n\$session_name/u,
-		);
-		assert.match(
-			BUILT_IN_EXAMPLE,
-			/\$activity\\\n\\n\\\n\$tokens\\\n\$cache\\\n\$context\\\n\$cost/u,
-		);
+		assert.match(BUILT_IN_EXAMPLE, /^format = "\$directory/mu);
+		assert.doesNotMatch(BUILT_IN_EXAMPLE, /\$brand|\$cache|bold|🤖|🌿/u);
 		assert.doesNotMatch(BUILT_IN_EXAMPLE, /format = '''|palette\s*=|\[palettes\.|░▒▓|/u);
 		writeFileSync(path, BUILT_IN_EXAMPLE);
 		const loaded = loadStarshipConfig(path);
 		assert.equal(
 			loaded.config.format,
-			[
-				"$brand",
-				"$model",
-				"$thinking",
-				"$directory",
-				"$session_name",
-				"$git_branch",
-				"$git_status",
-				"$activity\n",
-				"$tokens",
-				"$cache",
-				"$context",
-				"$cost",
-			].join(""),
+			"$directory$git_branch$git_status$activity $fill$model$thinking\n$tokens$context$cost",
 		);
+		assert.deepEqual(loaded.config, BUILT_IN_CONFIG);
 		assert.equal(loaded.config.format, BUILT_IN_CONFIG.format);
 		assert.equal(loaded.config.palette, undefined);
 		assert.deepEqual(loaded.config.palettes, {});
@@ -228,7 +209,7 @@ test("removed git_branch $pr settings use the generic unknown-variable diagnosti
 		format: "$git_branch",
 		git_branch: { format: "$branch$pr" },
 	});
-	assert.equal(BUILT_IN_CONFIG.modules.git_branch.format.includes("$pr"), false);
+	assert.equal(normalizeConfig({}).config.modules.git_branch.format.includes("$pr"), false);
 	assert.match(
 		normalized.diagnostics.map((item) => `${item.path}: ${item.message}`).join("\n"),
 		/git_branch\.format.*unknown variable.*pr/iu,
@@ -269,7 +250,7 @@ test("first-wave modules are registered in deterministic domain order", () => {
 	assert.ok(MODULE_NAMES.indexOf("openstack") < MODULE_NAMES.indexOf("os"));
 	assert.ok(MODULE_NAMES.indexOf("tokens") < MODULE_NAMES.indexOf("cache"));
 	assert.ok(MODULE_NAMES.indexOf("cache") < MODULE_NAMES.indexOf("cost"));
-	assert.equal(BUILT_IN_CONFIG.modules.cache.disabled, false);
+	assert.equal(normalizeConfig({}).config.modules.cache.disabled, false);
 	assert.ok(MODULE_NAMES.indexOf("fill") < MODULE_NAMES.indexOf("extension_status"));
 });
 
@@ -297,7 +278,7 @@ test("catalog-owned module options normalize values and diagnose invalid input",
 });
 
 test("Starship-aligned module options normalize their public defaults", () => {
-	assert.deepEqual(BUILT_IN_CONFIG.modules.directory.options, {
+	assert.deepEqual(normalizeConfig({}).config.modules.directory.options, {
 		truncation_length: 3,
 		truncate_to_repo: true,
 		fish_style_pwd_dir_length: 0,
@@ -306,12 +287,14 @@ test("Starship-aligned module options normalize their public defaults", () => {
 		use_os_path_sep: true,
 		substitutions: {},
 	});
-	assert.deepEqual(BUILT_IN_CONFIG.modules.git_branch.options, {
+	assert.deepEqual(normalizeConfig({}).config.modules.git_branch.options, {
 		truncation_length: 0,
 		truncation_symbol: "…",
 	});
-	assert.deepEqual(BUILT_IN_CONFIG.modules.git_commit.options, { commit_hash_length: 7 });
-	assert.deepEqual(BUILT_IN_CONFIG.modules.conda.options, {
+	assert.deepEqual(normalizeConfig({}).config.modules.git_commit.options, {
+		commit_hash_length: 7,
+	});
+	assert.deepEqual(normalizeConfig({}).config.modules.conda.options, {
 		ignore_base: true,
 		truncation_length: 1,
 	});
@@ -330,7 +313,7 @@ test("Starship-aligned module options normalize their public defaults", () => {
 });
 
 test("model truncation options normalize values and reject invalid directions independently", () => {
-	assert.deepEqual(BUILT_IN_CONFIG.modules.model.options, {
+	assert.deepEqual(normalizeConfig({}).config.modules.model.options, {
 		truncation_length: 0,
 		truncation_symbol: "…",
 		truncation_direction: "end",
@@ -368,7 +351,7 @@ test("model truncation options normalize values and reject invalid directions in
 });
 
 test("thinking level styles preserve and validate the legacy fallback independently", () => {
-	assert.deepEqual(BUILT_IN_CONFIG.modules.thinking.styles, {
+	assert.deepEqual(normalizeConfig({}).config.modules.thinking.styles, {
 		style_off: "",
 		style_minimal: "",
 		style_low: "",
@@ -392,7 +375,10 @@ test("thinking level styles preserve and validate the legacy fallback independen
 		thinking: { style: "not-a-color", style_low: "also-not-a-color", style_high: 7 },
 		username: { style: "blue" },
 	});
-	assert.equal(invalid.config.modules.thinking.style, BUILT_IN_CONFIG.modules.thinking.style);
+	assert.equal(
+		invalid.config.modules.thinking.style,
+		normalizeConfig({}).config.modules.thinking.style,
+	);
 	assert.equal(invalid.config.modules.thinking.styles.style_low, "");
 	assert.equal(invalid.config.modules.thinking.styles.style_high, "");
 	assert.deepEqual(
@@ -402,7 +388,7 @@ test("thinking level styles preserve and validate the legacy fallback independen
 });
 
 test("provider aliases normalize as exact string mappings", () => {
-	assert.deepEqual(BUILT_IN_CONFIG.modules.provider.options, { provider_aliases: {} });
+	assert.deepEqual(normalizeConfig({}).config.modules.provider.options, { provider_aliases: {} });
 	const normalized = normalizeConfig({
 		provider: { provider_aliases: { "openai-codex": "codex", anthropic: "claude" } },
 	});
@@ -466,9 +452,9 @@ test("invalid recognized fields fall back independently and unknown fields warn"
 		);
 		const loaded = loadStarshipConfig(path);
 		assert.equal(loaded.source, "user");
-		assert.equal(loaded.config.format, BUILT_IN_CONFIG.format);
+		assert.equal(loaded.config.format, normalizeConfig({}).config.format);
 		assert.equal(loaded.config.palette, "missing");
-		assert.equal(loaded.config.modules.model.style, BUILT_IN_CONFIG.modules.model.style);
+		assert.equal(loaded.config.modules.model.style, normalizeConfig({}).config.modules.model.style);
 		assert.equal(loaded.config.modules.model.disabled, false);
 		assert.ok(loaded.diagnostics.length >= 6);
 		assert.ok(loaded.diagnostics.every((item) => item.severity === "warning"));
@@ -484,7 +470,10 @@ test("palette normalization handles prototype-like names as exact own properties
 		writeFileSync(path, "palette = 'toString'\n\n[model]\nstyle = 'toString'\n");
 		const inherited = loadStarshipConfig(path);
 		assert.equal(inherited.config.palette, "toString");
-		assert.equal(inherited.config.modules.model.style, BUILT_IN_CONFIG.modules.model.style);
+		assert.equal(
+			inherited.config.modules.model.style,
+			normalizeConfig({}).config.modules.model.style,
+		);
 		assert.match(
 			inherited.diagnostics.map((item) => item.message).join("\n"),
 			/unknown palette.*toString/i,
@@ -511,7 +500,10 @@ test("only an explicitly selected custom palette is active", () => {
 		model: { style: "accent" },
 	});
 	assert.equal(unselected.config.palette, undefined);
-	assert.equal(unselected.config.modules.model.style, BUILT_IN_CONFIG.modules.model.style);
+	assert.equal(
+		unselected.config.modules.model.style,
+		normalizeConfig({}).config.modules.model.style,
+	);
 	assert.match(unselected.diagnostics.map((item) => item.message).join("\n"), /invalid style/iu);
 
 	const selected = normalizeConfig({
@@ -530,13 +522,16 @@ test("legacy palette aliases warn and receive no hidden fallback colors", () => 
 		directory: { style: "fg:directory_fg bg:directory" },
 	});
 	assert.equal(normalized.config.palette, undefined);
-	assert.equal(normalized.config.modules.directory.style, BUILT_IN_CONFIG.modules.directory.style);
+	assert.equal(
+		normalized.config.modules.directory.style,
+		normalizeConfig({}).config.modules.directory.style,
+	);
 	const messages = normalized.diagnostics.map((item) => `${item.path}: ${item.message}`).join("\n");
 	assert.match(messages, /format.*invalid literal style.*header/iu);
 	assert.match(messages, /directory\.style.*invalid style/iu);
 });
 
-test("built-in module styles use direct colors without backgrounds", () => {
+test("custom documents keep the legacy module styles without backgrounds", () => {
 	const expected = {
 		brand: "bold white",
 		provider: "bold blue",
@@ -559,9 +554,13 @@ test("built-in module styles use direct colors without backgrounds", () => {
 		fill: "bold black",
 	} as const;
 	for (const [name, style] of Object.entries(expected)) {
-		assert.equal(BUILT_IN_CONFIG.modules[name as keyof typeof expected].style, style, name);
+		assert.equal(
+			normalizeConfig({}).config.modules[name as keyof typeof expected].style,
+			style,
+			name,
+		);
 	}
-	for (const module of Object.values(BUILT_IN_CONFIG.modules)) {
+	for (const module of Object.values(normalizeConfig({}).config.modules)) {
 		for (const style of [
 			module.style,
 			...Object.values(module.styles),
@@ -579,7 +578,10 @@ test("invalid direct palette values warn and palette aliases cannot reference al
 		model: { style: "recursive" },
 	});
 	assert.deepEqual(normalized.config.palettes.mine, { direct: "#010203" });
-	assert.equal(normalized.config.modules.model.style, BUILT_IN_CONFIG.modules.model.style);
+	assert.equal(
+		normalized.config.modules.model.style,
+		normalizeConfig({}).config.modules.model.style,
+	);
 	assert.match(
 		normalized.diagnostics.map((item) => `${item.path}: ${item.message}`).join("\n"),
 		/palettes\.mine\.recursive.*named.*ANSI.*#RRGGBB|model\.style.*invalid style/iu,
@@ -615,7 +617,10 @@ test("multi-style and display settings normalize independently", () => {
 		{ threshold: 0, style: "bold green", hidden: true },
 		{ threshold: 80, style: "bold red", hidden: false },
 	]);
-	assert.deepEqual(normalized.config.modules.cost.display, BUILT_IN_CONFIG.modules.cost.display);
+	assert.deepEqual(
+		normalized.config.modules.cost.display,
+		normalizeConfig({}).config.modules.cost.display,
+	);
 	const messages = normalized.diagnostics.map((item) => `${item.path}: ${item.message}`).join("\n");
 	assert.match(messages, /git_metrics\.style.*unknown setting/iu);
 	assert.match(messages, /git_metrics\.added_style.*invalid style/iu);
@@ -631,9 +636,12 @@ test("display arrays use module defaults when no valid entries remain", () => {
 	});
 	assert.deepEqual(
 		normalized.config.modules.context.display,
-		BUILT_IN_CONFIG.modules.context.display,
+		normalizeConfig({}).config.modules.context.display,
 	);
-	assert.deepEqual(normalized.config.modules.cost.display, BUILT_IN_CONFIG.modules.cost.display);
+	assert.deepEqual(
+		normalized.config.modules.cost.display,
+		normalizeConfig({}).config.modules.cost.display,
+	);
 	assert.deepEqual(
 		normalized.diagnostics.map((item) => item.path),
 		["context.display", "cost.display"],
@@ -655,7 +663,7 @@ test("unknown root/module/style variables warn and invalid styles fall back", ()
 		assert.match(messages, /variable.*bad.*model/i);
 		assert.match(messages, /style variable.*other/i);
 		assert.match(messages, /style.*not-a-color/i);
-		assert.equal(loaded.config.modules.model.style, BUILT_IN_CONFIG.modules.model.style);
+		assert.equal(loaded.config.modules.model.style, normalizeConfig({}).config.modules.model.style);
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
@@ -667,8 +675,11 @@ test("invalid root and module formats fall back at the documented scope", () => 
 	try {
 		writeFileSync(path, `format = '['\n\n[model]\nformat = '$ '\nsymbol = 'custom'\n`);
 		const loaded = loadStarshipConfig(path);
-		assert.equal(loaded.config.format, BUILT_IN_CONFIG.format);
-		assert.equal(loaded.config.modules.model.format, BUILT_IN_CONFIG.modules.model.format);
+		assert.equal(loaded.config.format, normalizeConfig({}).config.format);
+		assert.equal(
+			loaded.config.modules.model.format,
+			normalizeConfig({}).config.modules.model.format,
+		);
 		assert.equal(loaded.config.modules.model.symbol, "custom");
 		assert.equal(loaded.diagnostics.length, 2);
 	} finally {

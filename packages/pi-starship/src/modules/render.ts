@@ -1,5 +1,12 @@
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { activePalette, type ModuleConfig, type StarshipConfig } from "../config.js";
+import { sanitizeTerminalText } from "@narumitw/pi-tui-kit/terminal-text";
+import {
+	activePalette,
+	BUILT_IN_CONFIG,
+	type ModuleConfig,
+	type StarshipConfig,
+} from "../config.js";
 import { type FormatValue, formatVariables, renderFormat } from "../format/formatter.js";
 import {
 	isFillChunk,
@@ -8,6 +15,7 @@ import {
 	type StyledChunk,
 } from "../format/style.js";
 import { MODULE_DEFINITIONS, MODULE_NAMES, type ModuleName } from "./catalog.js";
+import { fitDefaultEnvironment } from "./default-layout.js";
 import type { ModuleValueContext, RenderedStatusline, StarshipRuntimeSnapshot } from "./types.js";
 
 export function renderStatusline(
@@ -15,7 +23,9 @@ export function renderStatusline(
 	runtime: StarshipRuntimeSnapshot,
 	width = 80,
 	trueColor = true,
+	theme?: Pick<Theme, "fg">,
 ): RenderedStatusline<ModuleName> {
+	const defaultLayout = config.format === BUILT_IN_CONFIG.format;
 	const palette = activePalette(config);
 	const modules = {} as Record<ModuleName, StyledChunk[]>;
 	const layoutModules = {} as Record<ModuleName, LayoutChunk[]>;
@@ -45,7 +55,17 @@ export function renderStatusline(
 					: [],
 			),
 		);
+		if (defaultLayout && name === "model" && runtime.model) {
+			const prefix = `${sanitizeTerminalText(runtime.model.provider)}/`;
+			const label = contentValues.model;
+			if (typeof label === "string" && label.startsWith(prefix)) {
+				contentValues.model = label.slice(prefix.length);
+			}
+		}
 		const rendered = renderModule(module, contentValues, styleVariables, palette);
+		if (defaultLayout) {
+			for (const chunk of rendered) chunk.text = sanitizeTerminalText(chunk.text);
+		}
 		modules[name] = rendered;
 		layoutModules[name] =
 			definition.layout === "fill" && !module.disabled
@@ -53,6 +73,12 @@ export function renderStatusline(
 				: rendered;
 	}
 
+	if (defaultLayout) {
+		fitDefaultEnvironment(modules, width);
+		for (const name of ["directory", "git_branch", "model"] as const) {
+			layoutModules[name] = modules[name];
+		}
+	}
 	const explicitModules = formatVariables(config.formatAst);
 	const all = MODULE_NAMES.flatMap((name) =>
 		explicitModules.has(name) || config.modules[name].disabled ? [] : layoutModules[name],
@@ -62,10 +88,31 @@ export function renderStatusline(
 	const layout = renderFormat(config.formatAst, { variables: rootVariables, palette });
 	const chunks = resolveFillLayout(layout, width);
 	return {
-		ansi: renderChunksToAnsi(chunks, trueColor),
+		ansi:
+			defaultLayout && theme
+				? chunks.map((chunk) => themedDefaultChunk(chunk, theme, trueColor)).join("")
+				: renderChunksToAnsi(chunks, trueColor),
 		chunks,
 		modules,
 	};
+}
+
+function themedDefaultChunk(
+	chunk: StyledChunk,
+	theme: Pick<Theme, "fg">,
+	trueColor: boolean,
+): string {
+	const style = chunk.style;
+	if (style?.foreground?.kind === "named" && style.foreground.name === "red") {
+		return theme.fg("error", chunk.text);
+	}
+	if (style?.foreground?.kind === "named" && style.foreground.name === "yellow") {
+		return theme.fg("warning", chunk.text);
+	}
+	if (style?.dimmed && !style.foreground && !style.background) {
+		return theme.fg("muted", chunk.text);
+	}
+	return renderChunksToAnsi([chunk], trueColor);
 }
 
 function valueContext(

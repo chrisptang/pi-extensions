@@ -6,6 +6,7 @@ export const gitStatusModule = defineModule({
 	variables: [
 		"symbol",
 		"all_status",
+		"summary",
 		"ahead_behind",
 		"ahead",
 		"behind",
@@ -34,6 +35,11 @@ export const gitStatusModule = defineModule({
 		style: "red bold",
 		disabled: false,
 	},
+	styleVariables: ["style", "summary_style"],
+	resolveStyleVariables: ({ runtime, style }) => ({
+		style,
+		summary_style: runtime.gitStatus?.conflicted ? "red" : style,
+	}),
 	values: ({ runtime }) => {
 		if (!runtime.gitBranch || !runtime.gitStatus) return undefined;
 		const status = runtime.gitStatus;
@@ -78,7 +84,26 @@ export const gitStatusModule = defineModule({
 		]
 			.filter(Boolean)
 			.join(" ");
-		return allStatus || values.ahead_behind ? { ...values, all_status: allStatus } : undefined;
+		const summary = (
+			[
+				[status.conflicted, "conflicted"],
+				[status.stashed, "stashed"],
+				[status.deleted, "deleted"],
+				[status.renamed, "renamed"],
+				[status.modified, "modified"],
+				[status.typechanged, "typechanged"],
+				[status.staged, "staged"],
+				[status.untracked, "untracked"],
+				[status.ahead, "ahead"],
+				[status.behind, "behind"],
+			] satisfies Array<[number, string]>
+		)
+			.filter(([value]) => value > 0)
+			.map(([value, label]) => `${formatCount(value)} ${label}`)
+			.join(", ");
+		return allStatus || values.ahead_behind
+			? { ...values, all_status: allStatus, summary }
+			: undefined;
 	},
 });
 

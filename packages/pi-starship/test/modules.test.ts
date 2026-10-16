@@ -121,29 +121,32 @@ test("bundled presets render their promised Pi-native information", () => {
 	}
 });
 
-test("built-in root renders a two-line environment and session-metrics footer without backgrounds", () => {
-	const rendered = renderStatusline(BUILT_IN_CONFIG, fixture());
+test("built-in root renders quiet workspace and metrics rows", () => {
+	const rendered = renderStatusline(BUILT_IN_CONFIG, fixture(), 240);
 	const plain = stripAnsi(rendered.ansi);
 	for (const expected of [
-		/π/u,
 		/sonnet-4/u,
 		/high/u,
 		/pi-extensions/u,
 		/feature/u,
-		/=1 !4 \+3 \?5 ⇕⇡2⇣1/u,
-		/read/u,
+		/1 conflicted, 4 modified, 3 staged, 5 untracked, 2 ahead, 1 behind/u,
 		/750\/1\.0k 75\.0%/u,
 		/ΣIn 1\.5k · ΣOut 200/u,
-		/Cache 0\.0%/u,
 		/\$0\.123/u,
 	]) {
 		assert.match(plain, expected);
 	}
 	assert.equal(plain.split("\n").length, 2);
-	for (const omitted of [/anthropic/u, /PR #123/u, /09:05/u, /🔌 active/u]) {
+	for (const omitted of [
+		/anthropic/u,
+		/PR #123/u,
+		/09:05/u,
+		/🔌 active/u,
+		/π|Cache|completed|idle|🤖|🌿/u,
+	]) {
 		assert.doesNotMatch(plain, omitted);
 	}
-	assert.ok(rendered.chunks.every((chunk) => chunk.style?.background === undefined));
+	assert.ok(rendered.chunks.every((chunk) => !chunk.style?.background && !chunk.style?.bold));
 });
 
 test("thinking level styles override the compatible module fallback", () => {
@@ -217,7 +220,7 @@ test("provider aliases are exact, empty-capable, and terminal-safe", () => {
 });
 
 test("context supports native percentage/window precision", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$context";
 	config.formatAst = parseFormat(config.format);
 	config.modules.context.format = "$percentage/$window";
@@ -238,7 +241,7 @@ test("context supports native percentage/window precision", () => {
 });
 
 test("context display thresholds only select styles and never hide the metric", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$context";
 	config.formatAst = parseFormat(config.format);
 	const renderAt = (percent: number) =>
@@ -264,7 +267,7 @@ test("context display thresholds only select styles and never hide the metric", 
 });
 
 test("cost display thresholds select styles without hiding reported zero", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$cost";
 	config.formatAst = parseFormat(config.format);
 	const renderAt = (cost: number) =>
@@ -281,7 +284,7 @@ test("cost display thresholds select styles without hiding reported zero", () =>
 });
 
 test("git metrics render additions and deletions with independent styles", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$git_metrics";
 	config.formatAst = parseFormat(config.format);
 	config.modules.git_metrics.disabled = false;
@@ -298,7 +301,7 @@ test("git metrics render additions and deletions with independent styles", () =>
 });
 
 test("username selects user and root styles without exposing private selector metadata", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$username";
 	config.formatAst = parseFormat(config.format);
 	config.modules.username.format = "[$user]($style)$__pi_style_selector";
@@ -323,7 +326,7 @@ test("username selects user and root styles without exposing private selector me
 });
 
 test("cost module shows the tool-reported share only when it is positive", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$cost";
 	config.formatAst = parseFormat(config.format);
 	const render = (toolCost?: number) =>
@@ -350,7 +353,7 @@ test("cost module shows the tool-reported share only when it is positive", () =>
 });
 
 test("cache and subscription modules expose session and latest usage semantics", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$cache|$cost";
 	config.formatAst = parseFormat(config.format);
 	config.modules.cache.disabled = false;
@@ -432,7 +435,7 @@ test("cache and subscription modules expose session and latest usage semantics",
 });
 
 test("cache variables distinguish unknown latest and session rates", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$cache";
 	config.formatAst = parseFormat(config.format);
 	config.modules.cache.disabled = false;
@@ -460,7 +463,7 @@ test("cache variables distinguish unknown latest and session rates", () => {
 });
 
 test("external github-pr statuses remain generic extension statuses", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$extension_status";
 	config.formatAst = [{ type: "variable", name: "extension_status" }];
 	const rendered = stripAnsi(
@@ -478,7 +481,7 @@ test("external github-pr statuses remain generic extension statuses", () => {
 });
 
 test("empty and disabled modules disappear and make conditionals empty", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "($provider)($git_branch)($git_status)($extension_status)";
 	config.formatAst = [
 		{ type: "conditional", children: [{ type: "variable", name: "provider" }] },
@@ -512,7 +515,7 @@ test("empty and disabled modules disappear and make conditionals empty", () => {
 });
 
 test("module format, symbol, style, and disabled settings apply", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$model";
 	config.formatAst = [{ type: "variable", name: "model" }];
 	config.modules.model.format = "[$symbol:$model]($style)";
@@ -538,7 +541,7 @@ test("module format, symbol, style, and disabled settings apply", () => {
 });
 
 test("model truncation keeps the configured portions after built-in shortening", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$model";
 	config.formatAst = [{ type: "variable", name: "model" }];
 	config.modules.model.format = "$model";
@@ -575,7 +578,7 @@ test("model truncation keeps the configured portions after built-in shortening",
 });
 
 test("model rendering strips terminal sequences from runtime IDs and truncation symbols", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$model";
 	config.formatAst = [{ type: "variable", name: "model" }];
 	config.modules.model.format = "$model";
@@ -599,7 +602,7 @@ test("model rendering strips terminal sequences from runtime IDs and truncation 
 });
 
 test("$all expands enabled modules in default order without explicit duplicates", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$model$all";
 	config.formatAst = [
 		{ type: "variable", name: "model" },
@@ -613,7 +616,7 @@ test("$all expands enabled modules in default order without explicit duplicates"
 });
 
 test("directory applies Starship home, repository, substitution, and component defaults", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$directory";
 	config.formatAst = parseFormat(config.format);
 	config.modules.directory.format = "$path|$full_path";
@@ -693,7 +696,7 @@ test("directory applies Starship home, repository, substitution, and component d
 });
 
 test("directory normalizes equivalent roots before contraction", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$directory";
 	config.formatAst = parseFormat(config.format);
 	config.modules.directory.format = "$path";
@@ -723,7 +726,7 @@ test("directory normalizes equivalent roots before contraction", () => {
 test("directory preserves POSIX backslashes and strips terminal controls", {
 	skip: sep !== "/",
 }, () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$directory";
 	config.formatAst = parseFormat(config.format);
 	config.modules.directory.format = "$path|$full_path";
@@ -765,7 +768,7 @@ test("directory preserves POSIX backslashes and strips terminal controls", {
 });
 
 test("session name renders when set, hides when unnamed, and strips terminal controls", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$session_name";
 	config.formatAst = parseFormat(config.format);
 	config.modules.session_name.format = "$name";
@@ -789,7 +792,7 @@ test("session name renders when set, hides when unnamed, and strips terminal con
 });
 
 test("Git branch and commit honor Starship truncation options", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$git_branch|$git_commit";
 	config.formatAst = parseFormat(config.format);
 	config.modules.git_branch.format = "$branch:$remote_name/$remote_branch";
@@ -836,7 +839,7 @@ test("Git branch and commit honor Starship truncation options", () => {
 });
 
 test("model exact aliases bypass Pi-specific shortening and then truncate", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$model";
 	config.formatAst = parseFormat(config.format);
 	config.modules.model.format = "$model";
@@ -859,7 +862,7 @@ test("model exact aliases bypass Pi-specific shortening and then truncate", () =
 });
 
 test("Starship Git modules expose branch, commit, state, metrics, and detailed status", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$git_branch|$git_commit|$git_state|$git_metrics|$git_status";
 	config.formatAst = [
 		{ type: "variable", name: "git_branch" },
@@ -931,7 +934,7 @@ test("Starship Git modules expose branch, commit, state, metrics, and detailed s
 });
 
 test("git worktree renders linked worktree values and stays empty for the primary worktree", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$git_worktree";
 	config.formatAst = [{ type: "variable", name: "git_worktree" }];
 	config.modules.git_worktree.format = "$name:$path";
@@ -959,7 +962,7 @@ test("git worktree renders linked worktree values and stays empty for the primar
 });
 
 test("Conda applies Starship path-component truncation in its owning module", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$conda";
 	config.formatAst = parseFormat(config.format);
 	config.modules.conda.format = "$environment";
@@ -989,7 +992,7 @@ test("Conda applies Starship path-component truncation in its owning module", ()
 });
 
 test("first-wave workspace modules render documented snapshot variables", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	const names = [
 		"package",
 		"nodejs",
@@ -1039,7 +1042,7 @@ test("first-wave workspace modules render documented snapshot variables", () => 
 
 test("activity handles UI prompts, tools, thinking, completed, and idle", () => {
 	const text = (runtime: Partial<StarshipRuntimeSnapshot>, format = "$text") => {
-		const config = structuredClone(BUILT_IN_CONFIG);
+		const config = normalizeConfig({}).config;
 		config.format = "$activity";
 		config.formatAst = [{ type: "variable", name: "activity" }];
 		config.modules.activity.format = format;
@@ -1130,7 +1133,7 @@ test("extension status icons do not infer known or compatibility keys", () => {
 });
 
 test("extension status icons honor only explicit keys, suppression, leading icons, and fallback", () => {
-	const config = structuredClone(BUILT_IN_CONFIG);
+	const config = normalizeConfig({}).config;
 	config.format = "$extension_status";
 	config.formatAst = [{ type: "variable", name: "extension_status" }];
 	config.extensionStatus.icons = {

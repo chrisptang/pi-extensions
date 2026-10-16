@@ -5,7 +5,7 @@ import {
 	getAgentDir,
 	type ReadonlyFooterDataProvider,
 } from "@earendil-works/pi-coding-agent";
-import { getCapabilities, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { getCapabilities, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { completeStarshipArguments } from "./command-contract.js";
 import type { StarshipCommandOptions } from "./commands.js";
 import {
@@ -277,12 +277,13 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 		workspaceController.start(generation);
 		startGithubPr(target);
 
-		ctx.ui.setFooter((tui, _theme, footerData) => {
+		ctx.ui.setFooter((tui, theme, footerData) => {
 			runtime.requestRender = () => tui.requestRender();
 			runtime.renderPreview = (preview, width) => {
 				const snapshot = runtimeSnapshot(ctx, footerData, runtime);
 				return wrapFormattedStatusline(
-					renderStatusline(preview.config, snapshot, width, getCapabilities().trueColor).ansi,
+					renderStatusline(preview.config, snapshot, width, getCapabilities().trueColor, theme)
+						.ansi,
 					width,
 				);
 			};
@@ -337,7 +338,8 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 					if (!current) return [];
 					const snapshot = runtimeSnapshot(ctx, footerData, runtime);
 					return wrapFormattedStatusline(
-						renderStatusline(current.config, snapshot, width, getCapabilities().trueColor).ansi,
+						renderStatusline(current.config, snapshot, width, getCapabilities().trueColor, theme)
+							.ansi,
 						width,
 					);
 				},
@@ -634,7 +636,8 @@ function formatDiagnostics(loaded: LoadedStarshipConfig): string {
 
 export function wrapFormattedStatusline(format: string, width: number): string[] {
 	if (width <= 0) return [];
-	return wrapTextWithAnsi(format, width);
+	// Pi can emit a two-cell grapheme at width one; keep even that final line bounded.
+	return wrapTextWithAnsi(format, width).map((line) => truncateToWidth(line, width));
 }
 
 export {

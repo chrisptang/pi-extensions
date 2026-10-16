@@ -10,10 +10,10 @@ The extension parses and renders the footer itself, so it does not need the `sta
 
 ## ✨ Features
 
-- Starts with a readable built-in footer and offers Starship presets plus a Pi-native Minimal preset.
+- Starts with a quiet, iconless two-line footer and offers Starship presets plus a Pi-native Minimal preset.
 - Supports root and module formats, conditional groups, `$all`, styles, palettes, and width-aware `$fill` alignment.
 - Provides Pi, model, usage, Git, pull request, package, language, environment, deployment, cloud, and execution modules.
-- Wraps native multiline layouts to terminal width instead of truncating them.
+- Adaptively middle-shortens long workspace, branch, and model labels in the built-in layout; usage stays intact and may wrap on narrow terminals.
 - Keeps rendering pure while refreshing filesystem, process, and network-derived data through bounded caches.
 - Uses `/starship` for presets, preview, configuration health, searchable module details, customization, and recovery.
 - Bundles the authoritative configuration skill and references for editing `pi-starship.toml` or answering setup questions.
@@ -45,7 +45,10 @@ Do not enable this with `@narumitw/pi-statusline`: both own Pi's footer, and Pi 
 ## 🚀 Quick start
 
 Start Pi with the extension to use the built-in two-line footer without creating a settings file.
-The first row shows environment, model, thinking, directory, Git, activity, and live context; the second shows session metrics such as `ΣIn`, `ΣOut`, cache rate, and reported cost.
+The first row shows directory, branch, nonempty textual Git status, and live activity on the left, with model and thinking level aligned right through fill.
+The second shows `ΣIn` inclusive session input, `ΣOut` cumulative output, `Ctx` tokens/window and percentage, and reported cost including tool usage.
+Normal text uses terminal colors and Pi's muted theme role, without bold, rainbow segments, brand, or cache rate; context warnings, Git conflicts, and UI waits use Pi's warning/error theme roles.
+Idle and completed activity stays hidden.
 Run `/starship` to inspect the footer, choose a preset, or customize the configuration.
 
 The bundled configuration skill is manual-only and is not available for automatic model invocation.
@@ -87,7 +90,11 @@ Read the references directly when preferred:
 - [Runtime and security](./skills/configuring-pi-starship/references/runtime-and-security.md) — network and command execution, local metadata, cloud and deployment context, fill layout, refresh behavior, and limitations.
 
 The only configuration source remains `<getAgentDir()>/pi-starship.toml`.
-A minimal custom document can select and style only the modules it needs:
+Missing or malformed files use the quiet built-in fallback without writing a file.
+Valid custom TOML—including empty files—and presets retain legacy root/module defaults, not the quiet template's overrides.
+To migrate an existing document, choose **Restore built-in…**, review the replacement, and explicitly confirm; this replaces the entire document without a post-success backup.
+
+A minimal custom document can select and style only the modules it needs; this example intentionally uses legacy module defaults, not the quiet built-in template:
 
 ```toml
 format = "$model$directory$git_branch"
@@ -96,11 +103,11 @@ format = "$model$directory$git_branch"
 style = "bold blue"
 ```
 
-The default metrics row uses cumulative session input (`input + cacheRead + cacheWrite`), cumulative output, and a token-weighted cache-read rate.
-It shows `—` when Pi has not reported usage, but `0.0%` for measured zero cache use.
-`$rate` remains available for the latest assistant-request cache rate; `$total_input` is the new explicit inclusive input variable, while legacy `$input` and `$total` retain their existing meanings.
-Reported cost is an estimate; subscription-backed sessions are labeled `estimate`, not a billing statement.
-The cost includes usage that tools report in their results, such as subagent runs, and the default format shows that share as `(tools $x)` when it is positive.
+`ΣIn` uses `$total_input` (`input + cacheRead + cacheWrite`); legacy `$input` and `$total` retain their existing meanings.
+Missing usage shows `—`, not a measured zero.
+Cache metrics remain available through `$cache`, including the token-weighted `$session_rate` and latest assistant-request `$rate`, but are absent from the quiet default.
+Reported cost retains three decimal places below $1 and two from $1; subscription-backed sessions append `estimate`, not a billing statement.
+The cost includes usage that tools report in their results, such as subagent runs, and shows that share as `(tools $x)` when it is positive.
 
 Use `/starship` for interactive configuration, preview, diagnostics, presets, and recovery.
 Manual file edits load at the next `session_start`, including `/reload`.

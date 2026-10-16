@@ -169,7 +169,16 @@ All identity labels are bounded and stripped of C0/C1 controls, ANSI, newlines, 
 
 ### ↔️ Fill layout
 
-Add `${fill}` between left and right root content (braces disambiguate adjacent text):
+The quiet built-in template uses two logical rows: directory, branch, textual Git status, and live activity at left with model/thinking at right, then session input/output, context, and cost.
+It omits brand/cache, hides empty or completed activity, and uses terminal colors and Pi's muted theme role without bold or rainbow segments.
+Context at `60%` and UI waits use warning; context at `80%` and Git conflicts use error.
+These are built-in template overrides, not changes to public legacy module defaults.
+
+Only the new default root layout adaptively middle-shortens long directory, branch, and model output before fill resolution.
+Usage is never width-shortened, and sufficiently narrow terminals may wrap either row rather than drop metrics.
+Custom roots and presets retain their legacy module truncation and normal wrapping behavior.
+
+For a custom layout, add `${fill}` between left and right root content (braces disambiguate adjacent text):
 
 ```toml
 format = "$directory$git_branch${fill}$model$context"
@@ -182,7 +191,7 @@ style = "dimmed"
 Fill resolves independently on each logical line before ANSI serialization and wrapping.
 Multiple fills divide remaining cells left-to-right; complete positive-width patterns repeat and any remainder uses styled spaces.
 Empty/zero-width patterns become spaces.
-Fixed content is never truncated: when it already meets or exceeds the width, fill contributes zero and normal ANSI-aware wrapping applies.
+Fill itself never truncates fixed content: when it already meets or exceeds the width after any default-root fitting, fill contributes zero and normal ANSI-aware wrapping applies.
 Unicode wide/combining symbols, palettes, `prev_fg`/`prev_bg`, ANSI, and OSC hyperlinks use Pi TUI visible-width semantics.
 `$all` deliberately includes enabled fill, so use `$all` only when that whole-catalog layout is intended.
 There is no `line_break` module; use literal newlines in `format`.
@@ -199,6 +208,11 @@ Shutdown, replacement, footer disposal, branch changes, and accepted settings ab
 Bounded local filesystem operations may finish, but stale generations cannot publish them.
 Execution identity is retained rather than re-read by the periodic fallback.
 Render and live preview consume snapshots synchronously and perform zero reads or commands.
+
+Missing or malformed settings use the quiet built-in fallback without creating or rewriting a file.
+Valid custom TOML, even an empty document, and presets still normalize over legacy root/module defaults.
+The new template does not silently migrate existing settings or enable additional collectors.
+To adopt it for an existing document, use **Restore built-in…** and explicitly confirm the complete replacement after preview; cancellation preserves the previous file and footer.
 
 Missing, unreadable, malformed, oversized, timed-out, or unavailable sources produce empty values.
 Workspace and Git readers cap direct files at 64 KiB, use one bounded current-directory listing, never recurse, and make no network calls.

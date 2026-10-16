@@ -95,7 +95,7 @@ test("Explain consumes the current snapshot without starting collection work", a
 		await emit(mock.events, "session_start", {}, context.ctx);
 		const footer = (context.footer as FooterFactory)(
 			{ requestRender() {} },
-			{},
+			{ fg: (_role, text) => text },
 			{
 				getGitBranch: () => null,
 				getExtensionStatuses: () => new Map(),
@@ -155,7 +155,7 @@ test("settings opens the raw TOML in TUI, saves atomically, and applies immediat
 		await emit(mock.events, "session_start", {}, context.ctx);
 		const footer = (context.footer as FooterFactory)(
 			{ requestRender() {} },
-			{},
+			{ fg: (_role, text) => text },
 			{
 				getGitBranch: () => null,
 				getExtensionStatuses: () => new Map(),
@@ -698,7 +698,7 @@ test("Restore previews, confirms, and atomically applies the built-in footer", a
 		assert.match(restorePreview, /entire settings document/iu);
 		assert.match(restorePreview, /unknown fields/iu);
 		assert.match(restorePreview, /No backup/iu);
-		assert.match(restorePreview, /\$brand\$model/u);
+		assert.match(restorePreview, /\$directory\$git_branch/u);
 		assert.match(
 			confirmation,
 			/All custom settings, unknown fields, and comments will be removed/u,
@@ -927,7 +927,7 @@ async function flushAsyncWork() {
 
 type FooterFactory = (
 	tui: { requestRender(): void },
-	theme: unknown,
+	theme: { fg(role: string, text: string): string },
 	data: {
 		getGitBranch(): string | null;
 		getExtensionStatuses(): ReadonlyMap<string, string>;

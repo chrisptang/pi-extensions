@@ -73,22 +73,7 @@ export interface LoadedStarshipConfig {
 	diagnostics: ConfigDiagnostic[];
 }
 
-const BUILT_IN_FORMAT_DOCUMENT = String.raw`format = """
-$brand\
-$model\
-$thinking\
-$directory\
-$session_name\
-$git_branch\
-$git_status\
-$activity\
-\n\
-$tokens\
-$cache\
-$context\
-$cost"""`;
-
-const BUILT_IN_FORMAT =
+const LEGACY_FORMAT =
 	"$brand$model$thinking$directory$session_name$git_branch$git_status$activity\n$tokens$cache$context$cost";
 
 const BUILT_IN_MODULES = Object.fromEntries(
@@ -109,19 +94,69 @@ const BUILT_IN_MODULES = Object.fromEntries(
 	]),
 ) as Record<ModuleName, ModuleConfig>;
 
-export const BUILT_IN_CONFIG: StarshipConfig = {
-	format: BUILT_IN_FORMAT,
-	formatAst: parseFormat(BUILT_IN_FORMAT),
+const LEGACY_CONFIG: StarshipConfig = {
+	format: LEGACY_FORMAT,
+	formatAst: parseFormat(LEGACY_FORMAT),
 	palette: undefined,
 	palettes: {},
 	modules: BUILT_IN_MODULES,
 	extensionStatus: { separator: " • ", maxStatuses: 5, icons: {} },
 };
 
-export const BUILT_IN_EXAMPLE = `# Native Pi modules with Starship-compatible format and style syntax.\n${BUILT_IN_FORMAT_DOCUMENT}\n`;
+export const BUILT_IN_EXAMPLE = String.raw`# Quiet workspace and session usage; existing custom documents keep their defaults.
+format = "$directory$git_branch$git_status$activity $fill$model$thinking\n$tokens$context$cost"
+
+[directory]
+format = "[$path]($style)"
+symbol = ""
+style = "none"
+
+[git_branch]
+format = "[ / $branch]($style)"
+symbol = ""
+style = "dimmed"
+
+[git_status]
+format = "[ · $summary]($summary_style)"
+style = "dimmed"
+
+[activity]
+format = "[( · $live)]($live_style)"
+symbol = ""
+style = "dimmed"
+
+[fill]
+symbol = " "
+style = "none"
+
+[model]
+format = "[$model]($style)"
+symbol = ""
+style = "none"
+
+[thinking]
+format = "[ · $level]($style)"
+symbol = ""
+style = "dimmed"
+
+[tokens]
+format = "[ΣIn $total_input · ΣOut $output]($style)"
+style = "dimmed"
+
+[context]
+format = "[ · Ctx $tokens/$window $percentage]($style)"
+symbol = ""
+display = [{ threshold = 0, style = "dimmed", hidden = false }, { threshold = 60, style = "yellow", hidden = false }, { threshold = 80, style = "red", hidden = false }]
+
+[cost]
+format = '[ · \$$cost$tools$subscription]($style)'
+display = [{ threshold = 0, style = "dimmed", hidden = false }]
+`;
 
 const require = createRequire(import.meta.url);
 let parseTomlImplementation: typeof import("smol-toml")["parse"] | undefined;
+
+export const BUILT_IN_CONFIG = normalizeConfig(parseToml(BUILT_IN_EXAMPLE)).config;
 
 function parseToml(document: string): TomlTable {
 	parseTomlImplementation ??= (require("smol-toml") as typeof import("smol-toml")).parse;
@@ -139,14 +174,14 @@ export function loadStarshipConfig(settingsPath: string): LoadedStarshipConfig {
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT" && !existsSync(settingsPath)) {
 			return {
-				config: cloneBuiltInConfig(),
+				config: cloneBuiltInConfig(BUILT_IN_CONFIG),
 				source: "built-in",
 				settingsPath,
 				diagnostics: [],
 			};
 		}
 		return {
-			config: cloneBuiltInConfig(),
+			config: cloneBuiltInConfig(BUILT_IN_CONFIG),
 			source: "built-in",
 			settingsPath,
 			diagnostics: [diagnostic("error", "", `Unable to read settings: ${formatError(error)}`)],
@@ -158,7 +193,7 @@ export function loadStarshipConfig(settingsPath: string): LoadedStarshipConfig {
 		parsed = parseToml(rawDocument);
 	} catch (error) {
 		return {
-			config: cloneBuiltInConfig(),
+			config: cloneBuiltInConfig(BUILT_IN_CONFIG),
 			source: "built-in",
 			settingsPath,
 			rawDocument,
@@ -527,28 +562,28 @@ function atomicWriteConfigDocument(
 	}
 }
 
-function cloneBuiltInConfig(): StarshipConfig {
+function cloneBuiltInConfig(base: StarshipConfig = LEGACY_CONFIG): StarshipConfig {
 	return {
-		...BUILT_IN_CONFIG,
-		formatAst: structuredClone(BUILT_IN_CONFIG.formatAst),
+		...base,
+		formatAst: structuredClone(base.formatAst),
 		palettes: Object.fromEntries(
-			Object.entries(BUILT_IN_CONFIG.palettes).map(([name, colors]) => [name, { ...colors }]),
+			Object.entries(base.palettes).map(([name, colors]) => [name, { ...colors }]),
 		),
 		modules: Object.fromEntries(
 			MODULE_NAMES.map((name) => [
 				name,
 				{
-					...BUILT_IN_CONFIG.modules[name],
-					formatAst: structuredClone(BUILT_IN_CONFIG.modules[name].formatAst),
-					styles: { ...BUILT_IN_CONFIG.modules[name].styles },
-					display: structuredClone(BUILT_IN_CONFIG.modules[name].display),
-					options: structuredClone(BUILT_IN_CONFIG.modules[name].options),
+					...base.modules[name],
+					formatAst: structuredClone(base.modules[name].formatAst),
+					styles: { ...base.modules[name].styles },
+					display: structuredClone(base.modules[name].display),
+					options: structuredClone(base.modules[name].options),
 				},
 			]),
 		) as Record<ModuleName, ModuleConfig>,
 		extensionStatus: {
-			...BUILT_IN_CONFIG.extensionStatus,
-			icons: { ...BUILT_IN_CONFIG.extensionStatus.icons },
+			...base.extensionStatus,
+			icons: { ...base.extensionStatus.icons },
 		},
 	};
 }
@@ -605,9 +640,9 @@ function validateModuleStyleField(
 			`Invalid style ${JSON.stringify(style)}; using the module default`,
 		),
 	);
-	if (field === "style") module.style = BUILT_IN_CONFIG.modules[name].style;
+	if (field === "style") module.style = LEGACY_CONFIG.modules[name].style;
 	else {
-		const fallback = BUILT_IN_CONFIG.modules[name].styles[field];
+		const fallback = LEGACY_CONFIG.modules[name].styles[field];
 		if (fallback !== undefined) module.styles[field] = fallback;
 	}
 }

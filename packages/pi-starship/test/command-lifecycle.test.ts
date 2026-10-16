@@ -198,26 +198,26 @@ test("preset cursor preview swaps only the in-memory footer and Back restores it
 		await emit(mock.events, "session_start", {}, context.ctx);
 		const footer = (context.footer as FooterFactory)(
 			{ requestRender() {} },
-			{},
+			{ fg: (_role, text) => text },
 			{
 				getGitBranch: () => null,
 				getExtensionStatuses: () => new Map(),
 				onBranchChange: () => () => undefined,
 			},
 		);
-		assert.match(footer.render(80).join("\n"), /π/u);
+		assert.match(footer.render(80).join("\n"), /ΣIn/u);
 
 		const command = mock.commands.get("starship")?.handler("", context.ctx);
 		await tui.waitForOpen();
 		tui.press("tui.select.down");
 		tui.press("tui.select.confirm");
 		await tui.waitForOpen();
-		assert.doesNotMatch(footer.render(80).join("\n"), /π/u);
+		assert.doesNotMatch(footer.render(80).join("\n"), /ΣIn/u);
 		assert.equal(existsSync(join(root, "pi-starship.toml")), false);
 
 		tui.press("tui.select.cancel");
 		await tui.waitForOpen();
-		assert.match(footer.render(80).join("\n"), /π/u);
+		assert.match(footer.render(80).join("\n"), /ΣIn/u);
 		tui.press("ctrl+c");
 		await command;
 		footer.dispose();
@@ -243,7 +243,7 @@ test("session replacement clears an open preset footer preview before returning"
 		await emit(mock.events, "session_start", {}, oldContext.ctx);
 		const oldFooter = (oldContext.footer as FooterFactory)(
 			{ requestRender() {} },
-			{},
+			{ fg: (_role, text) => text },
 			{
 				getGitBranch: () => null,
 				getExtensionStatuses: () => new Map(),
@@ -255,12 +255,12 @@ test("session replacement clears an open preset footer preview before returning"
 		tui.press("tui.select.down");
 		tui.press("tui.select.confirm");
 		await tui.waitForOpen();
-		assert.doesNotMatch(oldFooter.render(80).join("\n"), /π/u);
+		assert.doesNotMatch(oldFooter.render(80).join("\n"), /ΣIn/u);
 
 		const newContext = createMockContext({ mode: "tui", cwd: "/work/replacement" });
 		await emit(mock.events, "session_start", {}, newContext.ctx);
 		await command;
-		assert.match(oldFooter.render(80).join("\n"), /π/u);
+		assert.match(oldFooter.render(80).join("\n"), /ΣIn/u);
 		assert.equal(existsSync(join(root, "pi-starship.toml")), false);
 		oldFooter.dispose();
 		await emit(mock.events, "session_shutdown", {}, newContext.ctx);
@@ -414,7 +414,7 @@ async function emit(
 
 type FooterFactory = (
 	tui: { requestRender(): void },
-	theme: unknown,
+	theme: { fg(role: string, text: string): string },
 	data: {
 		getGitBranch(): string | null;
 		getExtensionStatuses(): ReadonlyMap<string, string>;

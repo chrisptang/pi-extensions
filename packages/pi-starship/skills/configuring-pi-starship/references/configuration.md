@@ -10,11 +10,40 @@ The only configuration source is:
 <getAgentDir()>/pi-starship.toml
 ```
 
-When this file is absent, the extension uses its palette-free default without creating the file or its parent directory.
-The built-in footer has two rows: `$brand$model$thinking$directory$git_branch$git_status$activity$context`, then `$tokens$cache$cost`.
-It does not start the opt-in GitHub PR query; existing custom root formats remain unchanged.
-The first successful settings save creates the file atomically.
-Existing malformed documents are never overwritten.
+When this file is absent, the extension uses its quiet, palette-free built-in template without creating the file or its parent directory.
+Read failures and malformed TOML also fall back to that template, with diagnostics and no automatic write.
+The first successful explicit settings save creates the file atomically; loading never overwrites a malformed existing document.
+**Restore built-in…** offers explicit, confirmed replacement with the built-in template, including for an invalid document.
+
+The built-in root layout is:
+
+```toml
+format = "$directory$git_branch$git_status$activity $fill$model$thinking\n$tokens$context$cost"
+```
+
+This root line describes the layout, not the complete built-in document: its module formats and styles are explicit template overrides.
+Row one places workspace/directory, branch, nonempty textual Git status, and live activity on the left, with model and thinking level on the right.
+Row two retains `ΣIn` inclusive session input, `ΣOut` cumulative output, `Ctx` tokens/window and percentage, and precise reported cost including the positive tool-cost share and subscription `estimate` suffix.
+There is no brand or cache-rate module in this layout, and it does not start the opt-in GitHub PR query.
+Normal output uses terminal colors and dimmed/muted text without bold or rainbow segments.
+Context uses the warning theme role from `60%` and error from `80%`; conflicts use error and blocking UI waits use warning.
+Idle and completed activity is empty.
+Long directory, branch, and model labels adaptively shorten in the middle only for this new root layout; usage is never width-shortened, and narrow terminals may wrap.
+
+### Built-in template versus legacy defaults
+
+Valid custom TOML—including an empty file—and bundled presets normalize over the legacy root and public module defaults, not the quiet template.
+An omitted or invalid custom root format retains this legacy layout:
+
+```toml
+format = "$brand$model$thinking$directory$session_name$git_branch$git_status$activity\n$tokens$cache$context$cost"
+```
+
+Module formats, symbols, styles, and display defaults listed in [the module catalog](module-catalog.md) remain legacy defaults.
+The quiet template explicitly overrides only its selected modules; copying just its root line does not copy those overrides.
+In source, `config.ts` builds `BUILT_IN_CONFIG` by parsing the complete `BUILT_IN_EXAMPLE` document over legacy normalization.
+Use **Customize footer** without a file to start from that complete document, or **Restore built-in…** to migrate an existing file after preview and confirmation.
+Existing documents and presets are not rewritten or automatically migrated.
 
 The extension does **not** read project overrides, `pi-statusline.json`, `PI_STATUSLINE_PRESET`, or `~/.config/starship.toml`, and does not migrate statusline settings.
 
@@ -47,7 +76,8 @@ A deleted document is a valid previewable transition to built-in defaults and cr
 An unchanged document is a no-op, while read or parse failure, cancellation, disposal, external changes after preview, session replacement, shutdown, or runtime apply failure preserves the prior effective footer and every file byte.
 Reload re-reads immediately after confirmation and rejects a different external snapshot; it does not claim cross-process locking or continuing synchronization with later edits.
 Restore is disabled when no settings document exists or the exact built-in document is already saved.
-For a custom or invalid document, Restore previews the result and warns that the complete document, including custom settings, unknown fields, and comments, will be replaced without a post-success backup before asking for confirmation.
+For a custom or invalid document, Restore previews the new quiet template and warns that the complete document, including custom settings, unknown fields, and comments, will be replaced without a post-success backup before asking for confirmation.
+This confirmation explicitly migrates older documents, including empty ones, to the quiet built-in configuration.
 
 ### 🎛️ Presets
 
@@ -75,7 +105,7 @@ Moving through the preset picker temporarily renders the selected preset in the 
 Press Enter to confirm replacement, or press `e` to edit the selected complete TOML document before preview and confirmation.
 Escape returns to the main menu, while Ctrl+C closes the workflow; both restore the active footer.
 
-Presets are complete documents, not overlays.
+Presets are complete documents, not overlays, and retain their existing visual treatments and legacy normalization defaults rather than inheriting the quiet built-in styles.
 After confirmation, applying one replaces all of `pi-starship.toml`, including custom settings, unknown fields, and comments; no backup is kept.
 Cancellation, disposal, validation failure, write failure, and runtime-apply failure preserve the previous document and footer.
 An exact match is **Currently applied** and cannot be selected again; editing any byte makes it custom.
@@ -86,7 +116,10 @@ They do not enable the GitHub PR query, cloud/deployment readers, or optional co
 They are Pi-native adaptations of the color and format treatments emitted by Starship 1.26.0; they do not copy Starship's module selections because Pi exposes different runtime information.
 There is no `/starship preset` textual route and no remote preset download.
 
-### 📝 Example
+### 📝 Custom example
+
+This deliberately colorful custom document demonstrates legacy module defaults and explicit overrides; it is not the quiet built-in template.
+Use the menu's complete built-in document rather than this example when adopting the new default.
 
 ```toml
 format = """
@@ -244,7 +277,7 @@ Detection fallback and replacement behavior differs by module and is specified i
 | TOML syntax failure | Preserve the raw document, use built-in defaults, and report an error diagnostic. |
 | Unknown root, module, option, or display field | Warn, ignore that field, and keep processing the document. |
 | Wrong field type | Warn and retain the default for that field. |
-| Invalid root `format` | Warn and restore only the built-in root format. |
+| Invalid root `format` in valid TOML | Warn and restore only the legacy root format; retain other valid custom fields. |
 | Invalid module `format` | Warn and restore only that module's default format. |
 | Unknown format or style variable | Warn and render that variable empty. |
 | Invalid literal group style | Warn and render that group unstyled. |
@@ -268,6 +301,7 @@ Unknown fields and comments remain in the settings document even though they are
 - `$all` expands enabled modules in the default order and omits modules already referenced explicitly.
 
 Module formats can use `$style` in a style expression.
+`activity` additionally exposes `$live_style`, and `git_status` exposes `$summary_style`; these are resolved style variables, not extra TOML fields.
 Module output keeps its own style when embedded in an outer styled group.
 
 ## 🎨 Styles and palettes
@@ -302,11 +336,13 @@ Style tokens are case-insensitive and ordinary foreground/background colors are 
 `prev_fg`/`prev_bg` override their absolute fallback only when a previous chunk exists.
 Empty styled groups still advance previous-color state.
 Invalid literal style expressions warn and render unstyled.
-An invalid root format falls back to the built-in root format; an invalid module format or catalog-owned style field falls back only at that field's module scope.
+An invalid root format in otherwise valid TOML falls back to the legacy root format; an invalid module format or catalog-owned style field falls back only at that field's legacy module scope.
 `/starship status` reports warnings.
 
-The background-free defaults are: `brand = "bold white"`, `provider`/`model` = `"bold blue"`, `thinking`/`git_branch`/`turn` = `"bold purple"`, `directory`/`git_worktree` = `"cyan bold"`, `github_pr = "bold blue"`, `git_commit = "green bold"`, `git_state`/`activity`/`time` = `"bold yellow"`, `git_status = "red bold"`, `tokens = "bold cyan"`, `cache = "bold green"`, `extension_status = "dimmed white"`, `direnv = "bold bright-yellow"`, and `fill = "bold black"`.
-Context, cost, Git metrics, and username use the state/multi-style defaults below.
+The background-free **legacy module defaults**, not the quiet built-in template's styles, are: `brand = "bold white"`, `provider`/`model` = `"bold blue"`, `thinking`/`git_branch`/`turn` = `"bold purple"`, `directory`/`git_worktree` = `"cyan bold"`, `github_pr = "bold blue"`, `git_commit = "green bold"`, `git_state`/`activity`/`time` = `"bold yellow"`, `git_status = "red bold"`, `tokens = "bold cyan"`, `cache = "bold green"`, `extension_status = "dimmed white"`, `direnv = "bold bright-yellow"`, and `fill = "bold black"`.
+Context, cost, Git metrics, and username use the legacy state/multi-style defaults below.
+The quiet built-in template instead uses unstyled directory/model text, dimmed secondary text and cost, and non-bold context styles at thresholds `0`, `60`, and `80`.
+In the new default root, Pi theme roles map dimmed text to `muted`, yellow to `warning`, and red to `error`; custom root layouts keep their explicit style rendering.
 
 ### Thinking level styles
 
@@ -331,8 +367,10 @@ A later entry wins when thresholds are equal.
 Each display entry requires a finite `threshold`, a valid `style`, and boolean `hidden`.
 Invalid entries warn and are ignored; module defaults are used if none remain.
 
-The default context thresholds are `bold green` through `59.999%`, `bold yellow` from `60%`, and `bold red` from `80%`; they never hide the context metric.
-The default cost thresholds are `bold green` below `$1`, `bold yellow` from `$1`, and `bold red` from `$5`; they never hide a reported cost:
+The legacy module context thresholds are `bold green` below `60%`, `bold yellow` from `60%`, and `bold red` from `80%`; they never hide the context metric.
+The quiet built-in template overrides them with `dimmed` below `60%`, `yellow` from `60%`, and `red` from `80%`, rendered through Pi's muted/warning/error theme roles.
+Its cost stays dimmed at every amount.
+The legacy module cost thresholds remain `bold green` below `$1`, `bold yellow` from `$1`, and `bold red` from `$5`; they never hide a reported cost:
 
 ```toml
 [[cost.display]]

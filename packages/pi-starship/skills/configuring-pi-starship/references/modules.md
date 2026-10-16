@@ -18,12 +18,12 @@ Use this authoritative public reference whenever a question or change involves a
 | `git_commit` | `$symbol`, `$hash`, `$tag` | Seven-character HEAD hash and optional exact tag |
 | `git_state` | `$symbol`, `$state`, `$progress_current`, `$progress_total` | Rebase, merge, revert, cherry-pick, bisect, or mail-apply state |
 | `git_metrics` | `$symbol`, `$added`, `$deleted` | Added/deleted line totals from the working tree diff |
-| `git_status` | `$symbol`, `$all_status`, `$ahead_behind`, `$ahead`, `$behind`, `$diverged`, `$up_to_date`, `$conflicted`, `$stashed`, `$deleted`, `$renamed`, `$modified`, `$typechanged`, `$staged`, `$untracked`, and detailed index/worktree counters | Cached porcelain-v2 counters |
-| `activity` | `$symbol`, `$state`, `$tool`, `$count`, `$kind`, `$title`, `$text` | Extension UI waits, active tools, streaming, completion, or idle |
+| `git_status` | `$symbol`, `$all_status`, `$summary`, `$ahead_behind`, `$ahead`, `$behind`, `$diverged`, `$up_to_date`, `$conflicted`, `$stashed`, `$deleted`, `$renamed`, `$modified`, `$typechanged`, `$staged`, `$untracked`, and detailed index/worktree counters | Cached porcelain-v2 counters |
+| `activity` | `$symbol`, `$state`, `$tool`, `$count`, `$kind`, `$title`, `$text`, `$live` | Extension UI waits, active tools, streaming, completion, or idle; `$live` hides idle/completed states |
 | `context` | `$symbol`, `$percentage`, `$tokens`, `$window` | Current context tokens, context window, and percentage |
 | `tokens` | `$symbol`, `$input`, `$output`, `$total`, `$total_input` | Session token totals; `$total_input` includes prompt cache reads and writes |
 | `cache` | `$symbol`, `$rate`, `$session_rate`, `$read`, `$write` | Prompt-cache totals, latest-request rate, and session token-weighted rate |
-| `cost` | `$symbol`, `$cost`, `$subscription` | Reported usage-cost estimate and subscription estimate marker |
+| `cost` | `$symbol`, `$cost`, `$tools`, `$subscription` | Reported usage-cost estimate, included tool-cost share, and subscription estimate marker |
 | `time` | `$symbol`, `$time` | Current local time |
 | `turn` | `$symbol`, `$count` | User turn count |
 | `package` | `$symbol`, `$version`, `$source` | Direct project manifest version |
@@ -53,6 +53,8 @@ Use this authoritative public reference whenever a question or change involves a
 | `extension_status` | `$symbol`, `$statuses`, `$count` | Pi extension statuses |
 
 For exact default formats, symbols, enabled state, accepted style fields, display defaults, option types, numeric ranges, and enum values, use [the complete module catalog](module-catalog.md).
+Those are legacy public module defaults; the quiet built-in document explicitly overrides selected module formats and styles without changing custom TOML or presets.
+`activity` also exposes `$live_style` and `git_status` exposes `$summary_style` in style expressions, not as TOML fields.
 
 ## Reachability and collection rules
 
@@ -129,26 +131,38 @@ Terraform workspace precedence is `TF_WORKSPACE`, `TF_DATA_DIR/environment`, the
 
 - During a blocking extension UI prompt, `activity` sets `$state` to `waiting`, `$kind` to the prompt kind, and `$title` to the sanitized bounded title or an empty string.
 - Prompt waiting takes precedence without losing the underlying tool, streaming, completed, or idle state, which returns when the prompt closes.
+- Activity `$live` omits the symbol and shows `running <tool>`, adding `×<count>` for concurrent calls to that tool and `+<other-tool-count>` for other tool names; streaming without active tools shows `thinking`.
+  A prompt instead shows `waiting for <kind>` with ` · <title>` when present.
+  Idle and completed states render empty, while legacy `$text` still includes the configured symbol and idle/completed text.
+  `$live_style` is `yellow` for a UI prompt and the module's `style` otherwise; the quiet default renders prompt waits through Pi's warning theme role.
 - `tokens`, `cache`, and `cost` total every usage-bearing session entry, matching Pi's native session totals.
   This includes assistant messages, nested-LLM tool results, compactions, and branch summaries, including abandoned branches retained in the session; user, custom, model-change, thinking-level-change, label, and session-info entries contribute no usage.
 - Tokens `$input`, `$output`, and `$total` retain their legacy meanings: raw input, output, and raw input plus output.
   `$total_input` is the explicit cumulative prompt total used by the default footer: `input + cacheRead + cacheWrite`.
-- Cache `$read` and `$write` are cumulative, and the default `$session_rate` is token-weighted across the session: `cacheRead / (input + cacheRead + cacheWrite) * 100`.
+- Cache `$read` and `$write` are cumulative, and the legacy cache format's `$session_rate` is token-weighted across the session: `cacheRead / (input + cacheRead + cacheWrite) * 100`.
   `$rate` remains the optional latest assistant-request rate with that request's token counts.
   With measured non-cached usage, both rates show `0.0%`; with no usage report, rates show `—`.
-- `cache` is enabled and appears in the built-in metrics row.
-  Custom root formats remain authoritative: add or remove `$cache` or use `$all` as desired.
+- `cache` remains enabled at module scope but is absent from the quiet built-in metrics row, as is `brand` from the first row.
+  Custom root formats remain authoritative: add or remove `$cache` or use `$all` as desired; valid empty files retain the legacy root including cache.
 - Context `$percentage` uses native one-decimal precision.
-  The default always shows tokens, window, and percentage; display thresholds select color only.
+  The built-in template and legacy module format both show tokens, window, and percentage; display thresholds select color only.
+  The quiet template uses muted text below `60%`, warning from `60%`, and error from `80%` through Pi's theme, while legacy module display defaults retain bold green/yellow/red.
   Missing context usage renders `—` rather than a measured zero.
   The module name remains `context`, not `context_usage`.
 - Cost is the provider-reported usage estimate and always remains configurable through `[cost]` and `[[cost.display]]`.
   Subscription-backed OAuth models and `kimi-coding` append `$subscription` as `estimate`; this is not proof of an amount billed under a subscription.
   Missing usage renders cost as `—`, while measured zero renders `$0.000`.
+  Formatting retains three decimal places below $1 and two from $1.
+  `$cost` includes tool-result costs; `$tools` adds ` (tools $x)` only when that included share is positive, such as for subagent runs.
+  The quiet template keeps cost dimmed regardless of amount; legacy module display thresholds remain unchanged.
 
 ### Directory, Git, and environment contraction
 
-The analogous modules keep their display policy local and use Starship defaults:
+The quiet built-in root adds adaptive middle shortening for long directory, branch, and model output before fill and wrapping.
+Only that new root layout receives this width-fitting behavior; usage is never width-shortened, and narrow terminals may still wrap.
+Custom roots and presets retain the module-local contraction/truncation rules below.
+
+The analogous modules keep their legacy display policy local and use Starship defaults:
 
 ```toml
 [directory]
@@ -186,6 +200,11 @@ Git branch truncation retains the first `N` grapheme clusters and appends the fi
 The same rule applies independently to `$branch`, `$remote_name`, and `$remote_branch`.
 Upstream Starship represents its unlimited default as `2^63 - 1`; pi-starship uses `0` for the same behavior because its settings integers are deliberately bounded.
 `commit_hash_length` accepts 0 through 64.
+
+Git status `$summary` lists nonzero counters as `<count> <label>`, comma-separated in this exact order: conflicted, stashed, deleted, renamed, modified, typechanged, staged, untracked, ahead, behind.
+For example: `1 conflicted, 4 modified, 2 ahead`; a clean status is empty.
+`$summary_style` is `red` when conflicts exist and the module's `style` otherwise.
+The quiet template uses dimmed normal status and Pi's error theme role for conflicts, while legacy `$all_status`, symbolic counters, and module defaults remain unchanged.
 
 Conda retains the last path component by default; `0` keeps the complete environment path.
 Hostname trimming runs before exact alias lookup, matching Starship.

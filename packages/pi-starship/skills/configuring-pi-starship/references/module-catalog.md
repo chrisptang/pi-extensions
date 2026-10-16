@@ -3,6 +3,9 @@
 Use this authoritative public reference for exact module names, format variables, defaults, accepted style fields, display rules, option types, ranges, and enum values.
 
 The catalog order is also the `$all` expansion order.
+All default formats, symbols, styles, display arrays, and options below are the public **legacy module defaults** used when valid custom TOML or presets omit a field.
+They are not the quiet built-in template: that complete document explicitly overrides selected formats and styles and omits brand/cache from its root.
+See [configuration](configuration.md#built-in-template-versus-legacy-defaults) for the fallback and migration boundary.
 
 ## Shared module fields
 
@@ -274,8 +277,8 @@ Accepted style fields:
 
 Current Git worktree and index status summary.
 
-- Format variables: `$symbol`, `$all_status`, `$ahead_behind`, `$ahead`, `$behind`, `$up_to_date`, `$diverged`, `$conflicted`, `$stashed`, `$deleted`, `$renamed`, `$modified`, `$typechanged`, `$staged`, `$untracked`, `$worktree_added`, `$worktree_deleted`, `$worktree_modified`, `$worktree_typechanged`, `$index_added`, `$index_deleted`, `$index_modified`, `$index_typechanged`.
-- Style variables in `format`: `$style`.
+- Format variables: `$symbol`, `$all_status`, `$summary`, `$ahead_behind`, `$ahead`, `$behind`, `$up_to_date`, `$diverged`, `$conflicted`, `$stashed`, `$deleted`, `$renamed`, `$modified`, `$typechanged`, `$staged`, `$untracked`, `$worktree_added`, `$worktree_deleted`, `$worktree_modified`, `$worktree_typechanged`, `$index_added`, `$index_deleted`, `$index_modified`, `$index_typechanged`.
+- Style variables in `format`: `$style`, `$summary_style`.
 - Default `format`: `"[$all_status( $ahead_behind) ]($style)"`.
 - Default `symbol`: `""`.
 - Default `disabled`: `false`.
@@ -285,6 +288,13 @@ Accepted style fields:
 | Field | Default |
 | --- | --- |
 | `style` | `"red bold"` |
+
+`$summary` is a comma-separated textual list of nonzero counters in this order: conflicted, stashed, deleted, renamed, modified, typechanged, staged, untracked, ahead, behind.
+For example: `1 conflicted, 4 modified, 2 ahead`.
+A clean status is empty.
+`$summary_style` resolves to `red` on conflict, otherwise the module's `style`; it is a format style variable, not a TOML field.
+The quiet built-in template uses `$summary` with dimmed normal status and Pi's error theme role on conflict.
+`$all_status` and the existing symbolic counters keep their legacy values and default format.
 
 ### `package`
 
@@ -846,8 +856,8 @@ Additional options:
 
 Current Pi activity, extension UI wait, or most recently completed tool.
 
-- Format variables: `$symbol`, `$state`, `$tool`, `$count`, `$kind`, `$title`, `$text`.
-- Style variables in `format`: `$style`.
+- Format variables: `$symbol`, `$state`, `$tool`, `$count`, `$kind`, `$title`, `$text`, `$live`.
+- Style variables in `format`: `$style`, `$live_style`.
 - Default `format`: `"[ $text ]($style)"`.
 - Default `symbol`: `"⚙️"`.
 - Default `disabled`: `false`.
@@ -857,6 +867,12 @@ Accepted style fields:
 | Field | Default |
 | --- | --- |
 | `style` | `"bold yellow"` |
+
+`$live` is symbol-free: `running <tool>` with `×<count>` for repeated calls and `+<other-tool-count>` for other active tool names, `thinking` while streaming, or `waiting for <kind>` plus ` · <title>` when a bounded sanitized title exists.
+A blocking UI prompt takes precedence; idle and completed states produce an empty `$live`.
+`$live_style` resolves to `yellow` during a blocking UI prompt, otherwise the module's `style`; it is not a TOML field.
+The quiet built-in template uses these variables with dimmed normal activity and Pi's warning theme role for UI waits.
+The legacy `$text`, `$state`, and default format still expose idle/completed activity as before.
 
 ### `context`
 

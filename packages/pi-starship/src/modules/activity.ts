@@ -28,13 +28,18 @@ function formatUIPromptTitle(title: string | undefined): string {
 
 export const activityModule = defineModule({
 	name: "activity",
-	variables: ["symbol", "state", "tool", "count", "kind", "title", "text"],
+	variables: ["symbol", "state", "tool", "count", "kind", "title", "text", "live"],
 	defaults: {
 		format: "[ $text ]($style)",
 		symbol: "⚙️",
 		style: "bold yellow",
 		disabled: false,
 	},
+	styleVariables: ["style", "live_style"],
+	resolveStyleVariables: ({ runtime, style }) => ({
+		style,
+		live_style: runtime.uiPrompt ? "yellow" : style,
+	}),
 	values: ({ runtime, symbol }) => {
 		if (runtime.uiPrompt) {
 			const title = formatUIPromptTitle(runtime.uiPrompt.title);
@@ -46,6 +51,7 @@ export const activityModule = defineModule({
 				kind: runtime.uiPrompt.kind,
 				title,
 				text: `${symbol} ${waiting}`,
+				live: waiting,
 			};
 		}
 
@@ -60,6 +66,7 @@ export const activityModule = defineModule({
 				count: `${count}`,
 				...EMPTY_PROMPT_VALUES,
 				text: `${symbol} ${tool}${suffix}${more}`,
+				live: `running ${tool}${suffix}${more}`,
 			};
 		}
 		if (runtime.isStreaming) {
@@ -69,6 +76,7 @@ export const activityModule = defineModule({
 				count: "0",
 				...EMPTY_PROMPT_VALUES,
 				text: `${symbol} thinking`,
+				live: "thinking",
 			};
 		}
 		if (runtime.lastCompletedTool) {
@@ -78,6 +86,7 @@ export const activityModule = defineModule({
 				count: "0",
 				...EMPTY_PROMPT_VALUES,
 				text: `${symbol} completed ${runtime.lastCompletedTool}`,
+				live: "",
 			};
 		}
 		return {
@@ -86,6 +95,7 @@ export const activityModule = defineModule({
 			count: "0",
 			...EMPTY_PROMPT_VALUES,
 			text: `${symbol} idle`,
+			live: "",
 		};
 	},
 });
