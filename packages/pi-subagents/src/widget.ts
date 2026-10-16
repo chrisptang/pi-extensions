@@ -1,5 +1,12 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { truncateToWidth } from "@earendil-works/pi-tui";
+import {
+	isViewportTUI,
+	type TUI,
+	type TuiMouseEvent,
+	type TuiMouseEventResult,
+	truncateToWidth,
+} from "@earendil-works/pi-tui";
+import { openSubagentsPanel } from "./panel.js";
 import type { ActiveJobDisplay, SubagentRuntime } from "./runtime.js";
 import { formatDuration, sanitizeTerminalText } from "./text.js";
 
@@ -18,6 +25,7 @@ export function createSubagentWidgetController(runtime: SubagentRuntime): Subage
 	let refreshTimer: ReturnType<typeof setInterval> | undefined;
 	let unsubscribeJobs: (() => void) | undefined;
 	let publishedValue: string | undefined;
+	let panelOpen = false;
 
 	const ownsSession = (ctx: ExtensionContext): boolean => ctx.sessionManager === activeSession;
 
@@ -26,6 +34,32 @@ export function createSubagentWidgetController(runtime: SubagentRuntime): Subage
 		refreshTimer = undefined;
 		unsubscribeJobs?.();
 		unsubscribeJobs = undefined;
+	};
+
+	/**
+	 * Open the panel through the same path as `/subagents`. A click on a job row
+	 * lands on that job's detail view; a click on the header opens the list. The
+	 * flag blocks re-entry while a panel is up, since the widget stays mounted
+	 * above the editor and remains clickable.
+	 */
+	const openPanel = (ctx: ExtensionContext, jobId?: string): void => {
+		if (panelOpen || !ownsSession(ctx)) return;
+		panelOpen = true;
+		void openSubagentsPanel(
+			runtime,
+			ctx,
+			jobId === undefined ? undefined : { jobId, view: "detail" },
+		)
+			.catch((error: unknown) => {
+				if (!ownsSession(ctx)) return;
+				ctx.ui.notify(
+					`Could not open the subagents panel: ${error instanceof Error ? error.message : String(error)}`,
+					"error",
+				);
+			})
+			.finally(() => {
+				panelOpen = false;
+			});
 	};
 
 	const publish = (ctx: ExtensionContext): void => {
@@ -39,10 +73,21 @@ export function createSubagentWidgetController(runtime: SubagentRuntime): Subage
 			const snapshot = jobs.map(cloneDisplayJob);
 			ctx.ui.setWidget(
 				SUBAGENT_WIDGET_KEY,
-				(_tui, theme) => ({
-					render: (width) => renderSubagentWidget(snapshot, theme, width),
-					invalidate: () => {},
-				}),
+				(tui: TUI, theme) => {
+					const clickable = isViewportTUI(tui);
+					return {
+						render: (width) => renderSubagentWidget(snapshot, theme, width, clickable),
+						invalidate: () => {},
+						handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+							if (event.button !== "left") return undefined;
+							// The press must be handled for the release to arrive as a click.
+							if (event.type === "press") return { handled: true, render: false };
+							if (event.type !== "click") return undefined;
+							openPanel(ctx, event.y > 0 ? snapshot[event.y - 1]?.jobId : undefined);
+							return { handled: true };
+						},
+					};
+				},
 				WIDGET_OPTIONS,
 			);
 		}
@@ -75,11 +120,16 @@ export function renderSubagentWidget(
 	jobs: readonly ActiveJobDisplay[],
 	theme: Theme,
 	width: number,
+	clickable = false,
 ): string[] {
 	const renderWidth = Math.max(0, width);
 	const cost = jobs.reduce((total, job) => total + job.cost, 0);
+	// Only fullscreen mode tracks the mouse, so the click hint is viewport-only.
+	const hint = clickable
+		? " · click or /subagents to inspect"
+		: " · /subagents to inspect or terminate";
 	const lines = [
-		`${theme.fg("muted", `Subagents · ${jobs.length} active · ${formatCost(cost)}`)}${theme.fg("dim", " · /subagents to inspect or terminate")}`,
+		`${theme.fg("muted", `Subagents · ${jobs.length} active · ${formatCost(cost)}`)}${theme.fg("dim", hint)}`,
 		...jobs.map((job) => renderJob(job, theme)),
 	];
 	return lines.map((line) => truncateToWidth(line, renderWidth, "…"));

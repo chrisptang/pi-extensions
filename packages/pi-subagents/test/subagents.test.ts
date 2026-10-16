@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import type { Component } from "@earendil-works/pi-tui";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import type { Component, TUI, TuiMouseEvent } from "@earendil-works/pi-tui";
+import { KeybindingsManager, TUI_KEYBINDINGS, visibleWidth } from "@earendil-works/pi-tui";
 import { Check } from "typebox/value";
 import { afterEach, beforeEach, test, vi } from "vitest";
 import { createMockContext, createMockPi } from "../../../test/support.js";
@@ -346,6 +346,60 @@ test("labels active jobs with their agent and description above the editor", asy
 	await emit(mock, "session_shutdown", { reason: "reload" }, context.ctx);
 	assert.equal(context.widgets.get(SUBAGENT_WIDGET_KEY), undefined);
 	assert.ok(clearIntervalSpy.mock.calls.length > 0);
+});
+
+test("clicking a widget job row opens the panel on that job's detail", async () => {
+	const panelFactories: unknown[] = [];
+	let resolvePanel: ((result: unknown) => void) | undefined;
+	const { mock, context } = await setup(
+		{ runChild: waitForCancellation },
+		{},
+		{
+			mode: "tui",
+			// Hold the panel open until the test resolves it, so the re-entry
+			// guard can be observed.
+			custom: (factory: unknown) => {
+				panelFactories.push(factory);
+				return new Promise((resolve) => {
+					resolvePanel = resolve;
+				});
+			},
+		},
+	);
+	const spawned = await spawnJob(mock, context, "inspect the widget");
+	await Promise.resolve();
+	const component = widgetComponent(context, viewportTui());
+
+	// The fullscreen widget advertises the click shortcut; regular mode keeps
+	// the keyboard-only hint.
+	assert.match(component.render(120)[0] ?? "", /click or \/subagents/u);
+	assert.match(
+		widgetComponent(context, {}).render(120)[0] ?? "",
+		/\/subagents to inspect or terminate$/u,
+	);
+
+	// A press must be handled for the release to be delivered as a click;
+	// everything else stays transparent so selection and wheel scrolling work.
+	assert.deepEqual(component.handleMouse?.(mouse("press", 0)), { handled: true, render: false });
+	assert.equal(component.handleMouse?.(mouse("move", 0)), undefined);
+	assert.equal(component.handleMouse?.(mouse("wheel", 0)), undefined);
+	assert.equal(component.handleMouse?.(mouse("press", 0, "right")), undefined);
+
+	// The click lands on the job row (y=1), so the panel opens in detail view.
+	component.handleMouse?.(mouse("click", 1));
+	assert.equal(panelFactories.length, 1);
+	const lines = panelComponent(panelFactories[0]).render(100);
+	assert.match(lines[0] ?? "", new RegExp(`^╭─ ${String(spawned.details.jobId)} · running`, "u"));
+
+	// The widget stays mounted above the open panel; clicks must not stack.
+	component.handleMouse?.(mouse("click", 0));
+	assert.equal(panelFactories.length, 1);
+
+	resolvePanel?.({});
+	await new Promise((resolve) => setImmediate(resolve));
+	component.handleMouse?.(mouse("click", 0));
+	assert.equal(panelFactories.length, 2);
+	assert.match(panelComponent(panelFactories[1]).render(100)[0] ?? "", /^╭─ Subagents · /u);
 });
 
 test("does not install the component widget outside TUI mode", async () => {
@@ -1414,7 +1468,61 @@ function completed(result: string): ChildResult {
 function identityTheme(): Theme {
 	return {
 		fg: (_role: string, text: string) => text,
+		bg: (_role: string, text: string) => text,
+		bold: (text: string) => text,
 	} as Theme;
+}
+
+/** The component the widget most recently published, built against `tui`. */
+function widgetComponent(context: Context, tui: unknown): Component {
+	const factory = context.widgets.get(SUBAGENT_WIDGET_KEY) as
+		| ((tui: unknown, theme: Theme) => Component)
+		| undefined;
+	assert.ok(factory, "Expected the widget component to be published");
+	return factory(tui, identityTheme());
+}
+
+/** Only the fullscreen TUI marks itself as a viewport and tracks the mouse. */
+function viewportTui(): TUI {
+	return { [Symbol.for("@earendil-works/pi-tui/viewport")]: true } as unknown as TUI;
+}
+
+function mouse(
+	type: TuiMouseEvent["type"],
+	y: number,
+	button: TuiMouseEvent["button"] = "left",
+): TuiMouseEvent {
+	return {
+		type,
+		button,
+		x: 2,
+		y,
+		screenX: 2,
+		screenY: 10 + y,
+		width: 120,
+		height: 3,
+		shift: false,
+		alt: false,
+		ctrl: false,
+	};
+}
+
+/** Instantiate the component factory captured from `ctx.ui.custom()`. */
+function panelComponent(factory: unknown): { render(width: number): string[] } {
+	assert.equal(typeof factory, "function");
+	return (
+		factory as (
+			tui: unknown,
+			theme: Theme,
+			keybindings: KeybindingsManager,
+			done: (result: unknown) => void,
+		) => { render(width: number): string[] }
+	)(
+		{ requestRender: () => undefined, terminal: { rows: 30 } },
+		identityTheme(),
+		new KeybindingsManager(TUI_KEYBINDINGS),
+		() => undefined,
+	);
 }
 
 function cancelled(): ChildResult {

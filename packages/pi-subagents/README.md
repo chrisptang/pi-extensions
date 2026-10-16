@@ -99,6 +99,7 @@ Spend a background job incurs after the model's last subagent tool call is shown
 
 In TUI mode, the above-editor widget shows the active jobs' combined cost and one line per queued or running job: its agent or ID, description, elapsed time, turns used against its budget, cost so far, and its most recent activity line.
 The widget disappears when no jobs remain active, and clears when the session ends.
+In fullscreen mode the widget is clickable: a click opens the inspection panel, and clicking a job row jumps straight to that job's activity.
 
 Run `/subagents` for the full inspection panel. See [Inspecting and terminating jobs](#-inspecting-and-terminating-jobs).
 

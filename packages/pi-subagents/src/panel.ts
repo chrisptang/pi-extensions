@@ -1,4 +1,8 @@
-import type { ExtensionCommandContext, Theme } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionCommandContext,
+	ExtensionContext,
+	Theme,
+} from "@earendil-works/pi-coding-agent";
 import {
 	Key,
 	type KeybindingsManager,
@@ -67,6 +71,15 @@ export function registerSubagentsPanelCommand(runtime: SubagentRuntime): {
 }
 
 /**
+ * Where the panel opens: the job selected first, and whether it opens on its
+ * detail view or the list. A stale job id falls back to the list view.
+ */
+export interface PanelInitial {
+	jobId?: string;
+	view?: PanelView;
+}
+
+/**
  * Show the panel, then act on what the human chose.
  *
  * Termination is confirmed outside the panel rather than inside it, because a
@@ -75,14 +88,16 @@ export function registerSubagentsPanelCommand(runtime: SubagentRuntime): {
  */
 export async function openSubagentsPanel(
 	runtime: SubagentRuntime,
-	ctx: ExtensionCommandContext,
+	ctx: ExtensionContext,
+	initial?: PanelInitial,
 ): Promise<void> {
 	if (ctx.mode !== "tui") {
 		ctx.ui.notify("The subagents panel requires interactive mode.", "warning");
 		return;
 	}
 	const exit = await ctx.ui.custom<PanelExit>(
-		(tui, theme, keybindings, done) => createPanelComponent(runtime, tui, theme, keybindings, done),
+		(tui, theme, keybindings, done) =>
+			createPanelComponent(runtime, tui, theme, keybindings, done, initial),
 		{ overlay: false },
 	);
 	const jobId = exit.kill;
@@ -139,9 +154,10 @@ export function createPanelComponent(
 	theme: Theme,
 	keybindings: KeybindingsManager,
 	done: (result: PanelExit) => void,
+	initial?: PanelInitial,
 ): PanelComponent {
-	let view: PanelView = "list";
-	let selectedJobId: string | undefined;
+	let view: PanelView = initial?.view ?? "list";
+	let selectedJobId: string | undefined = initial?.jobId;
 	// Detail scroll position. `undefined` follows the newest event, which is
 	// what a reader opening a live log wants; scrolling up pins the offset until
 	// the reader scrolls back to the end.
