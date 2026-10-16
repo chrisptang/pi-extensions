@@ -89,9 +89,9 @@ export interface ModelPerformance {
 	model?: string;
 	/** LLM calls attributed to this model in the range. */
 	calls: number;
-	/** Milliseconds from request start to the first provider stream event. */
+	/** Milliseconds from request start to the first content update or stream event. */
 	timeToFirstToken: DistributionSummary;
-	/** Output tokens per second during the stream after the first event. */
+	/** Output tokens per second across the whole request, including the wait before it. */
 	outputTokensPerSecond: DistributionSummary;
 }
 
@@ -278,10 +278,13 @@ export async function querySnapshot(
 				performance.firstTokens.push(
 					Math.max(0, generation.firstTokenAtMs - generation.startedAtMs),
 				);
-				const decodeMs = (generation.finishedAtMs ?? 0) - generation.firstTokenAtMs;
-				if (generation.usage && decodeMs > 0) {
-					performance.rates.push((generation.usage.output * 1_000) / decodeMs);
-				}
+			}
+			// Throughput is measured end-to-end: gateways can buffer or batch delivery, so the
+			// stream window does not reliably reflect how fast tokens actually arrive.
+			const requestMs =
+				generation.durationMs ?? (generation.finishedAtMs ?? 0) - generation.startedAtMs;
+			if (generation.usage && requestMs > 0) {
+				performance.rates.push((generation.usage.output * 1_000) / requestMs);
 			}
 			performanceModels.set(performanceKey, performance);
 			const usage = generation.usage;

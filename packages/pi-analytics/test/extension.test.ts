@@ -169,6 +169,7 @@ test("factory registers lifecycle hooks without constructing or opening storage"
 		"before_provider_request",
 		"input",
 		"message_end",
+		"message_update",
 		"provider_stream_event",
 		"session_shutdown",
 		"session_start",
@@ -447,6 +448,60 @@ test("the first provider stream event timestamp reaches the recorded generation"
 	const generation = store.runs.at(-1)?.generations[0];
 	assert.equal(typeof generation?.firstTokenAtMs, "number");
 	assert.ok((generation?.firstTokenAtMs ?? 0) >= (generation?.startedAtMs ?? 0));
+});
+
+test("the first content update anchors first-token timing without a stream event", async () => {
+	const store = new FakeStore();
+	const mock = createMockPi();
+	createAnalyticsExtension({ createStore: () => store })(mock.pi);
+	const { ctx } = lifecycleContext();
+	await emit(mock, "session_start", { reason: "startup" }, ctx);
+	await emit(
+		mock,
+		"before_agent_start",
+		{ prompt: "run", systemPromptOptions: { skills: [] } },
+		ctx,
+	);
+	await emit(mock, "before_provider_request", { payload: {} }, ctx);
+	await emit(
+		mock,
+		"message_update",
+		{ message: { role: "assistant" }, assistantMessageEvent: { type: "text_delta" } },
+		ctx,
+	);
+	await emit(mock, "message_end", { message: { role: "assistant", stopReason: "stop" } }, ctx);
+	await emit(mock, "agent_settled", {}, ctx);
+
+	const generation = store.runs.at(-1)?.generations[0];
+	assert.equal(typeof generation?.firstTokenAtMs, "number");
+});
+
+test("content-free message updates do not anchor first-token timing", async () => {
+	const store = new FakeStore();
+	const mock = createMockPi();
+	createAnalyticsExtension({ createStore: () => store })(mock.pi);
+	const { ctx } = lifecycleContext();
+	await emit(mock, "session_start", { reason: "startup" }, ctx);
+	await emit(
+		mock,
+		"before_agent_start",
+		{ prompt: "run", systemPromptOptions: { skills: [] } },
+		ctx,
+	);
+	await emit(mock, "before_provider_request", { payload: {} }, ctx);
+	for (const type of ["start", "text_end", "done"]) {
+		await emit(
+			mock,
+			"message_update",
+			{ message: { role: "assistant" }, assistantMessageEvent: { type } },
+			ctx,
+		);
+	}
+	await emit(mock, "message_end", { message: { role: "assistant", stopReason: "stop" } }, ctx);
+	await emit(mock, "agent_settled", {}, ctx);
+
+	const generation = store.runs.at(-1)?.generations[0];
+	assert.equal(generation?.firstTokenAtMs, undefined);
 });
 
 test("assistant usage from message_end reaches the recorded run", async () => {

@@ -626,8 +626,8 @@ function performanceLines(result: AnalyticsLoadResult): string[] {
 		return ["No model calls recorded in this range."];
 	}
 	const lines = [
-		"TTFT spans request start to the first provider stream event;",
-		"tok/s divides output tokens by the stream time after that event.",
+		"TTFT spans request start to the first content update, in seconds;",
+		"tok/s divides output tokens by the whole request duration.",
 		"",
 	];
 	for (const item of models) {
@@ -635,7 +635,7 @@ function performanceLines(result: AnalyticsLoadResult): string[] {
 		lines.push(
 			metric(
 				"  TTFT avg / p95 / max",
-				`${formatDecimal(item.timeToFirstToken.average)} / ${formatDecimal(item.timeToFirstToken.p95)} / ${formatDecimal(item.timeToFirstToken.maximum)} ms · ${formatCount(item.timeToFirstToken.measured, "sample")}`,
+				`${formatDecimal(item.timeToFirstToken.average / 1_000)} / ${formatDecimal(item.timeToFirstToken.p95 / 1_000)} / ${formatDecimal(item.timeToFirstToken.maximum / 1_000)} s · ${formatCount(item.timeToFirstToken.measured, "sample")}`,
 			),
 		);
 		lines.push(

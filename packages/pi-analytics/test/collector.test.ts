@@ -115,6 +115,25 @@ test("collector keeps only the first stream event of a pending generation", () =
 	assert.equal(run?.generations[1]?.firstTokenAtMs, 35);
 });
 
+test("collector re-anchors the first token on the first content update", () => {
+	const collector = new ResponseCollector();
+	collector.begin({ id: "run-fc", now: 0, triggerSource: "interactive", model });
+	collector.beginGeneration({ id: "gen-1", now: 10, model });
+	collector.recordFirstToken({ now: 15 });
+	collector.recordFirstContent({ now: 18 });
+	collector.recordFirstContent({ now: 19 });
+	collector.finishGeneration({ now: 25, stopReason: "stop" });
+
+	// No content update: the stream-event anchor survives as the fallback.
+	collector.beginGeneration({ id: "gen-2", now: 30, model });
+	collector.recordFirstToken({ now: 35 });
+	collector.finishGeneration({ now: 38, stopReason: "stop" });
+
+	const run = collector.settle(40);
+	assert.equal(run?.generations[0]?.firstTokenAtMs, 18);
+	assert.equal(run?.generations[1]?.firstTokenAtMs, 35);
+});
+
 test("collector ignores duplicate or out-of-run events", () => {
 	const collector = new ResponseCollector();
 	assert.equal(collector.settle(1), undefined);

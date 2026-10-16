@@ -787,9 +787,9 @@ test("performance screen reports TTFT and output rate per model", async () => {
 	const screen = resolveMenuScreen(controller.menu, "performance", await state(controller));
 	assert.equal(screen.kind, "detail");
 	const lines = screen.lines?.join("\n") ?? "";
-	assert.match(lines, /first provider stream event/);
+	assert.match(lines, /first content update/);
 	assert.match(lines, /openai\/gpt-test · 192 calls/);
-	assert.match(lines, /TTFT avg \/ p95 \/ max\s+420 \/ 980 \/ 2400 ms · 190 samples/);
+	assert.match(lines, /TTFT avg \/ p95 \/ max\s+0\.42 \/ 0\.98 \/ 2\.4 s · 190 samples/);
 	assert.match(lines, /tok\/s avg \/ p95 \/ max\s+62 \/ 95 \/ 120 · 190 samples/);
 });
 

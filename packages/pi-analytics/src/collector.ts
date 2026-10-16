@@ -30,6 +30,8 @@ interface ActiveRun {
 
 export class ResponseCollector {
 	private active: ActiveRun | undefined;
+	/** Generations whose first-token anchor already came from a content-bearing update. */
+	private readonly contentAnchoredGenerations = new Set<string>();
 
 	hasActiveRun(): boolean {
 		return this.active !== undefined;
@@ -86,6 +88,22 @@ export class ResponseCollector {
 	recordFirstToken(input: { now: number }): void {
 		const generation = this.latestGeneration();
 		if (generation?.outcome !== "pending" || generation.firstTokenAtMs !== undefined) return;
+		generation.firstTokenAtMs = input.now;
+	}
+
+	// The raw stream anchor fires on any parsed frame—including content-free openers like
+	// `message_start`—so the first content-bearing update is a better "first token"; when a
+	// generation ends with only stream events, that earlier anchor stays as the fallback.
+	recordFirstContent(input: { now: number }): void {
+		const generation = this.latestGeneration();
+		if (
+			!generation ||
+			generation.outcome !== "pending" ||
+			this.contentAnchoredGenerations.has(generation.id)
+		) {
+			return;
+		}
+		this.contentAnchoredGenerations.add(generation.id);
 		generation.firstTokenAtMs = input.now;
 	}
 
@@ -198,6 +216,7 @@ export class ResponseCollector {
 		const active = this.active;
 		if (!active) return undefined;
 		this.active = undefined;
+		this.contentAnchoredGenerations.clear();
 
 		for (const generation of active.generations) {
 			if (generation.outcome !== "pending") continue;

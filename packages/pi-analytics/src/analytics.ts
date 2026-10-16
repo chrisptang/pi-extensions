@@ -179,6 +179,15 @@ export function createAnalyticsExtension(
 			collector.recordFirstToken({ now: deps.now() });
 		});
 
+		// First content-bearing update re-anchors first-token timing: a stream frame can be
+		// a content-free opener while `*_start`/`*_delta` events mark text the user sees.
+		pi.on("message_update", (event) => {
+			if (event.message.role !== "assistant") return;
+			const updateType = event.assistantMessageEvent.type;
+			if (!updateType.endsWith("_start") && !updateType.endsWith("_delta")) return;
+			collector.recordFirstContent({ now: deps.now() });
+		});
+
 		pi.on("after_provider_response", (event) => {
 			collector.recordProviderResponse({ status: event.status, now: deps.now() });
 		});

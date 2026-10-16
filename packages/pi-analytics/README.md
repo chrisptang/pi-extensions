@@ -100,11 +100,11 @@ A provider can make several HTTP attempts within it, so `429 → 429 → 200` co
 
 **Model performance** groups completed LLM calls per provider/model and reports two distributions with average, p95, and maximum:
 
-- **TTFT** is the time from request start to the first provider stream event Pi parses. That event can precede visible content—for example Anthropic's `message_start`—so it approximates rather than exactly matches the first rendered token; the approximation is uniform across providers.
-- **tok/s** divides the call's reported output tokens by the stream time after that first event, approximating decode speed.
+- **TTFT** is the time in seconds from request start to the first content-bearing message update, falling back to the first provider stream event when no update arrives. That anchor approximates rather than exactly matches the first rendered token; the approximation is uniform across providers.
+- **tok/s** divides the call's reported output tokens by the whole request duration, so the number reflects end-to-end throughput including any wait or stalls before and during streaming.
 
-Calls recorded before first-token collection, calls without provider usage counters, and calls that ended before any stream event are excluded from the distributions but still counted in the call total.
-Stream timing requires Pi 1.1 or newer, which introduced the `provider_stream_event` hook; on older hosts the distributions stay unmeasured while all other analytics continue to work.
+Calls recorded before first-token collection and calls that ended before any update or stream event are excluded from TTFT; tok/s covers every call whose provider reports usage counters. Both still count toward the call total.
+Stream-event timing requires Pi 1.1 or newer, which introduced the `provider_stream_event` hook; on older hosts TTFT anchors on message updates alone while all other analytics continue to work.
 
 ### Skills
 

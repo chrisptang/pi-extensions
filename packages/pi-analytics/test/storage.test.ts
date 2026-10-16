@@ -298,8 +298,8 @@ test("first-token timestamps round-trip and drive per-model TTFT and tok/s", asy
 					model: "gpt-a",
 					startedAtMs: started,
 					firstTokenAtMs: started + 50,
-					finishedAtMs: started + 150,
-					durationMs: 150,
+					finishedAtMs: started + 200,
+					durationMs: 200,
 					outcome: "stop",
 					usage: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, cost: 0 },
 					responses: [],
@@ -317,14 +317,17 @@ test("first-token timestamps round-trip and drive per-model TTFT and tok/s", asy
 					usage: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, cost: 0 },
 					responses: [],
 				},
-				// No stream event recorded: counted as a call but excluded from both metrics.
+				// No stream event recorded: no TTFT sample, but usage still yields a rate.
 				{
 					id: "g3",
 					ordinal: 2,
 					provider: "anthropic",
 					model: "claude-b",
 					startedAtMs: started + 2_000,
+					finishedAtMs: started + 2_500,
+					durationMs: 500,
 					outcome: "stop",
+					usage: { input: 5, output: 25, cacheRead: 0, cacheWrite: 0, cost: 0 },
 					responses: [],
 				},
 			],
@@ -338,18 +341,60 @@ test("first-token timestamps round-trip and drive per-model TTFT and tok/s", asy
 	assert.equal(gpt.calls, 2);
 	// TTFT samples: 50 and 200 ms.
 	assert.deepEqual(gpt.timeToFirstToken, { measured: 2, average: 125, p95: 200, maximum: 200 });
-	// Output rates: 10/0.1s = 100 and 20/0.2s = 100 tok/s.
+	// Output rates over the whole request: 10/0.2s = 50 and 20/0.4s = 50 tok/s.
 	assert.deepEqual(gpt.outputTokensPerSecond, {
 		measured: 2,
-		average: 100,
-		p95: 100,
-		maximum: 100,
+		average: 50,
+		p95: 50,
+		maximum: 50,
 	});
 	const claude = snapshot.performance.find(({ model }) => model === "claude-b");
 	assert.ok(claude);
 	assert.equal(claude.calls, 1);
 	assert.equal(claude.timeToFirstToken.measured, 0);
-	assert.equal(claude.outputTokensPerSecond.measured, 0);
+	// 25/0.5s = 50 tok/s, measured without any stream timing.
+	assert.deepEqual(claude.outputTokensPerSecond, {
+		measured: 1,
+		average: 50,
+		p95: 50,
+		maximum: 50,
+	});
+});
+
+test("tok/s uses the whole request duration regardless of the decode window", async (t) => {
+	const store = await fixture(t);
+	const started = 1_000;
+	await store.recordRun(
+		run("perf-burst", started, {
+			generations: [
+				{
+					id: "g1",
+					ordinal: 0,
+					provider: "local",
+					model: "buffered-a",
+					startedAtMs: started,
+					firstTokenAtMs: started + 9_996,
+					finishedAtMs: started + 10_000,
+					durationMs: 10_000,
+					outcome: "stop",
+					usage: { input: 10, output: 200, cacheRead: 0, cacheWrite: 0, cost: 0 },
+					responses: [],
+				},
+			],
+		}),
+	);
+
+	const snapshot = await store.getSnapshot({ fromMs: 0, toMs: 20_000 });
+	const buffered = snapshot.performance.find(({ model }) => model === "buffered-a");
+	assert.ok(buffered);
+	assert.equal(buffered.timeToFirstToken.maximum, 9_996);
+	// The body arrived in a 4 ms burst, but the rate stays honest: 200/10s = 20 tok/s.
+	assert.deepEqual(buffered.outputTokensPerSecond, {
+		measured: 1,
+		average: 20,
+		p95: 20,
+		maximum: 20,
+	});
 });
 
 test("a pre-v3 database gains the first-token column and keeps its rows", async (t) => {
