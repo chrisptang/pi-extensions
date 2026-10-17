@@ -13,7 +13,7 @@ The extension parses and renders the footer itself, so it does not need the `sta
 - Starts with a quiet, iconless two-line footer and offers Starship presets plus a Pi-native Minimal preset.
 - Supports root and module formats, conditional groups, `$all`, styles, palettes, and width-aware `$fill` alignment.
 - Provides Pi, model, usage, Git, pull request, package, language, environment, deployment, cloud, and execution modules.
-- Adaptively middle-shortens long workspace, branch, and model labels in the built-in layout; usage stays intact and may wrap on narrow terminals.
+- Adaptively middle-shortens long workspace, session title, branch, and model labels in the built-in layout; usage stays intact and may wrap on narrow terminals.
 - Keeps rendering pure while refreshing filesystem, process, and network-derived data through bounded caches.
 - Uses `/starship` for presets, preview, configuration health, searchable module details, customization, and recovery.
 - Bundles the authoritative configuration skill and references for editing `pi-starship.toml` or answering setup questions.
@@ -46,7 +46,8 @@ Do not enable this with `@narumitw/pi-statusline`: both own Pi's footer, and Pi 
 
 Start Pi with the extension to use the built-in two-line footer without creating a settings file.
 The first row shows directory, branch, nonempty textual Git status, and live activity on the left, with model and thinking level aligned right through fill.
-The second shows `ΣIn` inclusive session input, `ΣOut` cumulative output, `Ctx` tokens/window and percentage, and reported cost including tool usage.
+The second shows `ΣIn` inclusive session input, `ΣOut` cumulative output, `Ctx` tokens/window and percentage, and reported cost including tool usage, with the session title aligned right when named.
+The title shortens to the space left by usage and hides when no space remains.
 Normal text uses terminal colors and Pi's muted theme role, without bold, rainbow segments, brand, or cache rate; context warnings, Git conflicts, and UI waits use Pi's warning/error theme roles.
 Idle and completed activity stays hidden.
 Run `/starship` to inspect the footer, choose a preset, or customize the configuration.

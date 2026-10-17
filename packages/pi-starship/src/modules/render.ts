@@ -75,7 +75,7 @@ export function renderStatusline(
 
 	if (defaultLayout) {
 		fitDefaultEnvironment(modules, width);
-		for (const name of ["directory", "git_branch", "model"] as const) {
+		for (const name of ["directory", "session_name", "git_branch", "model"] as const) {
 			layoutModules[name] = modules[name];
 		}
 	}

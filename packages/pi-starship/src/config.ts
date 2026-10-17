@@ -104,12 +104,17 @@ const LEGACY_CONFIG: StarshipConfig = {
 };
 
 export const BUILT_IN_EXAMPLE = String.raw`# Quiet workspace and session usage; existing custom documents keep their defaults.
-format = "$directory$git_branch$git_status$activity $fill$model$thinking\n$tokens$context$cost"
+format = "$directory$git_branch$git_status$activity $fill$model$thinking\n$tokens$context$cost$fill(  $session_name)"
 
 [directory]
 format = "[$path]($style)"
 symbol = ""
 style = "none"
+
+[session_name]
+format = "[$name]($style)"
+symbol = ""
+style = "dimmed"
 
 [git_branch]
 format = "[ / $branch]($style)"

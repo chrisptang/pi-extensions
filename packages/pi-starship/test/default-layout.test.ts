@@ -39,7 +39,7 @@ function snapshot(overrides: Partial<StarshipRuntimeSnapshot> = {}): StarshipRun
 
 function lines(runtime = snapshot(), width = 100) {
 	return wrapFormattedStatusline(renderStatusline(BUILT_IN_CONFIG, runtime, width).ansi, width).map(
-		stripVTControlCharacters,
+		(line) => stripVTControlCharacters(line).trimEnd(),
 	);
 }
 
@@ -61,10 +61,37 @@ test("default aligns workspace and model above a complete, stable usage row", ()
 	assert.deepEqual(validateConfigDocument("/unused.toml", BUILT_IN_EXAMPLE).diagnostics, []);
 });
 
+test("default right-aligns a muted session title beside usage and hides empty titles", () => {
+	const runtime = snapshot({ sessionName: "Restore footer title" });
+	const output = lines(runtime, 120);
+	assert.equal(output.length, 2);
+	assert.match(output[0] ?? "", /^h5-pda \/ feat\/plaintext-login/u);
+	assert.doesNotMatch(output[0] ?? "", /Restore footer title/u);
+	assert.equal(
+		output[1],
+		`${usage + " ".repeat(120 - visibleWidth(usage) - 20)}Restore footer title`,
+	);
+	const roles: Array<{ role: string; text: string }> = [];
+	renderStatusline(BUILT_IN_CONFIG, runtime, 120, true, {
+		fg(role, text) {
+			roles.push({ role, text });
+			return text;
+		},
+	});
+	assert.ok(
+		roles.some(({ role, text }) => role === "muted" && text.includes("Restore footer title")),
+	);
+	for (const sessionName of [undefined, "", "   "]) {
+		assert.match(lines(snapshot({ sessionName }))[0] ?? "", /^h5-pda \/ feat\/plaintext-login/u);
+		assert.equal(lines(snapshot({ sessionName }))[1], usage);
+	}
+});
+
 test("narrow layouts shorten only environment labels and retain every usage character", () => {
 	const runtime = snapshot({
 		cwd: `/work/${"long-directory-".repeat(8)}tail`,
 		gitRoot: undefined,
+		sessionName: `Title ${"long-session-".repeat(8)}tail`,
 		gitBranch: `feat/${"long-branch-".repeat(8)}login`,
 		model: { provider: "agy", id: `agy/gemini-${"long-model-".repeat(8)}high` },
 	});
@@ -75,11 +102,34 @@ test("narrow layouts shorten only environment labels and retain every usage char
 			`${width}: ${output}`,
 		);
 		const compact = output.join("").replaceAll(/\s/gu, "");
-		assert.ok(compact.endsWith(usage.replaceAll(/\s/gu, "")), `${width}: ${output}`);
+		assert.ok(compact.includes(usage.replaceAll(/\s/gu, "")), `${width}: ${output}`);
 		assert.match(output.join(""), /…/u);
 	}
 	assert.equal(lines(runtime, 100).length, 2);
 	assert.deepEqual(lines(runtime, 0), []);
+});
+
+test("session titles shrink to the space left by usage and disappear before usage wraps", () => {
+	const runtime = snapshot({
+		sessionName: "设计独立的租户计费配置模型",
+		gitBranch: "main",
+		model: { provider: "test", id: "gpt" },
+	});
+	const usageWidth = visibleWidth(usage);
+	for (const available of [0, 1, 2, 3, 8, 16, 40]) {
+		const width = usageWidth + 2 + available;
+		const output = lines(runtime, width);
+		assert.equal(output.length, 2);
+		assert.ok(output[1]?.startsWith(usage));
+		assert.equal(visibleWidth(output[1] ?? ""), available > 0 ? width : usageWidth);
+		assert.doesNotMatch(output[0] ?? "", /设计|计费/u);
+		if (available > 0 && available < visibleWidth(runtime.sessionName ?? "")) {
+			assert.match(output[1] ?? "", /…/u);
+		}
+	}
+	for (const width of [usageWidth - 1, usageWidth, usageWidth + 1]) {
+		assert.deepEqual(lines(runtime, width), lines({ ...runtime, sessionName: undefined }, width));
+	}
 });
 
 test("default only shows ongoing activity, with no dangling separator when idle", () => {
@@ -207,6 +257,7 @@ test("default sanitizes terminal text before measuring and shrinking without cha
 	const branch = `feat/\x1b[31munsafe\n\u202e${"界".repeat(60)}login`;
 	const runtime = snapshot({
 		gitBranch: branch,
+		sessionName: "Title\x1b[31munsafe\n\u202eend",
 		activeTools: new Map([["bash\n\x1b]0;bad\x07", 1]]),
 	});
 	const output = lines(runtime, 100);
@@ -214,6 +265,7 @@ test("default sanitizes terminal text before measuring and shrinking without cha
 	assert.equal(output.join("").includes(String.fromCharCode(27)), false);
 	assert.equal(output.join("").includes("\u202e"), false);
 	assert.equal(runtime.gitBranch, branch);
+	assert.equal(runtime.sessionName, "Title\x1b[31munsafe\n\u202eend");
 	assert.match(output.join(""), /login/u);
 	for (const width of [1, 2, 3]) {
 		assert.ok(

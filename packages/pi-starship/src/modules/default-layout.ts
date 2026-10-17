@@ -2,7 +2,7 @@ import { sliceByColumn, visibleWidth } from "@earendil-works/pi-tui";
 import type { StyledChunk } from "../format/style.js";
 import type { ModuleName } from "./catalog.js";
 
-// Only the new built-in layout opts into shrinking environment fields; usage is never shortened.
+// Only the built-in layout shortens labels; usage takes priority over the session title.
 export function fitDefaultEnvironment(modules: Record<ModuleName, StyledChunk[]>, width: number) {
 	const environment = [
 		"directory",
@@ -24,6 +24,12 @@ export function fitDefaultEnvironment(modules: Record<ModuleName, StyledChunk[]>
 		if (target >= current) continue;
 		modules[name] = middleTruncate(modules[name], target);
 		overflow -= current - chunkWidth(modules[name]);
+	}
+	const titleWidth =
+		width - chunkWidth([...modules.tokens, ...modules.context, ...modules.cost]) - 2;
+	if (titleWidth <= 0) modules.session_name = [];
+	else if (chunkWidth(modules.session_name) > titleWidth) {
+		modules.session_name = middleTruncate(modules.session_name, titleWidth);
 	}
 }
 
