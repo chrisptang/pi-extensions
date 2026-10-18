@@ -65,7 +65,7 @@ This extension has no JSON settings. The Markdown prompt file is the only config
 | Project | `<workspace>/.pi/system-prompts/compaction.md` | Project is trusted |
 | User | `~/.pi/agent/system-prompts/compaction.md` | Always considered |
 
-Within each scope, the new path is checked first, followed by the legacy `<workspace>/.pi/compaction.md` or `~/.pi/agent/compaction.md` path. Project scope still takes precedence over user scope, including a legacy project file. No file is moved, rewritten, or deleted; move it manually when convenient.
+Only `system-prompts/` paths are read. If upgrading from the old layout, move `<workspace>/.pi/compaction.md` to `<workspace>/.pi/system-prompts/compaction.md` and `~/.pi/agent/compaction.md` to `~/.pi/agent/system-prompts/compaction.md`. The extension does not migrate files at runtime.
 
 The user path follows Pi's agent directory, so `PI_CODING_AGENT_DIR` moves it. A file that is missing, or that holds only whitespace, is treated as absent and the next scope applies; when neither scope yields text, Pi's default compaction runs untouched. Files are read at each compaction, so an edit takes effect on the next one without a restart.
 

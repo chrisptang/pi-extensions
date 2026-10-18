@@ -296,7 +296,7 @@ A name that no directory defines, or that names a subagent-role definition, is r
 The main session decides when and how to delegate from the `subagent_*` tool descriptions and their prompt guidelines.
 That wording is written for the general case, and some models follow parts of it loosely.
 
-Create `~/.pi/agent/system-prompts/subagent_instruction.md` to replace it with your own. The user path follows Pi's agent directory (`PI_CODING_AGENT_DIR`). If the new file is missing, the legacy `~/.pi/agent/subagent_instruction.md` is still read. An existing new file takes precedence, even when empty or invalid; an invalid file keeps the built-in text and reports diagnostics. No files are moved, modified, or deleted.
+Create `~/.pi/agent/system-prompts/subagent_instruction.md` to replace it with your own. The user path follows Pi's agent directory (`PI_CODING_AGENT_DIR`). Only this location is read; move an existing `~/.pi/agent/subagent_instruction.md` here when upgrading. An invalid file keeps the built-in text and reports diagnostics. The extension does not migrate files at runtime.
 The file is optional; without it every tool keeps its built-in text.
 
 A `##` heading names one tool and opens its section.

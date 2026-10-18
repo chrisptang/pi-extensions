@@ -34,20 +34,13 @@ function canStillRead(path: string): boolean {
 }
 
 describe("resolvePrompt", () => {
-	test("new paths win within each scope while legacy project files still override user files", () => {
-		const { cwd, agentDir } = createScopes({ project: "new project", user: "new user" });
-		writeFileSync(join(cwd, ".pi", PROMPT_FILE_NAME), "legacy project");
-		writeFileSync(join(agentDir, PROMPT_FILE_NAME), "legacy user");
-		expect(resolvePrompt({ cwd, agentDir, projectTrusted: true }).prompt?.text).toBe("new project");
-		writeFileSync(projectPromptPath(cwd), " ");
-		expect(resolvePrompt({ cwd, agentDir, projectTrusted: true }).prompt?.text).toBe(
-			"legacy project",
-		);
-		expect(resolvePrompt({ cwd, agentDir, projectTrusted: false }).prompt?.text).toBe("new user");
+	test("reads only system-prompts and ignores files in the old locations", () => {
+		const { cwd, agentDir } = createScopes({ user: "user rules" });
+		writeFileSync(join(cwd, ".pi", PROMPT_FILE_NAME), "old project rules");
+		writeFileSync(join(agentDir, PROMPT_FILE_NAME), "old user rules");
+		expect(resolvePrompt({ cwd, agentDir, projectTrusted: true }).prompt?.text).toBe("user rules");
 		writeFileSync(userPromptPath(agentDir), " ");
-		expect(resolvePrompt({ cwd, agentDir, projectTrusted: false }).prompt?.text).toBe(
-			"legacy user",
-		);
+		expect(resolvePrompt({ cwd, agentDir, projectTrusted: true }).prompt).toBeUndefined();
 	});
 
 	test("prefers the project prompt over the user prompt when the project is trusted", () => {

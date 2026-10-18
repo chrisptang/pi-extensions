@@ -176,13 +176,14 @@ test("the instruction file uses system-prompts in the configured agent directory
 	}
 });
 
-test("the new path wins and a missing new file falls back without changing legacy files", () => {
+test("reads only system-prompts and ignores the old instruction location", () => {
 	const legacyFile = writeInstruction("## subagent_spawn\n\nLegacy rules.");
 	const directory = path.dirname(legacyFile);
 	const previous = process.env.PI_CODING_AGENT_DIR;
 	process.env.PI_CODING_AGENT_DIR = directory;
 	try {
-		assert.equal(loadInstructionOverrides().source, legacyFile);
+		assert.equal(loadInstructionOverrides().source, undefined);
+		assert.equal(loadInstructionOverrides().tools.size, 0);
 		fs.mkdirSync(path.join(directory, "system-prompts"));
 		fs.writeFileSync(instructionFilePath(), "## subagent_spawn\n\nNew rules.");
 		assert.equal(loadInstructionOverrides().tools.get("subagent_spawn")?.description, "New rules.");
@@ -192,10 +193,7 @@ test("the new path wins and a missing new file falls back without changing legac
 		fs.writeFileSync(instructionFilePath(), "x".repeat(MAX_INSTRUCTION_BYTES + 1));
 		assert.match(loadInstructionOverrides().diagnostics[0], /past the/);
 		fs.rmSync(instructionFilePath());
-		assert.equal(
-			loadInstructionOverrides().tools.get("subagent_spawn")?.description,
-			"Legacy rules.",
-		);
+		assert.equal(loadInstructionOverrides().tools.size, 0);
 		assert.equal(fs.readFileSync(legacyFile, "utf8"), "## subagent_spawn\n\nLegacy rules.");
 	} finally {
 		if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;

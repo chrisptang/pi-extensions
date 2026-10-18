@@ -64,23 +64,16 @@ export function emptyOverrides(): InstructionOverrides {
  * yields no diagnostics; anything else that goes wrong is reported and the
  * built-in text is kept, because a broken override must not disarm the tools.
  */
-export function loadInstructionOverrides(file?: string): InstructionOverrides {
-	const resolvedFile = file ?? instructionFilePath();
+export function loadInstructionOverrides(file = instructionFilePath()): InstructionOverrides {
 	let raw: string;
 	try {
-		raw = fs.readFileSync(resolvedFile, "utf8");
+		raw = fs.readFileSync(file, "utf8");
 	} catch (error) {
 		const code = (error as NodeJS.ErrnoException).code;
-		if (code === "ENOENT" || code === "ENOTDIR") {
-			return file === undefined
-				? loadInstructionOverrides(path.join(getAgentDir(), "subagent_instruction.md"))
-				: emptyOverrides();
-		}
+		if (code === "ENOENT" || code === "ENOTDIR") return emptyOverrides();
 		return {
 			tools: new Map(),
-			diagnostics: [
-				`Cannot read ${resolvedFile}: ${text(error)}; using the built-in tool instructions.`,
-			],
+			diagnostics: [`Cannot read ${file}: ${text(error)}; using the built-in tool instructions.`],
 		};
 	}
 
@@ -89,14 +82,14 @@ export function loadInstructionOverrides(file?: string): InstructionOverrides {
 		return {
 			tools: new Map(),
 			diagnostics: [
-				`${resolvedFile} is ${bytes} bytes, past the ${MAX_INSTRUCTION_BYTES} byte limit; using the built-in tool instructions.`,
+				`${file} is ${bytes} bytes, past the ${MAX_INSTRUCTION_BYTES} byte limit; using the built-in tool instructions.`,
 			],
-			source: resolvedFile,
+			source: file,
 		};
 	}
 
 	const parsed = parseInstructions(raw);
-	return { ...parsed, source: resolvedFile };
+	return { ...parsed, source: file };
 }
 
 /**

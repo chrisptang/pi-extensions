@@ -52,15 +52,9 @@ export function userPromptPath(agentDir = getAgentDir()): string {
 export function resolvePrompt(options: ResolvePromptOptions): PromptResolution {
 	const candidates: Array<{ scope: PromptScope; path: string }> = [];
 	if (options.projectTrusted) {
-		candidates.push(
-			{ scope: "project", path: projectPromptPath(options.cwd) },
-			{ scope: "project", path: join(options.cwd, CONFIG_DIR_NAME, PROMPT_FILE_NAME) },
-		);
+		candidates.push({ scope: "project", path: projectPromptPath(options.cwd) });
 	}
-	candidates.push(
-		{ scope: "user", path: userPromptPath(options.agentDir) },
-		{ scope: "user", path: join(options.agentDir ?? getAgentDir(), PROMPT_FILE_NAME) },
-	);
+	candidates.push({ scope: "user", path: userPromptPath(options.agentDir) });
 
 	const errors: string[] = [];
 	for (const candidate of candidates) {
