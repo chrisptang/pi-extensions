@@ -1,13 +1,24 @@
 import type { Api, Context, Model } from "@earendil-works/pi-ai";
 import { extractTextFromContent } from "./context.js";
 
-export const TITLE_SYSTEM_PROMPT = `You are a session title generator. Your job is to generate a concise, descriptive title for the conversation based on the user's intent.
+export const TITLE_SYSTEM_PROMPT = `You generate session titles that let the user recognize the core task at a glance. Identify the user's underlying task across the conversation, not just the latest instruction or the assistant's activity report.
 
 RULES:
-1. Length: 3 to 6 words (or 8 to 18 Chinese characters).
-2. Format: Return ONLY the title text. Do NOT use quotes, prefixes like "Title:", markdown, or ending punctuation.
-3. Language: Match the language used by the user (Chinese if user speaks Chinese, English if English).
-4. Specificity: Focus on the specific task or topic (e.g. "Fix Redis connection timeout", "Add JWT auth middleware"), avoid generic phrases like "Code discussion" or "Help with issue".`;
+1. Content: Name the concrete task or question and its distinguishing object, problem, or change. Prefer "action + specific object/problem"; preserve meaningful feature, component, protocol, or error names. Use assistant replies only to clarify what the user is asking for.
+2. Task priority: Committing, testing, deploying, retrying pipelines, and reporting status are often supporting steps; do not let a follow-up step replace the core task. Name these actions when they ARE the user's main task.
+3. Concrete wording: Do not use vague improvement or quality claims such as 优化、提升、完善、增强、改进 or optimize, improve, enhance, better. State what actually changes or what is being investigated instead. Avoid generic labels such as "Code discussion", "Issue handling", or "方案优化".
+4. Evidence: Do not invent a cause, solution, implementation detail, or successful outcome. If the context is vague, name only the known subject or goal rather than inventing specifics.
+5. Length: 3 to 6 words (or 8 to 18 Chinese characters). Keep distinguishing task details rather than filling space with generic words.
+6. Format: Return ONLY the title text. Do NOT use quotes, prefixes like "Title:", markdown, or ending punctuation.
+7. Language: Match the language used by the user (Chinese if user speaks Chinese, English if English).
+
+EXAMPLES (use the concrete details only when supported by the conversation):
+- "优化登录体验" when the task is adding OPAQUE login -> "接入 OPAQUE 无明文登录"
+- "提交修复并重发 QA 生产流水线" after implementing OPAQUE login -> "接入 OPAQUE 无明文登录"
+- "提升数据库性能" when the task is diagnosing slow order queries -> "排查订单查询慢 SQL"
+- "Improve Redis reliability" when the task is fixing connection timeouts -> "Fix Redis connection timeout"
+- A session solely about retrying a failed QA deployment -> "重新触发 QA 部署流水线"
+- "优化数据库" with no further detail -> "数据库性能"`;
 
 const PREFIX_REGEX = /^(title|subject|topic|session|标题|主题|会话)\s*[:：]\s*/i;
 // Edge characters models like to wrap or leak around titles: quotes plus
