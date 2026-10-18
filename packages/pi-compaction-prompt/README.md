@@ -9,7 +9,7 @@ Pi's built-in summary asks for goals, progress, decisions, and next steps, and a
 ## ✨ Features
 
 - Adds your Markdown prompt to every compaction: automatic, threshold, overflow recovery, and manual `/compact`.
-- Reads the prompt from `<workspace>/.pi/compaction.md` when the project is trusted, otherwise from `~/.pi/agent/compaction.md`.
+- Reads the prompt from `<workspace>/.pi/system-prompts/compaction.md` when the project is trusted, otherwise from `~/.pi/agent/system-prompts/compaction.md`.
 - Keeps your prompt additive, so Pi's section format and its `<read-files>`/`<modified-files>` path lists still apply.
 - Appends a `/compact <instructions>` argument after the file prompt, so a one-off focus narrows the standing policy instead of replacing it.
 - Falls back to Pi's default compaction whenever the file is absent or summarization cannot run, so a configuration mistake never costs you a compaction.
@@ -36,7 +36,7 @@ Pi extensions run with the Pi process's user permissions, so install only truste
 
 ## 🚀 Quick start
 
-Create `~/.pi/agent/compaction.md`:
+Create `~/.pi/agent/system-prompts/compaction.md`:
 
 ```markdown
 Also keep, in addition to the sections above:
@@ -54,7 +54,7 @@ Copy failing commands, error messages, and stack traces exactly as they appeared
 
 Then compact as usual. `/compact` and automatic compaction both apply the file.
 
-To override the prompt for one repository, put a `compaction.md` in that workspace's `.pi/` directory and trust the project.
+To override the prompt for one repository, put a `compaction.md` in that workspace's `.pi/system-prompts/` directory and trust the project.
 
 ## ⚙️ Settings
 
@@ -62,8 +62,10 @@ This extension has no JSON settings. The Markdown prompt file is the only config
 
 | Scope | Path | Condition |
 | --- | --- | --- |
-| Project | `<workspace>/.pi/compaction.md` | Project is trusted |
-| User | `~/.pi/agent/compaction.md` | Always considered |
+| Project | `<workspace>/.pi/system-prompts/compaction.md` | Project is trusted |
+| User | `~/.pi/agent/system-prompts/compaction.md` | Always considered |
+
+Within each scope, the new path is checked first, followed by the legacy `<workspace>/.pi/compaction.md` or `~/.pi/agent/compaction.md` path. Project scope still takes precedence over user scope, including a legacy project file. No file is moved, rewritten, or deleted; move it manually when convenient.
 
 The user path follows Pi's agent directory, so `PI_CODING_AGENT_DIR` moves it. A file that is missing, or that holds only whitespace, is treated as absent and the next scope applies; when neither scope yields text, Pi's default compaction runs untouched. Files are read at each compaction, so an edit takes effect on the next one without a restart.
 

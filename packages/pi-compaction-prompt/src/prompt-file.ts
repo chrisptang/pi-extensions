@@ -34,12 +34,12 @@ export interface ResolvePromptOptions {
 
 /** Path of the project-scope prompt file for a workspace. */
 export function projectPromptPath(cwd: string): string {
-	return join(cwd, CONFIG_DIR_NAME, PROMPT_FILE_NAME);
+	return join(cwd, CONFIG_DIR_NAME, "system-prompts", PROMPT_FILE_NAME);
 }
 
 /** Path of the user-scope prompt file. */
 export function userPromptPath(agentDir = getAgentDir()): string {
-	return join(agentDir, PROMPT_FILE_NAME);
+	return join(agentDir, "system-prompts", PROMPT_FILE_NAME);
 }
 
 /**
@@ -52,9 +52,15 @@ export function userPromptPath(agentDir = getAgentDir()): string {
 export function resolvePrompt(options: ResolvePromptOptions): PromptResolution {
 	const candidates: Array<{ scope: PromptScope; path: string }> = [];
 	if (options.projectTrusted) {
-		candidates.push({ scope: "project", path: projectPromptPath(options.cwd) });
+		candidates.push(
+			{ scope: "project", path: projectPromptPath(options.cwd) },
+			{ scope: "project", path: join(options.cwd, CONFIG_DIR_NAME, PROMPT_FILE_NAME) },
+		);
 	}
-	candidates.push({ scope: "user", path: userPromptPath(options.agentDir) });
+	candidates.push(
+		{ scope: "user", path: userPromptPath(options.agentDir) },
+		{ scope: "user", path: join(options.agentDir ?? getAgentDir(), PROMPT_FILE_NAME) },
+	);
 
 	const errors: string[] = [];
 	for (const candidate of candidates) {

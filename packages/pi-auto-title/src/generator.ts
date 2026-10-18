@@ -69,6 +69,7 @@ export interface GenerateTitleOptions {
 	model: Model<Api>;
 	completer: ModelCompleter;
 	conversationContext: string;
+	systemPrompt?: string;
 	maxLength?: number;
 	signal?: AbortSignal;
 }
@@ -86,7 +87,7 @@ export async function generateSessionTitle(
 		const response = await completer.complete(
 			model,
 			{
-				systemPrompt: TITLE_SYSTEM_PROMPT,
+				systemPrompt: options.systemPrompt?.trim() || TITLE_SYSTEM_PROMPT,
 				messages: [
 					{
 						role: "user",

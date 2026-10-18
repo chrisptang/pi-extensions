@@ -8,7 +8,7 @@ A job earns its cost in three cases: the user asked for one, several genuinely i
 
 Planning, the critical path, integration, deterministic checks, authorization decisions, and the final answer stay in the main session.
 
-`subagent_spawn` states this to the model through its prompt guidelines. `~/.pi/agent/subagent_instruction.md` replaces them when a model needs a stricter rule.
+`subagent_spawn` states this to the model through its prompt guidelines. `~/.pi/agent/system-prompts/subagent_instruction.md` replaces them when a model needs a stricter rule.
 
 ## `subagent_spawn`
 
@@ -56,7 +56,7 @@ Lists the agent definitions in `~/.pi/agent/agents/` with their descriptions, fo
 
 The command deliberately never lists the fallback directories, so it reflects exactly what the session advertises.
 
-It also reports whether `~/.pi/agent/subagent_instruction.md` replaced any tool instructions, and any diagnostics from parsing it. A file that failed to parse would otherwise be invisible, because the tools keep working on their built-in text.
+It also reports whether `~/.pi/agent/system-prompts/subagent_instruction.md` replaced any tool instructions, and any diagnostics from parsing it. A file that failed to parse would otherwise be invisible, because the tools keep working on their built-in text.
 
 ## `skill_run`
 
@@ -163,7 +163,7 @@ The `tools` allowlist holds the eight core work tools — `read`, `bash`, `power
 
 Each child additionally inherits `PI_SUBAGENT_DEPTH` incremented by one, and `subagent_spawn` and `skill_run` refuse to run above zero. That layer is defence in depth: a child holding `bash` could unset the variable, but the process it runs in still has no spawn tool, so the guarantee rests on the tool set rather than the environment.
 
-## `~/.pi/agent/subagent_instruction.md`
+## `~/.pi/agent/system-prompts/subagent_instruction.md`
 
 Replaces the instruction text the main session reads for the subagent tools. The file is optional: without it every tool keeps its built-in wording.
 

@@ -36,7 +36,7 @@ This shapes the design rather than just the documentation. Jobs are one-way so t
 - Publishes one asynchronous terminal completion and shows active-job progress above the editor.
 - Opens `/subagents` so you can watch a job's tool activity and visible output live, and terminate one after confirming.
 - Redacts credential-shaped text and reports file writes by size, so an inspected job never puts a secret on screen.
-- Lets `~/.pi/agent/subagent_instruction.md` replace the tool instructions the main session reads, for a model that ignores the built-in wording.
+- Lets `~/.pi/agent/system-prompts/subagent_instruction.md` replace the tool instructions the main session reads, for a model that ignores the built-in wording.
 - Gives a child no tool to reach the parent at all: it loads no extensions and holds only its selected work tools, so it cannot spawn a grandchild or message anyone.
 - Starts independent jobs concurrently, up to eight active children.
 - Exposes privacy-filtered metadata without task text, output, prompts, or selected tools.
@@ -263,7 +263,7 @@ An alias that does not resolve to a usable model falls back to the main agent's 
 
 `/agents` lists the definitions in `~/.pi/agent/agents/` with their descriptions and any parse diagnostics, marking a `role: main` definition with `[main]`.
 It never lists the fallback directories, so it reflects exactly what the session advertises.
-It also reports which main agent this session runs as, and whether `~/.pi/agent/subagent_instruction.md` replaced any tool instructions, along with any diagnostics from parsing either.
+It also reports which main agent this session runs as, and whether `~/.pi/agent/system-prompts/subagent_instruction.md` replaced any tool instructions, along with any diagnostics from parsing either.
 
 ## 🧑‍💻 Running the main session as an agent
 
@@ -296,7 +296,7 @@ A name that no directory defines, or that names a subagent-role definition, is r
 The main session decides when and how to delegate from the `subagent_*` tool descriptions and their prompt guidelines.
 That wording is written for the general case, and some models follow parts of it loosely.
 
-Create `~/.pi/agent/subagent_instruction.md` to replace it with your own.
+Create `~/.pi/agent/system-prompts/subagent_instruction.md` to replace it with your own. The user path follows Pi's agent directory (`PI_CODING_AGENT_DIR`). If the new file is missing, the legacy `~/.pi/agent/subagent_instruction.md` is still read. An existing new file takes precedence, even when empty or invalid; an invalid file keeps the built-in text and reports diagnostics. No files are moved, modified, or deleted.
 The file is optional; without it every tool keeps its built-in text.
 
 A `##` heading names one tool and opens its section.
@@ -337,7 +337,7 @@ The shipped guidelines already tell the model to do the work itself by default.
 Some models still reach for a subagent on anything that sounds like more than one step, which costs you latency and a verification pass for nothing.
 
 If that is happening, tighten the rule rather than arguing with the model turn by turn.
-Write this to `~/.pi/agent/subagent_instruction.md`:
+Write this to `~/.pi/agent/system-prompts/subagent_instruction.md`:
 
 ```markdown
 My delegation policy. Everything above the first heading is for me, not the model.

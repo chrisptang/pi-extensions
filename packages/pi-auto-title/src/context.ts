@@ -76,10 +76,6 @@ export function extractCompactTurns(entries: readonly SessionEntry[]): CompactTu
 
 export interface FormatContextOptions {
 	maxTurns?: number;
-	userTurn1Limit?: number;
-	assistantTurn1Limit?: number;
-	userTurn2Limit?: number;
-	assistantTurn2Limit?: number;
 }
 
 /**
@@ -89,13 +85,7 @@ export function buildTitleGenerationContext(
 	entries: readonly SessionEntry[],
 	options: FormatContextOptions = {},
 ): string {
-	const {
-		maxTurns = 2,
-		userTurn1Limit = 300,
-		assistantTurn1Limit = 200,
-		userTurn2Limit = 500,
-		assistantTurn2Limit = 300,
-	} = options;
+	const { maxTurns = 2 } = options;
 
 	const turns = extractCompactTurns(entries).slice(0, maxTurns);
 	if (turns.length === 0) return "";
@@ -104,19 +94,17 @@ export function buildTitleGenerationContext(
 
 	turns.forEach((turn, idx) => {
 		const turnNum = idx + 1;
-		const userLimit = turnNum === 1 ? userTurn1Limit : userTurn2Limit;
-		const assistantLimit = turnNum === 1 ? assistantTurn1Limit : assistantTurn2Limit;
 
 		const userSnippet =
-			turn.userText.length > userLimit ? `${turn.userText.slice(0, userLimit)}...` : turn.userText;
+			turn.userText.length > 500 ? `${turn.userText.slice(0, 500)}...` : turn.userText;
 
 		if (userSnippet) {
 			lines.push(`User (Turn ${turnNum}): ${userSnippet}`);
 		}
 
 		const assistantSnippet =
-			turn.assistantText.length > assistantLimit
-				? `${turn.assistantText.slice(0, assistantLimit)}...`
+			turn.assistantText.length > 500
+				? `${turn.assistantText.slice(0, 500)}...`
 				: turn.assistantText;
 
 		if (assistantSnippet) {

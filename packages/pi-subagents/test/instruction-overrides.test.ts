@@ -162,14 +162,41 @@ test("applyOverride replaces only the fields the section defined", () => {
 	});
 });
 
-test("the instruction file sits beside the agent directory Pi is configured to use", () => {
+test("the instruction file uses system-prompts in the configured agent directory", () => {
 	const previous = process.env.PI_CODING_AGENT_DIR;
 	process.env.PI_CODING_AGENT_DIR = path.join(os.tmpdir(), "pi-subagents-agent-dir");
 	try {
 		assert.equal(
 			instructionFilePath(),
-			path.join(os.tmpdir(), "pi-subagents-agent-dir", "subagent_instruction.md"),
+			path.join(os.tmpdir(), "pi-subagents-agent-dir", "system-prompts", "subagent_instruction.md"),
 		);
+	} finally {
+		if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = previous;
+	}
+});
+
+test("the new path wins and a missing new file falls back without changing legacy files", () => {
+	const legacyFile = writeInstruction("## subagent_spawn\n\nLegacy rules.");
+	const directory = path.dirname(legacyFile);
+	const previous = process.env.PI_CODING_AGENT_DIR;
+	process.env.PI_CODING_AGENT_DIR = directory;
+	try {
+		assert.equal(loadInstructionOverrides().source, legacyFile);
+		fs.mkdirSync(path.join(directory, "system-prompts"));
+		fs.writeFileSync(instructionFilePath(), "## subagent_spawn\n\nNew rules.");
+		assert.equal(loadInstructionOverrides().tools.get("subagent_spawn")?.description, "New rules.");
+		fs.writeFileSync(instructionFilePath(), "");
+		assert.equal(loadInstructionOverrides().tools.size, 0);
+		assert.equal(loadInstructionOverrides().source, instructionFilePath());
+		fs.writeFileSync(instructionFilePath(), "x".repeat(MAX_INSTRUCTION_BYTES + 1));
+		assert.match(loadInstructionOverrides().diagnostics[0], /past the/);
+		fs.rmSync(instructionFilePath());
+		assert.equal(
+			loadInstructionOverrides().tools.get("subagent_spawn")?.description,
+			"Legacy rules.",
+		);
+		assert.equal(fs.readFileSync(legacyFile, "utf8"), "## subagent_spawn\n\nLegacy rules.");
 	} finally {
 		if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
 		else process.env.PI_CODING_AGENT_DIR = previous;

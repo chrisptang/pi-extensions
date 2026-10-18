@@ -3,6 +3,26 @@ import type { Api, Context, Model } from "@earendil-works/pi-ai";
 import { test } from "vitest";
 import { generateSessionTitle, TITLE_SYSTEM_PROMPT } from "../src/generator.js";
 
+test("a custom prompt replaces the built-in prompt without bypassing title cleanup", async () => {
+	for (const prompt of [" My title rules ", "", undefined]) {
+		let sentPrompt: string | undefined;
+		const title = await generateSessionTitle({
+			model: { provider: "anthropic", id: "haiku" } as Model<Api>,
+			conversationContext: "User (Turn 1): Add Redis caching",
+			systemPrompt: prompt,
+			maxLength: 10,
+			completer: {
+				async complete(_model, context) {
+					sentPrompt = context.systemPrompt;
+					return { content: '"Title: Add Redis caching."' };
+				},
+			},
+		});
+		assert.equal(sentPrompt, prompt?.trim() || TITLE_SYSTEM_PROMPT);
+		assert.equal(title, "Add Redis");
+	}
+});
+
 test("title requests prioritize the underlying task over vague wording and follow-up steps", async () => {
 	const conversationContext = [
 		"User (Turn 1): 接入 OPAQUE 无明文登录，补充回归测试和构建指纹校验。",

@@ -3,6 +3,20 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { test } from "vitest";
 import { buildTitleGenerationContext, extractCompactTurns } from "../src/context.js";
 
+test("context uses the same 500-character limit for both roles in both turns", () => {
+	for (const length of [499, 500, 501]) {
+		const entries = ["user", "assistant", "user", "assistant"].map((role, index) => ({
+			type: "message",
+			message: { role, content: String(index).repeat(length) },
+		})) as unknown as SessionEntry[];
+		const expected = ["User", "Assistant", "User", "Assistant"].map(
+			(role, index) =>
+				`${role} (Turn ${Math.floor(index / 2) + 1}): ${String(index).repeat(Math.min(length, 500))}${length > 500 ? "..." : ""}`,
+		);
+		assert.equal(buildTitleGenerationContext(entries), expected.join("\n\n"));
+	}
+});
+
 test("extractCompactTurns groups user and assistant messages into rounds", () => {
 	const entries = [
 		{

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { Api, Context, Model } from "@earendil-works/pi-ai";
 import type { ExtensionCommandContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { test } from "vitest";
 import { createMockContext, createMockPi } from "../../../test/support.js";
@@ -39,7 +41,8 @@ test("auto-title triggers on turn 2 agent_settled and sets session name silently
 		getAvailable() {
 			return [mockModel];
 		},
-		async complete(model: Model<Api>, context: unknown) {
+		async complete(model: Model<Api>, context: Context) {
+			assert.equal(context.systemPrompt, "Background title rules");
 			completeCalledWith = { model, context };
 			return {
 				role: "assistant",
@@ -50,6 +53,7 @@ test("auto-title triggers on turn 2 agent_settled and sets session name silently
 
 	const mockContext = createMockContext({
 		model: mockModel,
+		isProjectTrusted: () => true,
 		sessionManager: {
 			getSessionId: () => "sess-1",
 			getSessionName: () => mock.rawPi.getSessionName(),
@@ -58,6 +62,19 @@ test("auto-title triggers on turn 2 agent_settled and sets session name silently
 		} as unknown as ExtensionCommandContext["sessionManager"],
 		modelRegistry: mockRegistry as unknown as ExtensionCommandContext["modelRegistry"],
 	});
+
+	mkdirSync(join((mockContext.ctx as ExtensionCommandContext).cwd, ".pi", "system-prompts"), {
+		recursive: true,
+	});
+	writeFileSync(
+		join(
+			(mockContext.ctx as ExtensionCommandContext).cwd,
+			".pi",
+			"system-prompts",
+			"auto-title.md",
+		),
+		"Background title rules",
+	);
 
 	// 1. Session start with empty entries
 	emit(mock, "session_start", { type: "session_start", reason: "new" }, mockContext.ctx);
@@ -261,14 +278,15 @@ test("/auto-title generate command generates title on demand", async () => {
 		find: () => mockModel,
 		hasConfiguredAuth: () => true,
 		getAvailable: () => [mockModel],
-		complete: async () => ({
-			role: "assistant",
-			content: [{ type: "text", text: "Web Perf Optimization" }],
-		}),
+		complete: async (_model: Model<Api>, context: Context) => {
+			assert.equal(context.systemPrompt, "Manual title rules");
+			return { role: "assistant", content: [{ type: "text", text: "Web Perf Optimization" }] };
+		},
 	};
 
 	const mockContext = createMockContext({
 		hasUI: true,
+		isProjectTrusted: () => true,
 		sessionManager: {
 			getSessionId: () => "sess-3",
 			getSessionName: () => mock.rawPi.getSessionName(),
@@ -277,6 +295,19 @@ test("/auto-title generate command generates title on demand", async () => {
 		} as unknown as ExtensionCommandContext["sessionManager"],
 		modelRegistry: mockRegistry as unknown as ExtensionCommandContext["modelRegistry"],
 	});
+
+	mkdirSync(join((mockContext.ctx as ExtensionCommandContext).cwd, ".pi", "system-prompts"), {
+		recursive: true,
+	});
+	writeFileSync(
+		join(
+			(mockContext.ctx as ExtensionCommandContext).cwd,
+			".pi",
+			"system-prompts",
+			"auto-title.md",
+		),
+		"Manual title rules",
+	);
 
 	const cmd = mock.commands.get("auto-title");
 	assert.ok(cmd);

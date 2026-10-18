@@ -10,9 +10,10 @@ Pi defaults to un-named sessions that fall back to raw message previews. `pi-aut
 
 - **Turn 2 Trigger**: Names the session at the first idle settle once the second user turn has happened, avoiding noisy or premature titles from exploratory first prompts.
 - **Model Alias Integration**: Defaults to resolving the `haiku` alias from `~/.pi/agent/model-alias.json`, with robust multi-tier fallback (catalog search, fast models, or current model).
-- **Silent & Non-intrusive**: Executes asynchronously during idle boundaries (`agent_settled`), updating the UI title bar and session list with zero toast interruptions.
+- **Silent & Non-intrusive**: Executes asynchronously during idle boundaries (`agent_settled`), updating the UI title bar and session list without success toasts.
 - **Manual Intent Respected**: Never overwrites user-specified names set via `--name`, `/name`, or RPC.
-- **Compact & Prompt-Cache Safe**: Bounded context extraction (< 500 tokens) with all tool outputs omitted; does not inject synthetic messages into the conversation history.
+- **Compact & Prompt-Cache Safe**: Uses the first two user/assistant turns, capped at 500 characters per role per turn with explicit role labels and tool outputs omitted; does not inject synthetic messages into the conversation history.
+- **Custom Title Prompt**: Reads your Markdown system prompt from user or trusted project settings, falling back to the built-in task-focused prompt.
 - **On-demand Regeneration**: Force generate or manually set titles anytime via `/auto-title`.
 
 ## 📦 Install
@@ -74,6 +75,20 @@ Configure preferences in `~/.pi/agent/pi-auto-title.json` or project-local `<wor
 | `maxTitleLength` | `number` | `40` | Maximum character length for generated titles. |
 | `fallbackToCurrentModel` | `boolean` | `true` | Fallback to active session model if alias resolution fails. |
 
+### Custom title prompt
+
+Create `~/.pi/agent/system-prompts/auto-title.md` to replace the built-in title system prompt:
+
+```markdown
+Name the user's core task using a concrete action and subject.
+Do not use vague wording such as "optimize" or "improve".
+Match the user's language and return only the title, without quotes or commentary.
+```
+
+The first non-empty readable file wins: trusted project `<workspace>/.pi/system-prompts/auto-title.md`, then user `~/.pi/agent/system-prompts/auto-title.md`, then the built-in prompt. The user path follows Pi's agent directory (`PI_CODING_AGENT_DIR`). Missing or whitespace-only files fall through; read failures also fall through and warn in TUI/RPC modes. Reads do not create or modify files.
+
+Files are reread for each automatic or manual generation, so edits apply without restarting. Already named sessions are not renamed automatically; use `/auto-title generate` to regenerate one. Your file replaces rather than extends the built-in instructions, so include any desired language and output-format rules. Title cleanup and `maxTitleLength` still apply.
+
 ## 💬 Commands
 
 | Command | Description |
@@ -92,6 +107,7 @@ packages/pi-auto-title/
 │   ├── alias.ts        # Model alias resolution and fallback ladder
 │   ├── context.ts      # Bounded turn extraction and context compaction
 │   ├── generator.ts    # Prompt engineering, LLM completion, and title sanitization
+│   ├── prompt-file.ts  # Trusted project and user system-prompt resolution
 │   └── settings.ts     # Settings loading and persistence
 └── test/               # Lifecycle, alias, context, and sanitizer tests
 ```

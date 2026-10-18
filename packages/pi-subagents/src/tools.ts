@@ -29,7 +29,7 @@ import {
 
 /**
  * Built-in prompt text for each overridable tool, named so
- * `~/.pi/agent/subagent_instruction.md` can replace a field without the
+ * `~/.pi/agent/system-prompts/subagent_instruction.md` can replace a field without the
  * fallback being buried in a registration call.
  */
 const BUILTIN_INSTRUCTIONS = {

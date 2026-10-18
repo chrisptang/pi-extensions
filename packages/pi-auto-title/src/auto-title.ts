@@ -1,8 +1,23 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type {
+	ExtensionAPI,
+	ExtensionCommandContext,
+	ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { resolveTitleModel } from "./alias.js";
 import { buildTitleGenerationContext, extractCompactTurns } from "./context.js";
 import { generateSessionTitle } from "./generator.js";
+import { resolveTitlePrompt } from "./prompt-file.js";
 import { loadSettings } from "./settings.js";
+
+function loadTitlePrompt(ctx: ExtensionContext): string | undefined {
+	return resolveTitlePrompt({
+		cwd: ctx.cwd,
+		projectTrusted: ctx.isProjectTrusted(),
+		warn: (message) => {
+			if (ctx.hasUI) ctx.ui.notify(message, "warning");
+		},
+	});
+}
 
 interface SessionTitlingState {
 	named: boolean;
@@ -80,6 +95,7 @@ export default function autoTitle(pi: ExtensionAPI): void {
 				model,
 				completer: ctx.modelRegistry,
 				conversationContext: contextText,
+				systemPrompt: loadTitlePrompt(ctx),
 				maxLength: settings.maxTitleLength,
 				signal: controller.signal,
 			});
@@ -149,6 +165,7 @@ export default function autoTitle(pi: ExtensionAPI): void {
 					model,
 					completer: cmdCtx.modelRegistry,
 					conversationContext: contextText,
+					systemPrompt: loadTitlePrompt(cmdCtx),
 					maxLength: settings.maxTitleLength,
 				});
 

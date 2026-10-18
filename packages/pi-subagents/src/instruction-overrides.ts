@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { piAgentDirectory } from "./agent-definitions.js";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 
 /**
  * User-supplied replacements for the tool text the main session reads.
@@ -49,10 +49,10 @@ export interface InstructionOverrides {
 
 /**
  * Path of the override file. `PI_CODING_AGENT_DIR` is honoured through
- * {@link piAgentDirectory}, so an alternate install keeps its own copy.
+ * {@link getAgentDir}, so an alternate install keeps its own copy.
  */
 export function instructionFilePath(): string {
-	return path.join(piAgentDirectory(), "subagent_instruction.md");
+	return path.join(getAgentDir(), "system-prompts", "subagent_instruction.md");
 }
 
 export function emptyOverrides(): InstructionOverrides {
@@ -64,16 +64,23 @@ export function emptyOverrides(): InstructionOverrides {
  * yields no diagnostics; anything else that goes wrong is reported and the
  * built-in text is kept, because a broken override must not disarm the tools.
  */
-export function loadInstructionOverrides(file = instructionFilePath()): InstructionOverrides {
+export function loadInstructionOverrides(file?: string): InstructionOverrides {
+	const resolvedFile = file ?? instructionFilePath();
 	let raw: string;
 	try {
-		raw = fs.readFileSync(file, "utf8");
+		raw = fs.readFileSync(resolvedFile, "utf8");
 	} catch (error) {
 		const code = (error as NodeJS.ErrnoException).code;
-		if (code === "ENOENT") return emptyOverrides();
+		if (code === "ENOENT" || code === "ENOTDIR") {
+			return file === undefined
+				? loadInstructionOverrides(path.join(getAgentDir(), "subagent_instruction.md"))
+				: emptyOverrides();
+		}
 		return {
 			tools: new Map(),
-			diagnostics: [`Cannot read ${file}: ${text(error)}; using the built-in tool instructions.`],
+			diagnostics: [
+				`Cannot read ${resolvedFile}: ${text(error)}; using the built-in tool instructions.`,
+			],
 		};
 	}
 
@@ -82,14 +89,14 @@ export function loadInstructionOverrides(file = instructionFilePath()): Instruct
 		return {
 			tools: new Map(),
 			diagnostics: [
-				`${file} is ${bytes} bytes, past the ${MAX_INSTRUCTION_BYTES} byte limit; using the built-in tool instructions.`,
+				`${resolvedFile} is ${bytes} bytes, past the ${MAX_INSTRUCTION_BYTES} byte limit; using the built-in tool instructions.`,
 			],
-			source: file,
+			source: resolvedFile,
 		};
 	}
 
 	const parsed = parseInstructions(raw);
-	return { ...parsed, source: file };
+	return { ...parsed, source: resolvedFile };
 }
 
 /**

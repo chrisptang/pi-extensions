@@ -13,13 +13,13 @@ function createScopes(options: { project?: string; user?: string } = {}) {
 	const root = mkdtempSync(join(tmpdir(), "pi-compaction-prompt-"));
 	const cwd = join(root, "workspace");
 	const agentDir = join(root, "agent");
-	mkdirSync(join(cwd, ".pi"), { recursive: true });
-	mkdirSync(agentDir, { recursive: true });
+	mkdirSync(join(cwd, ".pi", "system-prompts"), { recursive: true });
+	mkdirSync(join(agentDir, "system-prompts"), { recursive: true });
 	if (options.project !== undefined) {
-		writeFileSync(join(cwd, ".pi", PROMPT_FILE_NAME), options.project);
+		writeFileSync(projectPromptPath(cwd), options.project);
 	}
 	if (options.user !== undefined) {
-		writeFileSync(join(agentDir, PROMPT_FILE_NAME), options.user);
+		writeFileSync(userPromptPath(agentDir), options.user);
 	}
 	return { cwd, agentDir };
 }
@@ -34,6 +34,22 @@ function canStillRead(path: string): boolean {
 }
 
 describe("resolvePrompt", () => {
+	test("new paths win within each scope while legacy project files still override user files", () => {
+		const { cwd, agentDir } = createScopes({ project: "new project", user: "new user" });
+		writeFileSync(join(cwd, ".pi", PROMPT_FILE_NAME), "legacy project");
+		writeFileSync(join(agentDir, PROMPT_FILE_NAME), "legacy user");
+		expect(resolvePrompt({ cwd, agentDir, projectTrusted: true }).prompt?.text).toBe("new project");
+		writeFileSync(projectPromptPath(cwd), " ");
+		expect(resolvePrompt({ cwd, agentDir, projectTrusted: true }).prompt?.text).toBe(
+			"legacy project",
+		);
+		expect(resolvePrompt({ cwd, agentDir, projectTrusted: false }).prompt?.text).toBe("new user");
+		writeFileSync(userPromptPath(agentDir), " ");
+		expect(resolvePrompt({ cwd, agentDir, projectTrusted: false }).prompt?.text).toBe(
+			"legacy user",
+		);
+	});
+
 	test("prefers the project prompt over the user prompt when the project is trusted", () => {
 		const { cwd, agentDir } = createScopes({ project: "project rules", user: "user rules" });
 
@@ -95,7 +111,7 @@ describe("resolvePrompt", () => {
 
 	test("treats a directory at the prompt path as absent and uses the next scope", () => {
 		const { cwd, agentDir } = createScopes({ user: "user rules" });
-		mkdirSync(join(cwd, ".pi", PROMPT_FILE_NAME), { recursive: true });
+		mkdirSync(projectPromptPath(cwd), { recursive: true });
 
 		const resolution = resolvePrompt({ cwd, agentDir, projectTrusted: true });
 
@@ -105,7 +121,7 @@ describe("resolvePrompt", () => {
 
 	test("reports an unreadable prompt file and continues to the next scope", () => {
 		const { cwd, agentDir } = createScopes({ project: "project rules", user: "user rules" });
-		const projectFile = join(cwd, ".pi", PROMPT_FILE_NAME);
+		const projectFile = projectPromptPath(cwd);
 		chmodSync(projectFile, 0o000);
 		if (canStillRead(projectFile)) return; // A privileged runner ignores the mode bits.
 
