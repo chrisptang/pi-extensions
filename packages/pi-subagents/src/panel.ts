@@ -79,6 +79,15 @@ export interface PanelInitial {
 	view?: PanelView;
 }
 
+export interface PanelHooks {
+	/**
+	 * Receives a function that closes the panel as if it were cancelled, with no
+	 * kill result. The widget uses it to toggle the panel back off on a second
+	 * click while the panel stays mounted above the editor.
+	 */
+	onCloseHandle?: (close: () => void) => void;
+}
+
 /**
  * Show the panel, then act on what the human chose.
  *
@@ -90,14 +99,25 @@ export async function openSubagentsPanel(
 	runtime: SubagentRuntime,
 	ctx: ExtensionContext,
 	initial?: PanelInitial,
+	hooks?: PanelHooks,
 ): Promise<void> {
 	if (ctx.mode !== "tui") {
 		ctx.ui.notify("The subagents panel requires interactive mode.", "warning");
 		return;
 	}
 	const exit = await ctx.ui.custom<PanelExit>(
-		(tui, theme, keybindings, done) =>
-			createPanelComponent(runtime, tui, theme, keybindings, done, initial),
+		(tui, theme, keybindings, done) => {
+			// A close handed out through the hook and the component's own finish both
+			// funnel through this guard so a repeated click cannot call done twice.
+			let closed = false;
+			const close = (result: PanelExit) => {
+				if (closed) return;
+				closed = true;
+				done(result);
+			};
+			hooks?.onCloseHandle?.(() => close({}));
+			return createPanelComponent(runtime, tui, theme, keybindings, close, initial);
+		},
 		{ overlay: false },
 	);
 	const jobId = exit.kill;

@@ -348,21 +348,22 @@ test("labels active jobs with their agent and description above the editor", asy
 	assert.ok(clearIntervalSpy.mock.calls.length > 0);
 });
 
-test("clicking a widget job row opens the panel on that job's detail", async () => {
-	const panelFactories: unknown[] = [];
-	let resolvePanel: ((result: unknown) => void) | undefined;
+test("widget clicks toggle the panel open and closed", async () => {
+	const panelComponents: { render(width: number): string[] }[] = [];
 	const { mock, context } = await setup(
 		{ runChild: waitForCancellation },
 		{},
 		{
 			mode: "tui",
-			// Hold the panel open until the test resolves it, so the re-entry
-			// guard can be observed.
+			// Instantiate the factory like Pi does so the close handle reaches the
+			// widget, and hold the panel open until its done fires.
 			custom: (factory: unknown) => {
-				panelFactories.push(factory);
-				return new Promise((resolve) => {
-					resolvePanel = resolve;
+				let resolveDone: ((result: unknown) => void) | undefined;
+				const promise = new Promise((resolve) => {
+					resolveDone = resolve;
 				});
+				panelComponents.push(panelComponent(factory, (result: unknown) => resolveDone?.(result)));
+				return promise;
 			},
 		},
 	);
@@ -387,19 +388,19 @@ test("clicking a widget job row opens the panel on that job's detail", async () 
 
 	// The click lands on the job row (y=1), so the panel opens in detail view.
 	component.handleMouse?.(mouse("click", 1));
-	assert.equal(panelFactories.length, 1);
-	const lines = panelComponent(panelFactories[0]).render(100);
+	assert.equal(panelComponents.length, 1);
+	const lines = panelComponents[0]?.render(100) ?? [];
 	assert.match(lines[0] ?? "", new RegExp(`^╭─ ${String(spawned.details.jobId)} · running`, "u"));
 
-	// The widget stays mounted above the open panel; clicks must not stack.
+	// The widget stays mounted above the open panel; a second click closes it
+	// instead of stacking another panel.
 	component.handleMouse?.(mouse("click", 0));
-	assert.equal(panelFactories.length, 1);
-
-	resolvePanel?.({});
 	await new Promise((resolve) => setImmediate(resolve));
+
+	// Once closed, a click opens a fresh panel on the list view.
 	component.handleMouse?.(mouse("click", 0));
-	assert.equal(panelFactories.length, 2);
-	assert.match(panelComponent(panelFactories[1]).render(100)[0] ?? "", /^╭─ Subagents · /u);
+	assert.equal(panelComponents.length, 2);
+	assert.match(panelComponents[1]?.render(100)[0] ?? "", /^╭─ Subagents · /u);
 });
 
 test("does not install the component widget outside TUI mode", async () => {
@@ -1508,7 +1509,10 @@ function mouse(
 }
 
 /** Instantiate the component factory captured from `ctx.ui.custom()`. */
-function panelComponent(factory: unknown): { render(width: number): string[] } {
+function panelComponent(
+	factory: unknown,
+	done: (result: unknown) => void = () => undefined,
+): { render(width: number): string[] } {
 	assert.equal(typeof factory, "function");
 	return (
 		factory as (
@@ -1521,7 +1525,7 @@ function panelComponent(factory: unknown): { render(width: number): string[] } {
 		{ requestRender: () => undefined, terminal: { rows: 30 } },
 		identityTheme(),
 		new KeybindingsManager(TUI_KEYBINDINGS),
-		() => undefined,
+		done,
 	);
 }
 

@@ -26,6 +26,7 @@ export function createSubagentWidgetController(runtime: SubagentRuntime): Subage
 	let unsubscribeJobs: (() => void) | undefined;
 	let publishedValue: string | undefined;
 	let panelOpen = false;
+	let closePanel: (() => void) | undefined;
 
 	const ownsSession = (ctx: ExtensionContext): boolean => ctx.sessionManager === activeSession;
 
@@ -37,10 +38,10 @@ export function createSubagentWidgetController(runtime: SubagentRuntime): Subage
 	};
 
 	/**
-	 * Open the panel through the same path as `/subagents`. A click on a job row
-	 * lands on that job's detail view; a click on the header opens the list. The
-	 * flag blocks re-entry while a panel is up, since the widget stays mounted
-	 * above the editor and remains clickable.
+	 * A click toggles the panel through the same path as `/subagents`. The first
+	 * click opens it — a job row lands on that job's detail view, the header opens
+	 * the list — and a click while it is up closes it through the close handle,
+	 * because the widget stays mounted above the editor and remains clickable.
 	 */
 	const openPanel = (ctx: ExtensionContext, jobId?: string): void => {
 		if (panelOpen || !ownsSession(ctx)) return;
@@ -49,6 +50,11 @@ export function createSubagentWidgetController(runtime: SubagentRuntime): Subage
 			runtime,
 			ctx,
 			jobId === undefined ? undefined : { jobId, view: "detail" },
+			{
+				onCloseHandle: (close) => {
+					closePanel = close;
+				},
+			},
 		)
 			.catch((error: unknown) => {
 				if (!ownsSession(ctx)) return;
@@ -59,6 +65,7 @@ export function createSubagentWidgetController(runtime: SubagentRuntime): Subage
 			})
 			.finally(() => {
 				panelOpen = false;
+				closePanel = undefined;
 			});
 	};
 
@@ -83,6 +90,10 @@ export function createSubagentWidgetController(runtime: SubagentRuntime): Subage
 							// The press must be handled for the release to arrive as a click.
 							if (event.type === "press") return { handled: true, render: false };
 							if (event.type !== "click") return undefined;
+							if (panelOpen) {
+								closePanel?.();
+								return { handled: true };
+							}
 							openPanel(ctx, event.y > 0 ? snapshot[event.y - 1]?.jobId : undefined);
 							return { handled: true };
 						},
