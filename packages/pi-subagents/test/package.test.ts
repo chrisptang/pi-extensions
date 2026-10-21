@@ -64,8 +64,8 @@ test("repository example skill documents every minimal-runtime operating respons
 		/disjoint.*ownership/is,
 		/workspace isolation/i,
 		/`\/agents` to see the definitions/i,
-		/`background: true` when the main agent has unrelated work/i,
-		/omit `background` when the next action depends on the result/i,
+		/every job's completion interrupts the main agent/i,
+		/call `subagent_wait` when the next action depends on the result/i,
 	]) {
 		assert.match(skill, evidence);
 	}

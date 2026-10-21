@@ -66,7 +66,7 @@ const BUILTIN_INSTRUCTIONS = {
 	},
 	subagent_tail: {
 		description:
-			"Use subagent_tail to see the newest activity lines of one job, like tail on a log: each line is a tool call with summarized arguments and outcome, visible assistant text, or a lifecycle note. Use it to confirm a running job is alive and roughly where it is; it returns at once and never waits. Do not poll it in a loop: a running job needs subagent_wait or its background completion, and the lines are progress signals, not results.",
+			"Use subagent_tail to see the newest activity lines of one job, like tail on a log: each line is a tool call with summarized arguments and outcome, visible assistant text, or a lifecycle note. Use it to confirm a running job is alive and roughly where it is; it returns at once and never waits. Do not poll it in a loop: a running job needs subagent_wait or its completion interrupt, and the lines are progress signals, not results.",
 	},
 } as const satisfies Record<string, { description: string; guidelines?: readonly string[] }>;
 
@@ -112,12 +112,6 @@ function buildSpawnParameters(agents: AgentRegistry) {
 				Type.String({
 					description: agentParameterDescription(agents),
 					maxLength: MAX_IDENTIFIER_LENGTH,
-				}),
-			),
-			background: Type.Optional(
-				Type.Boolean({
-					description:
-						"Run without blocking and interrupt the main agent with the completion when the job ends. Defaults to false, where the caller collects the result with subagent_wait.",
 				}),
 			),
 			tools: Type.Optional(
@@ -211,7 +205,6 @@ export interface StartSkillJobOptions {
 	tools?: string[];
 	thinkingLevel?: string;
 	maxTurns?: number;
-	notifyOnCompletion: boolean;
 }
 
 export type StartSkillJob = (
@@ -296,7 +289,6 @@ export function registerSubagentTools(
 					cwd: ctx.cwd,
 					maxTurns,
 					projectTrusted: ctx.isProjectTrusted(),
-					notifyOnCompletion: params.background === true,
 				}),
 			);
 		},
@@ -318,7 +310,6 @@ export function registerSubagentTools(
 					tools: params.tools === undefined ? undefined : resolveTools(params.tools),
 					thinkingLevel: params.thinkingLevel,
 					maxTurns: params.maxTurns,
-					notifyOnCompletion: params.background === true,
 				}),
 			);
 		},
@@ -358,7 +349,6 @@ export function registerSubagentTools(
 			cwd: ctx.cwd,
 			maxTurns,
 			projectTrusted: ctx.isProjectTrusted(),
-			notifyOnCompletion: options.notifyOnCompletion,
 		});
 	};
 
@@ -579,12 +569,6 @@ function buildSkillRunParameters(skills: SkillRegistry) {
 					description:
 						"The user's request for this skill, in their own words, plus any context the skill needs. The child cannot see this conversation, so state the objective in full. Maximum 50 KiB.",
 					maxLength: MAX_SKILL_ARGS_BYTES,
-				}),
-			),
-			background: Type.Optional(
-				Type.Boolean({
-					description:
-						"Run without blocking and interrupt the main agent with the completion when the job ends. Defaults to false, where the caller collects the result with subagent_wait.",
 				}),
 			),
 			tools: Type.Optional(

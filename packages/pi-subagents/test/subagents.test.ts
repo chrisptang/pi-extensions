@@ -120,10 +120,7 @@ test("registers six fixed main-agent tools with stable schemas and explicit limi
 			/\bbounded\b/i,
 		);
 	}
-	assert.equal(
-		tools[0]?.parameters.properties?.background?.description?.includes("blocking"),
-		true,
-	);
+	assert.equal(tools[0]?.parameters.properties?.background, undefined);
 	assert.deepEqual([...mock.commands.keys()], ["skills", "subagents", "agents"]);
 	const handoff = tools[0]?.promptGuidelines?.find((text) =>
 		text.startsWith("For implementation jobs"),
@@ -987,31 +984,20 @@ test("rejects an unknown agent without starting a job", async () => {
 	assert.equal(started, false);
 });
 
-test("background spawns trigger a turn on completion and blocking spawns do not", async () => {
+test("every spawn completion triggers a turn so an idle session collects the result", async () => {
 	const { mock, context } = await setup({ runChild: async () => completed("finished") });
-	const background = await tool(mock, "subagent_spawn").execute(
-		"spawn",
-		{ description: "test job", task: "Run in background", background: true },
-		undefined,
-		undefined,
-		context.ctx,
-	);
-	const backgroundId = String(background.details.jobId);
-	await waitFor(mock, context, backgroundId);
-	const blocking = await spawnJob(mock, context, "Run blocking");
-	await waitFor(mock, context, String(blocking.details.jobId));
+	const first = await spawnJob(mock, context, "First job");
+	await waitFor(mock, context, String(first.details.jobId));
+	const second = await spawnJob(mock, context, "Second job");
+	await waitFor(mock, context, String(second.details.jobId));
 
 	const completions = mock.sentMessages.filter(
 		(entry) => (entry.message as { customType?: string }).customType === "pi-subagents-completion",
 	);
 	assert.equal(completions.length, 2);
-	const backgroundDelivery = completions.find((entry) =>
-		(entry.message as { content: string }).content.includes(backgroundId),
-	);
-	assert.ok(backgroundDelivery);
-	assert.deepEqual(backgroundDelivery.options, { deliverAs: "steer", triggerTurn: true });
-	const blockingDelivery = completions.find((entry) => entry !== backgroundDelivery);
-	assert.deepEqual(blockingDelivery?.options, { deliverAs: "steer" });
+	for (const completion of completions) {
+		assert.deepEqual(completion.options, { deliverAs: "steer", triggerTurn: true });
+	}
 });
 
 test("/agents lists only the Pi directory and reports its diagnostics", async () => {

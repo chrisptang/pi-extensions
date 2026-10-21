@@ -30,7 +30,7 @@ This shapes the design rather than just the documentation. Jobs are one-way so t
 - Runs a skill inside a subagent through `skill_run`, keeping its instructions and intermediate work out of the main session.
 - Routes a user's `/skill:<name>` into a subagent when the skill declares Claude Code's `content: fork`, so the skill's steps never enter the main session.
 - Advertises only that directory's definitions, and resolves any other name on demand from `~/.claude/agents/` and `~/.agents/agents/`.
-- Runs a job blocking or in the background, where a background completion interrupts the main agent with the result.
+- Runs a job without blocking, where its completion interrupts the main agent with the result.
 - Defaults work tools to `read`, `grep`, `find`, and `ls`.
 - Inherits the main session's effective model and thinking level, so a job needs neither argument unless you deliberately want a different one.
 - Publishes one asynchronous terminal completion and shows active-job progress above the editor.
@@ -87,7 +87,7 @@ When a job does earn its cost, call `subagent_spawn` with a self-contained task 
 The call returns a `jobId` immediately, and the job continues in the background.
 Continue useful main-agent work until the result is required or a completion arrives.
 
-Collect the result with `subagent_wait`, or let a `background: true` job interrupt you with its completion.
+Collect the result with `subagent_wait`, or keep working and let the completion interrupt you.
 
 While a job runs you can watch it and stop it, but you cannot talk to it. If a child needs a decision, it ends and reports what it needs; you then decide and, if useful, start a fresh job with the answer written into its task.
 
@@ -95,7 +95,7 @@ Completion messages follow Pi's global tool-output expansion state and the `app.
 A collapsed completion shows the job's agent, model, state, elapsed time, turns, cache rate, token totals, and cost; the cost is display-only and never reaches the model.
 
 Every subagent tool result reports, in Pi's tool-result `usage` field, what the session's jobs spent since the previous subagent tool result, so Pi's footer and compatible footers include subagent tokens and cost in the session totals exactly once without counting them as main-agent context.
-Spend a background job incurs after the model's last subagent tool call is shown in its completion message but not added to the session totals.
+Spend a job incurs after the model's last subagent tool call is shown in its completion message but not added to the session totals.
 
 In TUI mode, the above-editor widget shows the active jobs' combined cost and one line per queued or running job: its agent or ID, description, elapsed time, turns used against its budget, cost so far, and its most recent activity line.
 The widget disappears when no jobs remain active, and clears when the session ends.
@@ -109,8 +109,8 @@ The main Pi session exposes six fixed tools and the `/agents`, `/skills`, and `/
 
 | Tool | Parameters | Purpose |
 | --- | --- | --- |
-| `subagent_spawn` | `task`, `description`, optional `agent`, `background`, `tools`, `thinkingLevel`, `maxTurns` | Start one subagent job and return its `jobId`. |
-| `skill_run` | `name`, `description`, optional `args`, `background`, `tools`, `thinkingLevel`, `maxTurns` | Run one skill inside a subagent and return its `jobId`. |
+| `subagent_spawn` | `task`, `description`, optional `agent`, `tools`, `thinkingLevel`, `maxTurns` | Start one subagent job and return its `jobId`. |
+| `skill_run` | `name`, `description`, optional `args`, `tools`, `thinkingLevel`, `maxTurns` | Run one skill inside a subagent and return its `jobId`. |
 | `subagent_inspect` | none | List privacy-filtered retained-job metadata. |
 | `subagent_cancel` | `jobId` | Idempotently cancel one queued or running job. |
 | `subagent_wait` | `jobId` | Wait for one job to reach a terminal state. |
@@ -179,14 +179,11 @@ Spawn rejects providers registered by a parent extension because child processes
 Spawn also rejects process-local runtime API keys, including a parent-only `--api-key` value.
 Use stored or environment credentials that child processes can read.
 
-### Blocking and background jobs
+### Waiting and completion interrupts
 
-Both modes start the same way and return a `jobId` immediately.
+Every job returns a `jobId` immediately and delivers one terminal completion that interrupts the main agent: while the caller is streaming, including blocked inside `subagent_wait`, it arrives as a steering message, and at an idle session it starts a new turn so no result is left uncollected.
 
-- The default blocking mode expects the caller to collect the result with `subagent_wait`.
-- `background: true` interrupts the main agent with the completion and starts a turn, so the result is acted on without polling.
-
-Use background for work whose result is not needed to continue the current step, and blocking when the next step depends on the answer.
+Call `subagent_wait` when the next step depends on the answer and no useful work remains; otherwise keep working and let the completion arrive on its own.
 
 ## 🧬 Agent definitions
 
@@ -496,7 +493,7 @@ Calling it several times, whether in one parallel tool batch or one after anothe
 All jobs share a maximum of eight active children; a ninth spawn is rejected until one finishes.
 
 Start jobs in one batch only when they are mutually independent: every task must be completable without any other task in the batch, and none may consume another's result, file output, or conclusion.
-When one task needs another's result, spawn the first, collect its result with `subagent_wait` or its background completion, and only then spawn the second with that result written into its task text.
+When one task needs another's result, spawn the first, collect its result with `subagent_wait` or its completion interrupt, and only then spawn the second with that result written into its task text.
 Children cannot see each other, exchange results, or observe each other's progress, so splitting a sequential task into a parallel batch does not make it parallel — it makes the later jobs work from missing information.
 
 Give each parallel writer disjoint file or responsibility ownership, or isolate their workspaces outside this extension.
@@ -600,7 +597,7 @@ Parallel writers require disjoint ownership or workspace isolation outside this 
 - A running job cannot be steered, questioned, or answered. To redirect one, terminate it and spawn another; a task that needs a mid-flight decision should be split so the decision lands between jobs.
 - A child cannot report a blocking question until it ends, so a child that hits one spends the rest of its turn budget stopping cleanly rather than waiting.
 - The main agent must verify child claims against the actual diff and deterministic checks.
-- A blocking job's completion does not wake an idle turn, because its caller is waiting; a `background: true` job's completion does.
+- Every job's completion wakes an idle main agent with a new turn; a caller blocked in `subagent_wait` receives the same completion inside its running turn.
 - Jobs and retained results do not survive extension reload, session replacement, or process exit.
 
 ## 🗂️ Package layout

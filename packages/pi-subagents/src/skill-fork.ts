@@ -31,7 +31,6 @@ export function registerSkillFork(
 			const started = startSkillJob(skill, ctx, {
 				description: `${SKILL_COMMAND_PREFIX}${skill.name}`,
 				...(command.args ? { args: validateSkillArgs(command.args) } : {}),
-				notifyOnCompletion: true,
 			});
 			ctx.ui.notify(
 				`Skill ${skill.name} is running as subagent job ${started.jobId}; its result arrives when it finishes.`,

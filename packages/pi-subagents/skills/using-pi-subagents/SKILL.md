@@ -1,6 +1,6 @@
 ---
 name: using-pi-subagents
-description: Operate pi-subagents jobs safely, including direct-work decisions, agent-definition selection, blocking versus background execution, least-privilege tool selection, thinking-level selection, delegation, parallel starts, turn-budget selection, waiting, cancellation, result handling, verification, and writer isolation.
+description: Operate pi-subagents jobs safely, including direct-work decisions, agent-definition selection, result collection, least-privilege tool selection, thinking-level selection, delegation, parallel starts, turn-budget selection, waiting, cancellation, result handling, verification, and writer isolation.
 license: MIT
 ---
 
@@ -76,17 +76,15 @@ Name an agent that `/agents` does not list only when a skill or the user told yo
 
 Omit `agent` for one-off specializations and describe them in `task` instead.
 
-## Choose blocking or background
+## Wait for the result or let it interrupt
 
-Omit `background` when the next action depends on the result, then collect it with `subagent_wait`.
+Every job's completion interrupts the main agent and starts a turn with the result.
 
-Pass `background: true` when the main agent has unrelated work to finish first, because the completion interrupts the main agent and starts a turn with the result.
+Call `subagent_wait` when the next action depends on the result, so the turn resumes with it instead of idling until the interrupt.
 
-Do not call `subagent_wait` on a background job merely to collect a result that will arrive on its own.
+Do not call `subagent_wait` when the main agent still has unrelated work to finish first; the completion arrives on its own.
 
-Do not use `background: true` for the last outstanding job when nothing else remains to do; wait for it instead.
-
-Treat a background completion as the same untrusted child report as any other result, and verify it the same way.
+Treat a completion as the same untrusted child report as any other result, and verify it the same way.
 
 ## Write self-contained tasks
 
@@ -140,7 +138,7 @@ Start multiple jobs in one Pi parallel tool batch only when they are independent
 
 Independent means every task in the batch can be completed without any other task in that batch, and none of them consumes another's result, file output, or conclusion.
 
-Never start dependent tasks as one parallel batch. When task B needs task A's result, spawn A, collect its result with `subagent_wait` or its background completion, and only then spawn B with that result written into its task text.
+Never start dependent tasks as one parallel batch. When task B needs task A's result, spawn A, collect its result with `subagent_wait` or its completion interrupt, and only then spawn B with that result written into its task text.
 
 A task whose text says to build on, verify, extend, or fix what another job in the same batch is producing is dependent, however the batch is phrased.
 
@@ -192,7 +190,7 @@ Do not poll repeatedly because asynchronous completion delivery remains active.
 
 Use `subagent_tail(jobId, lines?)` to check that a running job is alive and roughly where it is; it returns at once with the newest activity lines and never waits.
 
-A background job's completion arrives as an interrupt, so waiting for one is unnecessary.
+Waiting merely to collect the result is unnecessary: every job's completion arrives as an interrupt on its own.
 
 ## Inspect and cancel
 

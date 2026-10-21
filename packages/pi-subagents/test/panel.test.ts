@@ -403,7 +403,7 @@ test("subagent tool results report each child response's usage exactly once", as
 	assert.equal(again.usage, undefined);
 });
 
-test("a background completion shows its spend without telling the model", async () => {
+test("a completion shows its spend without telling the model", async () => {
 	let report: ((activity: ChildActivity) => void) | undefined;
 	let release: (() => void) | undefined;
 	let now = 1_000;
@@ -418,7 +418,7 @@ test("a background completion shows its spend without telling the model", async 
 	const { mock, context } = await setup({ runChild });
 	await tool(mock, "subagent_spawn").execute(
 		"spawn",
-		{ task: "background work", description: "test job", background: true },
+		{ task: "background work", description: "test job" },
 		undefined,
 		undefined,
 		context.ctx,

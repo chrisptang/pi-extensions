@@ -31,7 +31,6 @@ interface InternalJob extends JobSummary {
 	usage: JobUsage;
 	/** Share of `usage` already reported to the main session through a tool result. */
 	billed: BilledUsage;
-	notifyOnCompletion: boolean;
 	terminal: Promise<void>;
 	resolveTerminal: () => void;
 	task?: Promise<void>;
@@ -144,11 +143,6 @@ export interface StartJobInput {
 	description?: string;
 	/** Notes about degraded setup, such as an unresolved model alias. */
 	limitations?: string[];
-	/**
-	 * Background jobs interrupt the main agent with their completion so a weaker
-	 * model cannot forget to collect the result. Blocking callers use wait instead.
-	 */
-	notifyOnCompletion?: boolean;
 }
 
 export class SubagentRuntime {
@@ -274,7 +268,6 @@ export class SubagentRuntime {
 			...(input.contextWindow !== undefined ? { contextWindow: input.contextWindow } : {}),
 			usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
 			billed: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
-			notifyOnCompletion: input.notifyOnCompletion ?? false,
 			terminal,
 			resolveTerminal,
 			// Setup limitations, such as an unresolved model alias, are reported even
@@ -595,9 +588,10 @@ export class SubagentRuntime {
 					display: true,
 					details: { ...payload, ...cost },
 				},
-				// A background job triggers a turn so the main agent acts on the result
-				// immediately. A blocking caller is already waiting, so it must not.
-				{ deliverAs: "steer", ...(job.notifyOnCompletion ? { triggerTurn: true } : {}) },
+				// Every completion triggers a turn: while the caller is streaming —
+				// including blocked in subagent_wait — this stays a steer, and at an
+				// idle session it wakes the main agent so no result is left uncollected.
+				{ deliverAs: "steer", triggerTurn: true },
 			);
 		} catch {
 			// Completion remains available through wait; inspect continues to report status.

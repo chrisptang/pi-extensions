@@ -17,7 +17,6 @@ Planning, the critical path, integration, deterministic checks, authorization de
 | `task` | `string` | Yes | Self-contained task, up to 50 KiB of UTF-8 text. |
 | `description` | `string` | Yes | Short label shown in the active-jobs widget; truncated to 60 characters for display. |
 | `agent` | `string` | No | Agent definition name, case-insensitive; see [agent definitions](../README.md#-agent-definitions). |
-| `background` | `boolean` | No | `true` runs without blocking and interrupts the main agent when the job ends; defaults to `false`. |
 | `tools` | `string[]` | No | Up to 64 names from `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`; defaults to the agent definition's tools, otherwise `read`, `grep`, `find`, and `ls`. |
 | `thinkingLevel` | `string` | No | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; defaults to the agent definition's level, otherwise the main agent's effective thinking level. |
 | `maxTurns` | `integer` | No | Turn budget, `>= 1`; defaults to `100`. The child is told the budget in its system prompt and reminded of the remaining turns at 90%. At the budget the child is asked to stop using tools and report; three turns later it is stopped as `budget_exhausted`. Independently, a child whose context reaches 70% of its model's window (200K when the registry does not know it) is asked to wrap up the same way. |
@@ -40,7 +39,7 @@ The `agent` parameter description lists only the definitions in `~/.pi/agent/age
 
 The child inherits the main agent's effective provider and model at spawn time, unless the agent definition names a `model` that resolves to a usable one. An alias that cannot be resolved falls back to the inherited model and is reported as a job limitation.
 
-`background: true` delivers the completion as a steering interrupt that starts a main-agent turn, so the main agent acts on the result without polling. The default blocking mode delivers the same completion without triggering a turn, because `subagent_wait` is already collecting the result.
+Every job delivers its completion with a turn trigger: while the main agent is streaming, including blocked inside `subagent_wait`, it arrives as a steering message inside the running turn, and at an idle session it starts a new turn so no result is left uncollected.
 
 Providers registered by a parent extension throw before the job is queued because children disable unrelated extensions.
 
@@ -65,7 +64,6 @@ It also reports whether `~/.pi/agent/system-prompts/subagent_instruction.md` rep
 | `name` | `string` | Yes | Skill name, case-insensitive. |
 | `description` | `string` | Yes | Short label shown in the active-jobs widget; truncated to 60 characters for display. |
 | `args` | `string` | No | The caller's request for the skill, up to 50 KiB of UTF-8 text. |
-| `background` | `boolean` | No | `true` runs without blocking and interrupts the main agent when the job ends; defaults to `false`. |
 | `tools` | `string[]` | No | Up to 64 names from `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`; defaults to the skill's translated `allowed-tools`, otherwise `read`, `grep`, `find`, and `ls`. |
 | `thinkingLevel` | `string` | No | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; defaults to the skill's level, otherwise the main agent's effective level. |
 | `maxTurns` | `integer` | No | Turn budget, `>= 1`; defaults to `100`; same semantics as `subagent_spawn`. |
@@ -88,7 +86,7 @@ The `name` parameter description lists only the skills in `.pi/skills/` and `~/.
 
 ### `/skill:<name>` with `content: fork`
 
-The extension listens to Pi's `input` event. When the typed text is `/skill:<name>` and the named skill declares `content: fork`, the input is consumed and the skill starts as a subagent through the same path as `skill_run`: the body is the system prompt, text after the name is the task, and the skill's `model`, `allowed-tools`, and `thinkingLevel` apply; an `agent:` field is ignored, so the child runs on the skill body alone. The job is labelled `/skill:<name>` and delivers its completion with a turn trigger, as a `background: true` run does. Any other input, including `/skill:` for a skill without `content: fork`, continues to Pi unchanged. A fork that cannot start is reported as an error notification and the input is still consumed, because an inline expansion is what the skill opted out of.
+The extension listens to Pi's `input` event. When the typed text is `/skill:<name>` and the named skill declares `content: fork`, the input is consumed and the skill starts as a subagent through the same path as `skill_run`: the body is the system prompt, text after the name is the task, and the skill's `model`, `allowed-tools`, and `thinkingLevel` apply; an `agent:` field is ignored, so the child runs on the skill body alone. The job is labelled `/skill:<name>` and delivers its completion with a turn trigger, as every job does. Any other input, including `/skill:` for a skill without `content: fork`, continues to Pi unchanged. A fork that cannot start is reported as an error notification and the input is still consumed, because an inline expansion is what the skill opted out of.
 
 An unknown name throws before the job is queued. Every spawn-time rule above — extension providers, runtime API keys, and unavailable tool names — applies unchanged.
 
@@ -137,7 +135,7 @@ Returns at once with the job's `state`, `elapsedMs`, `turns` against `maxTurns`,
 
 Each line is `+m:ss` from the job's start followed by one of a tool call (`read ✓ src/a.ts → first result line`, with `…` while the call is still running and `✗` on error), visible assistant text (`say …`), or a lifecycle notice (`note Job completed.`). The lines are the `/subagents` panel's activity record — summarized arguments, credential redaction, and the 512-byte bound apply — so the tool never exposes file bodies or the child's thinking.
 
-The tool exists so the main agent can confirm a running job is alive and roughly where it is without waiting for it. Its lines are progress signals, not results: a running job still needs `subagent_wait` or its background completion.
+The tool exists so the main agent can confirm a running job is alive and roughly where it is without waiting for it. Its lines are progress signals, not results: a running job still needs `subagent_wait` or its completion interrupt.
 
 ## `/subagents`
 
