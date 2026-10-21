@@ -444,16 +444,16 @@ The key hints sit in the bottom border, and a list longer than the panel says ho
 
 `Enter` opens the selected job: its description and `jobId`, what the child is spending, any error or limitation beside them, and below the rule its activity as the child produces it.
 The title carries its elapsed time and turns used against its budget.
-The log follows the newest event until you scroll up, and `←→` moves to the neighbouring job without leaving the view:
+The log shows the newest event at the top; scroll down for older events and return to the top to follow live activity, and `←→` moves to the neighbouring job without leaving the view:
 
 ```
 ╭─ explorer · running · 42s / 2m · 7/100 turns ──────────────────────╮
 │ review auth middleware  job_m2x1_3                                 │
 │ anthropic/claude-x · ctx 49k/1.0m 4.9% · cache 92.5% · in 663k …   │
 │ ────────────────────────────────────────────────────────────────── │
-│ 12:04:31 read   ✓ src/auth/middleware.ts → 80 lines                │
-│ 12:04:33 grep   ✓ "verifyToken" src/ → 7 matches                   │
 │ 12:04:35 say      The middleware verifies exp before refresh.      │
+│ 12:04:33 grep   ✓ "verifyToken" src/ → 7 matches                   │
+│ 12:04:31 read   ✓ src/auth/middleware.ts → 80 lines                │
 ╰─ ↑↓ scroll  PgUp/PgDn page  ←→ job  k terminate  esc back ─────────╯
 ```
 

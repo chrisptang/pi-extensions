@@ -179,8 +179,8 @@ export function createPanelComponent(
 	let view: PanelView = initial?.view ?? "list";
 	let selectedJobId: string | undefined = initial?.jobId;
 	// Detail scroll position. `undefined` follows the newest event, which is
-	// what a reader opening a live log wants; scrolling up pins the offset until
-	// the reader scrolls back to the end.
+	// what a reader opening a live log wants; scrolling down pins the offset until
+	// the reader scrolls back to the top.
 	let scrollTop: number | undefined;
 	let finished = false;
 	let unsubscribe: () => void = () => undefined;
@@ -226,9 +226,9 @@ export function createPanelComponent(
 	const scrollDetail = (job: PanelJob, delta: number) => {
 		const total = detailLogLines(job, theme).length;
 		const maxTop = Math.max(0, total - detailLogRows(bodyRows(), job));
-		const current = scrollTop ?? maxTop;
+		const current = scrollTop ?? 0;
 		const next = Math.min(maxTop, Math.max(0, current + delta));
-		scrollTop = next >= maxTop ? undefined : next;
+		scrollTop = next === 0 ? undefined : next;
 	};
 
 	return {
@@ -403,8 +403,8 @@ function renderJobRow(
  * Render one job's activity log inside a frame.
  *
  * The job's own facts (description, id, cost, error, limitations) sit above the
- * rule; below it is the chronological log, which follows the newest event unless
- * the reader scrolled up. The eviction notice at its head makes the bounded
+ * rule; below it is the newest-first log, which follows the newest event unless
+ * the reader scrolled down. The eviction notice at its end makes the bounded
  * retention explicit instead of letting the log look complete.
  */
 export function renderDetailView(
@@ -417,7 +417,7 @@ export function renderDetailView(
 	const log = detailLogLines(job, theme);
 	const rows = detailLogRows(bodyRows, job);
 	const maxTop = Math.max(0, log.length - rows);
-	const top = Math.min(maxTop, scrollTop ?? maxTop);
+	const top = Math.min(maxTop, scrollTop ?? 0);
 	const visible = log.slice(top, top + rows);
 	const body = [
 		...jobLines(job).map(([role, line]) => theme.fg(role, line)),
@@ -512,7 +512,7 @@ function detailLogLines(job: PanelJob, theme: Theme): string[] {
 	} else {
 		lines.push(...job.activity.map((event) => renderActivityEvent(event, theme)));
 	}
-	return lines;
+	return lines.reverse();
 }
 
 /**

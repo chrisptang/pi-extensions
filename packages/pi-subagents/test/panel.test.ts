@@ -107,8 +107,8 @@ test("detail view shows the job's budget, meta line, and activity", () => {
 		lines[2] ?? "",
 		/^│ anthropic\/model-x · ctx 49k\/1\.0m 4\.9% · cache 90\.2% · in 41k · out 6\.6k · \$0\.029\s+│$/u,
 	);
-	assert.match(lines[4] ?? "", /^│ 12:04:31 read {3}✓ src\/auth\/mw\.ts → 80 lines/u);
-	assert.match(lines[5] ?? "", /^│ 12:04:35 say {6}The middleware verifies exp before refresh\./u);
+	assert.match(lines[5] ?? "", /^│ 12:04:31 read {3}✓ src\/auth\/mw\.ts → 80 lines/u);
+	assert.match(lines[4] ?? "", /^│ 12:04:35 say {6}The middleware verifies exp before refresh\./u);
 	assert.match(
 		lines.at(-1) ?? "",
 		/^╰─ ↑↓ scroll {2}PgUp\/PgDn page {2}←→ job {2}k terminate {2}esc back ─+╯$/u,
@@ -127,11 +127,11 @@ test("detail view keeps the tool column aligned across tool-name lengths", () =>
 	};
 	const lines = renderDetailView(job, identityTheme(), 80, 10, undefined);
 	// Clock, a six-column label, a two-column outcome mark, then the detail.
-	assert.match(lines[4] ?? "", /^│ 01:00:00 read {3}✓ a\.ts/u);
-	assert.match(lines[5] ?? "", /^│ 01:00:01 write {2}✗ b\.ts/u);
+	assert.match(lines[7] ?? "", /^│ 01:00:00 read {3}✓ a\.ts/u);
+	assert.match(lines[6] ?? "", /^│ 01:00:01 write {2}✗ b\.ts/u);
 	// Truncating the name adds pi-tui's own style resets around the ellipsis.
-	assert.match((lines[6] ?? "").split("\u001b[0m").join(""), /^│ 01:00:02 list_… … src/u);
-	assert.match(lines[7] ?? "", /^│ 01:00:03 say {6}done/u);
+	assert.match((lines[5] ?? "").split("\u001b[0m").join(""), /^│ 01:00:02 list_… … src/u);
+	assert.match(lines[4] ?? "", /^│ 01:00:03 say {6}done/u);
 });
 
 test("detail view follows the newest event and scrolls to an explicit offset", () => {
@@ -150,11 +150,46 @@ test("detail view follows the newest event and scrolls to an explicit offset", (
 	assert.ok(tail.some((line) => line.includes("line 30")));
 	assert.ok(!tail.some((line) => line.includes("line 23 ")));
 	// The scroll position sits at the right end of the bottom border.
-	assert.match(tail.at(-1) ?? "", /─ 24–30\/30 ─╯$/u);
-	const head = renderDetailView(job, identityTheme(), 80, 10, 0);
+	assert.match(tail[4] ?? "", /line 30 /u);
+	assert.match(tail.at(-1) ?? "", /─ 1–7\/30 ─╯$/u);
+	const head = renderDetailView(job, identityTheme(), 80, 10, 23);
 	assert.ok(head.some((line) => line.includes("line 1 ")));
 	assert.ok(!head.some((line) => line.includes("line 8 ")));
-	assert.match(head.at(-1) ?? "", /─ 1–7\/30 ─╯$/u);
+	assert.match(head[4] ?? "", /line 7 /u);
+	assert.match(head.at(-1) ?? "", /─ 24–30\/30 ─╯$/u);
+	assert.equal(job.activity[0]?.seq, 1, "rendering must not reorder stored activity");
+});
+
+test("detail navigation pages through older events and returns to live updates", async () => {
+	let report: ChildRequest["onActivity"];
+	const { mock, context } = await setup({
+		runChild: (request) => {
+			report = request.onActivity;
+			return neverSettles(request);
+		},
+	});
+	await spawnJob(mock, context);
+	await Promise.resolve();
+	for (let index = 1; index <= 30; index++) {
+		report?.({ type: "output", text: `record ${index}` });
+	}
+	const component = panel(runtimeOf(mock), () => undefined);
+	try {
+		component.render(100);
+		component.handleInput(KEYS.enter);
+		assert.match(component.render(100)[4] ?? "", /record 30 /u);
+		component.handleInput(KEYS.down);
+		assert.match(component.render(100)[4] ?? "", /record 29 /u);
+		component.handleInput("\u001b[6~");
+		assert.match(component.render(100)[4] ?? "", /record 22 /u);
+		component.handleInput("\u001b[5~");
+		assert.match(component.render(100)[4] ?? "", /record 29 /u);
+		component.handleInput("\u001b[A");
+		report?.({ type: "output", text: "record 31" });
+		assert.match(component.render(100)[4] ?? "", /record 31 /u);
+	} finally {
+		component.dispose();
+	}
 });
 
 test("panel reports a terminal selection as not terminable", () => {
@@ -204,7 +239,7 @@ test("detail view reports dropped events and a job's own limitations", () => {
 	// meta line rather than being appended to the chronological log.
 	assert.match(lines[3] ?? "", /^│ note: Agent model was unavailable; inherited the main model\./u);
 	assert.match(lines[4] ?? "", /^│ ─+ │$/u);
-	assert.match(lines[5] ?? "", /^│ … 37 earlier event\(s\) dropped/u);
+	assert.match(lines[6] ?? "", /^│ … 37 earlier event\(s\) dropped/u);
 });
 
 test("list view renders an empty session", () => {
