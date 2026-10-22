@@ -3,7 +3,11 @@ import type { StyledChunk } from "../format/style.js";
 import type { ModuleName } from "./catalog.js";
 
 // Only the built-in layout shortens labels; usage takes priority over the session title.
-export function fitDefaultEnvironment(modules: Record<ModuleName, StyledChunk[]>, width: number) {
+export function fitDefaultEnvironment(
+	modules: Record<ModuleName, StyledChunk[]>,
+	width: number,
+	includesSpeed: boolean,
+) {
 	const environment = [
 		"directory",
 		"git_branch",
@@ -26,7 +30,10 @@ export function fitDefaultEnvironment(modules: Record<ModuleName, StyledChunk[]>
 		overflow -= current - chunkWidth(modules[name]);
 	}
 	const titleWidth =
-		width - chunkWidth([...modules.tokens, ...modules.context, ...modules.cost]) - 2;
+		width -
+		chunkWidth([...modules.tokens, ...modules.context, ...modules.cost]) -
+		(includesSpeed ? chunkWidth(modules.speed) : 0) -
+		2;
 	if (titleWidth <= 0) modules.session_name = [];
 	else if (chunkWidth(modules.session_name) > titleWidth) {
 		modules.session_name = middleTruncate(modules.session_name, titleWidth);

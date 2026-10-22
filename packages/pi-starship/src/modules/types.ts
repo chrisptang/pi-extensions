@@ -95,6 +95,7 @@ export interface StarshipRuntimeSnapshot {
 		tokens?: number | null;
 		contextWindow?: number | null;
 	};
+	responseSpeed?: { ttftSeconds?: number; tokensPerSecond?: number };
 	tokenTotals: {
 		input: number;
 		output: number;

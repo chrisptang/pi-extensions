@@ -87,6 +87,43 @@ function fixture(overrides: Partial<StarshipRuntimeSnapshot> = {}): StarshipRunt
 	};
 }
 
+test("speed exposes measured, partial, unknown and zero-valued response metrics", () => {
+	const { config, diagnostics } = normalizeConfig({ format: "$speed" });
+	assert.deepEqual(diagnostics, []);
+	for (const [responseSpeed, expected] of [
+		[undefined, "TTFT — · — tok/s "],
+		[{ ttftSeconds: 1.234, tokensPerSecond: 45.678 }, "TTFT 1.23s · 45.7 tok/s "],
+		[{ ttftSeconds: 0.5 }, "TTFT 0.50s · — tok/s "],
+		[{ tokensPerSecond: 20 }, "TTFT — · 20.0 tok/s "],
+		[{ ttftSeconds: 0, tokensPerSecond: 0 }, "TTFT 0.00s · 0.0 tok/s "],
+	] as const) {
+		assert.equal(stripAnsi(renderStatusline(config, fixture({ responseSpeed })).ansi), expected);
+	}
+	config.modules.speed.disabled = true;
+	assert.equal(renderStatusline(config, fixture()).ansi, "");
+});
+
+test("custom speed format and disabled configuration validate without changing legacy layouts", () => {
+	const loaded = validateConfigDocument(
+		"/speed.toml",
+		`format = "$speed"
+[speed]
+format = "[$symbol $ttft / $tok_per_sec]($style)"
+symbol = "speed"
+style = "dimmed"
+`,
+	);
+	assert.deepEqual(loaded.diagnostics, []);
+	assert.equal(stripAnsi(renderStatusline(loaded.config, fixture()).ansi), "speed — / —");
+	assert.equal(normalizeConfig({}).config.format.includes("$speed"), false);
+	for (const preset of STARSHIP_PRESETS) {
+		assert.equal(
+			validateConfigDocument("/preset.toml", preset.rawDocument).config.format.includes("$speed"),
+			false,
+		);
+	}
+});
+
 test("bundled presets render their promised Pi-native information", () => {
 	const plainById = new Map(
 		STARSHIP_PRESETS.map((preset) => {

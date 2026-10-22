@@ -25,7 +25,10 @@ export function renderStatusline(
 	trueColor = true,
 	theme?: Pick<Theme, "fg">,
 ): RenderedStatusline<ModuleName> {
-	const defaultLayout = config.format === BUILT_IN_CONFIG.format;
+	const includesSpeed = config.format === BUILT_IN_CONFIG.format;
+	// Saved quiet layouts keep their theme and sizing without opting into new metrics.
+	const defaultLayout =
+		includesSpeed || config.format === BUILT_IN_CONFIG.format.replace("$speed", "");
 	const palette = activePalette(config);
 	const modules = {} as Record<ModuleName, StyledChunk[]>;
 	const layoutModules = {} as Record<ModuleName, LayoutChunk[]>;
@@ -74,7 +77,7 @@ export function renderStatusline(
 	}
 
 	if (defaultLayout) {
-		fitDefaultEnvironment(modules, width);
+		fitDefaultEnvironment(modules, width, includesSpeed);
 		for (const name of ["directory", "session_name", "git_branch", "model"] as const) {
 			layoutModules[name] = modules[name];
 		}

@@ -177,7 +177,7 @@ test("built-in example restores the quiet defaults without a palette", () => {
 		const loaded = loadStarshipConfig(path);
 		assert.equal(
 			loaded.config.format,
-			"$directory$git_branch$git_status$activity $fill$model$thinking\n$tokens$context$cost$fill(  $session_name)",
+			"$directory$git_branch$git_status$activity $fill$model$thinking\n$tokens$speed$context$cost$fill(  $session_name)",
 		);
 		assert.deepEqual(loaded.config, BUILT_IN_CONFIG);
 		assert.equal(loaded.config.format, BUILT_IN_CONFIG.format);

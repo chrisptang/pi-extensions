@@ -22,6 +22,7 @@ function snapshot(overrides: Partial<StarshipRuntimeSnapshot> = {}): StarshipRun
 		activeTools: new Map(),
 		isStreaming: false,
 		contextUsage: { tokens: 32_000, contextWindow: 512_000, percent: 6.25 },
+		responseSpeed: { ttftSeconds: 1.25, tokensPerSecond: 50 },
 		tokenTotals: {
 			input: 8_000,
 			cacheRead: 270_000,
@@ -43,7 +44,7 @@ function lines(runtime = snapshot(), width = 100) {
 	);
 }
 
-const usage = "ΣIn 288k · ΣOut 4.4k · Ctx 32k/512k 6.3% · $0.092";
+const usage = "ΣIn 288k · ΣOut 4.4k · TTFT 1.25s · 50.0 tok/s · Ctx 32k/512k 6.3% · $0.092";
 
 test("default aligns workspace and model above a complete, stable usage row", () => {
 	const output = lines();
@@ -81,6 +82,7 @@ test("default right-aligns a muted session title beside usage and hides empty ti
 	assert.ok(
 		roles.some(({ role, text }) => role === "muted" && text.includes("Restore footer title")),
 	);
+	assert.ok(roles.some(({ role, text }) => role === "muted" && text.includes("TTFT")));
 	for (const sessionName of [undefined, "", "   "]) {
 		assert.match(lines(snapshot({ sessionName }))[0] ?? "", /^h5-pda \/ feat\/plaintext-login/u);
 		assert.equal(lines(snapshot({ sessionName }))[1], usage);
@@ -235,13 +237,17 @@ test("unknown usage, subscription estimates and tool costs keep their existing m
 				tokenTotals: { ...known.tokenTotals, cost: 1.234, toolCost: 0.058 },
 			}),
 		)[1],
-		"ΣIn 288k · ΣOut 4.4k · Ctx 32k/512k 6.3% · $1.23 (tools $0.058) estimate",
+		"ΣIn 288k · ΣOut 4.4k · TTFT 1.25s · 50.0 tok/s · Ctx 32k/512k 6.3% · $1.23 (tools $0.058) estimate",
 	);
 	assert.equal(
 		lines(
-			snapshot({ tokenTotals: { ...known.tokenTotals, hasUsage: false }, contextUsage: undefined }),
+			snapshot({
+				tokenTotals: { ...known.tokenTotals, hasUsage: false },
+				contextUsage: undefined,
+				responseSpeed: undefined,
+			}),
 		)[1],
-		"ΣIn — · ΣOut — · Ctx —/— — · $—",
+		"ΣIn — · ΣOut — · TTFT — · — tok/s · Ctx —/— — · $—",
 	);
 	assert.match(
 		lines(
@@ -273,6 +279,28 @@ test("default sanitizes terminal text before measuring and shrinking without cha
 			`wide characters must fit ${width} column(s)`,
 		);
 	}
+});
+
+test("saved quiet layouts keep their theme and sizing without enabling speed", () => {
+	const previousDocument = BUILT_IN_EXAMPLE.replace("$tokens$speed", "$tokens");
+	const { config, diagnostics } = validateConfigDocument("/previous.toml", previousDocument);
+	assert.deepEqual(diagnostics, []);
+	const previousUsage = usage.replace(" · TTFT 1.25s · 50.0 tok/s", "");
+	const roles: Array<{ role: string; text: string }> = [];
+	const runtime = snapshot({ sessionName: "A very long session title for the remaining space" });
+	const rendered = renderStatusline(config, runtime, 80, true, {
+		fg(role, text) {
+			roles.push({ role, text });
+			return text;
+		},
+	});
+	const output = wrapFormattedStatusline(rendered.ansi, 80).map(stripVTControlCharacters);
+	assert.equal(output.length, 2);
+	assert.ok(output[1]?.startsWith(previousUsage));
+	assert.match(output[1] ?? "", /…/u);
+	assert.doesNotMatch(output.join("\n"), /TTFT|tok\/s|agy\//u);
+	assert.ok(roles.some(({ role, text }) => role === "muted" && text.includes("ΣIn")));
+	assert.ok(output.every((line) => visibleWidth(line) <= 80));
 });
 
 test("custom documents retain their legacy module defaults and do not opt into shrinking", () => {

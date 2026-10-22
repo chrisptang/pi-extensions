@@ -18,12 +18,12 @@ The first successful explicit settings save creates the file atomically; loading
 The built-in root layout is:
 
 ```toml
-format = "$directory$git_branch$git_status$activity $fill$model$thinking\n$tokens$context$cost$fill(  $session_name)"
+format = "$directory$git_branch$git_status$activity $fill$model$thinking\n$tokens$speed$context$cost$fill(  $session_name)"
 ```
 
 This root line describes the layout, not the complete built-in document: its module formats and styles are explicit template overrides.
 Row one places workspace/directory, branch, nonempty textual Git status, and live activity on the left, with model and thinking level on the right.
-Row two retains `ΣIn` inclusive session input, `ΣOut` cumulative output, `Ctx` tokens/window and percentage, and precise reported cost including the positive tool-cost share and subscription `estimate` suffix, with the session title aligned right when named.
+Row two retains `ΣIn` inclusive session input, `ΣOut` cumulative output, current-model `TTFT` in seconds and end-to-end output `tok/s`, `Ctx` tokens/window and percentage, and precise reported cost including the positive tool-cost share and subscription `estimate` suffix, with the session title aligned right when named.
 The title shortens to the space left by usage and hides when no space remains.
 There is no brand or cache-rate module in this layout, and it does not start the opt-in GitHub PR query.
 Normal output uses terminal colors and dimmed/muted text without bold or rainbow segments.

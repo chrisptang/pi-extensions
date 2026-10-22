@@ -22,6 +22,7 @@ Use this authoritative public reference whenever a question or change involves a
 | `activity` | `$symbol`, `$state`, `$tool`, `$count`, `$kind`, `$title`, `$text`, `$live` | Extension UI waits, active tools, streaming, completion, or idle; `$live` hides idle/completed states |
 | `context` | `$symbol`, `$percentage`, `$tokens`, `$window` | Current context tokens, context window, and percentage |
 | `tokens` | `$symbol`, `$input`, `$output`, `$total`, `$total_input` | Session token totals; `$total_input` includes prompt cache reads and writes |
+| `speed` | `$symbol`, `$ttft`, `$tok_per_sec` | Latest current-model TTFT in seconds and end-to-end output tokens per second |
 | `cache` | `$symbol`, `$rate`, `$session_rate`, `$read`, `$write` | Prompt-cache totals, latest-request rate, and session token-weighted rate |
 | `cost` | `$symbol`, `$cost`, `$tools`, `$subscription` | Reported usage-cost estimate, included tool-cost share, and subscription estimate marker |
 | `time` | `$symbol`, `$time` | Current local time |
@@ -142,6 +143,15 @@ Terraform workspace precedence is `TF_WORKSPACE`, `TF_DATA_DIR/environment`, the
 - Cache `$read` and `$write` are cumulative, and the legacy cache format's `$session_rate` is token-weighted across the session: `cacheRead / (input + cacheRead + cacheWrite) * 100`.
   `$rate` remains the optional latest assistant-request rate with that request's token counts.
   With measured non-cached usage, both rates show `0.0%`; with no usage report, rates show `—`.
+- `speed` shows the latest response for the current session and selected model, not a session average.
+  `$ttft` is client-observed time from Pi's provider-request hook to the first nonempty text, thinking, or tool-call content event, including redacted thinking when reported; empty block starts, headers, and content-free stream frames do not count.
+  It uses a monotonic clock, has two decimals and an `s` suffix, and becomes available while streaming.
+  `$tok_per_sec` uses final `usage.output` divided by the whole request duration, with one decimal; it includes TTFT, excludes time between requests such as tool execution, and is not decode-only speed.
+  Output already includes reported reasoning tokens, so they are not added again.
+  Unavailable values show `—`, including after reload/resume, model or session changes, tree navigation, and at the start of each request; values are not reconstructed from history.
+  Errors, cancellation, deferred/pending responses, and interrupted unfinished requests clear partial measurements; completed `stop`, `length`, and `toolUse` responses retain them until the next request or reset.
+  Missing or invalid output usage and nonpositive durations leave throughput unknown; reported zero output remains `0.0`.
+  The quiet default includes `$speed`; custom documents and presets must explicitly reference it or `$all`.
 - `cache` remains enabled at module scope but is absent from the quiet built-in metrics row, as is `brand` from the first row.
   Custom root formats remain authoritative: add or remove `$cache` or use `$all` as desired; valid empty files retain the legacy root including cache.
 - Context `$percentage` uses native one-decimal precision.

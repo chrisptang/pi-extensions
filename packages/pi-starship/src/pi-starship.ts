@@ -3,6 +3,7 @@ import {
 	type ExtensionAPI,
 	type ExtensionContext,
 	getAgentDir,
+	type MessageEndEvent,
 	type ReadonlyFooterDataProvider,
 } from "@earendil-works/pi-coding-agent";
 import { getCapabilities, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
@@ -25,6 +26,7 @@ import {
 	type StatuslineInspection,
 	type WorkspaceSnapshot,
 } from "./modules/index.js";
+import { hasResponseContent } from "./modules/speed.js";
 import { execWorkspaceCommand } from "./runtime/command.js";
 import { githubPrSnapshotEqual, queryGithubPr } from "./runtime/github-pr.js";
 import { AsyncRefreshController } from "./runtime/refresh-controller.js";
@@ -59,6 +61,8 @@ interface RuntimeState {
 	isStreaming: boolean;
 	uiPrompt?: NonNullable<StarshipRuntimeSnapshot["uiPrompt"]>;
 	thinkingLevel: string;
+	responseSpeed?: StarshipRuntimeSnapshot["responseSpeed"];
+	responseRequest?: { provider: string; model: string; startedAt: number };
 	lastCompletedTool?: string;
 	git?: GitSnapshot;
 	githubPr?: GithubPrSnapshot;
@@ -104,6 +108,19 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 
 	const refresh = () => runtime.requestRender?.();
 	const ownsRuntime = (ctx: ExtensionContext) => sessionOwner === ctx.sessionManager;
+	const clearResponseSpeed = () => {
+		runtime.responseRequest = undefined;
+		runtime.responseSpeed = undefined;
+	};
+	const currentResponse = (ctx: ExtensionContext, message: MessageEndEvent["message"]) => {
+		const request = runtime.responseRequest;
+		return ownsRuntime(ctx) &&
+			message.role === "assistant" &&
+			message.provider === request?.provider &&
+			message.model === request?.model
+			? request
+			: undefined;
+	};
 	const githubPrExec = options.githubPrExec ?? execWorkspaceCommand;
 	const gitController = new AsyncRefreshController<GitRefreshInput, GitSnapshot | undefined>({
 		async read(input, signal) {
@@ -254,6 +271,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 	}
 
 	const installFooter = (ctx: ExtensionContext) => {
+		clearResponseSpeed();
 		const generation = ++sessionGeneration;
 		sessionOwner = ctx.sessionManager;
 		previewLoaded = undefined;
@@ -318,6 +336,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 					unsubscribe();
 					clearInterval(timer);
 					if (isActiveTarget(target)) {
+						clearResponseSpeed();
 						activeTarget = undefined;
 						clearDebounce();
 						gitController.stop();
@@ -426,6 +445,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 	pi.on("session_shutdown", (_event, ctx) => {
 		if (sessionOwner !== ctx.sessionManager) return;
 		sessionOwner = undefined;
+		clearResponseSpeed();
 		previewLoaded = undefined;
 		sessionGeneration += 1;
 		menuController.abort(new DOMException("Starship session shut down", "AbortError"));
@@ -448,7 +468,48 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 		ctx.ui.setStatus("starship", undefined);
 	});
 
-	pi.on("model_select", () => refresh());
+	pi.on("model_select", (_event, ctx) => {
+		if (!ownsRuntime(ctx)) return;
+		clearResponseSpeed();
+		refresh();
+	});
+	pi.on("before_provider_request", (_event, ctx) => {
+		if (!ownsRuntime(ctx) || !ctx.model) return;
+		clearResponseSpeed();
+		runtime.responseRequest = {
+			provider: ctx.model.provider,
+			model: ctx.model.id,
+			startedAt: performance.now(),
+		};
+		refresh();
+	});
+	pi.on("message_update", (event, ctx) => {
+		const request = currentResponse(ctx, event.message);
+		if (!request || runtime.responseSpeed?.ttftSeconds !== undefined) return;
+		if (!hasResponseContent(event.assistantMessageEvent)) return;
+		runtime.responseSpeed = {
+			ttftSeconds: Math.max(0, performance.now() - request.startedAt) / 1000,
+		};
+		refresh();
+	});
+	pi.on("message_end", (event, ctx) => {
+		const request = currentResponse(ctx, event.message);
+		if (!request || event.message.role !== "assistant") return;
+		runtime.responseRequest = undefined;
+		if (["stop", "length", "toolUse"].includes(event.message.stopReason)) {
+			const seconds = (performance.now() - request.startedAt) / 1000;
+			const output = event.message.usage?.output;
+			if (seconds > 0 && Number.isFinite(output) && output >= 0) {
+				runtime.responseSpeed = { ...runtime.responseSpeed, tokensPerSecond: output / seconds };
+			}
+		} else runtime.responseSpeed = undefined;
+		refresh();
+	});
+	pi.on("agent_settled", (_event, ctx) => {
+		if (!ownsRuntime(ctx) || !runtime.responseRequest) return;
+		clearResponseSpeed();
+		refresh();
+	});
 	pi.on("session_info_changed", () => refresh());
 	pi.on("thinking_level_select", (event) => {
 		runtime.thinkingLevel = event.level;
@@ -596,6 +657,7 @@ function runtimeSnapshot(
 		lastCompletedTool: runtime.lastCompletedTool,
 		contextUsage: ctx.getContextUsage() ?? undefined,
 		tokenTotals: summarizeFooterUsage(ctx.sessionManager.getEntries()),
+		responseSpeed: runtime.responseSpeed,
 		usingSubscription: isSubscriptionBacked(ctx),
 		gitBranch: runtime.git?.branch?.name ?? footerData.getGitBranch(),
 		gitBranchDetails: runtime.git?.branch,

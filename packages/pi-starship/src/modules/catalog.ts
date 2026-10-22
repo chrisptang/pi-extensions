@@ -22,6 +22,7 @@ import { modelModule } from "./model.js";
 import { packageModule } from "./package.js";
 import { providerModule } from "./provider.js";
 import { sessionNameModule } from "./session-name.js";
+import { speedModule } from "./speed.js";
 import { thinkingModule } from "./thinking.js";
 import { timeModule } from "./time.js";
 import { tokensModule } from "./tokens.js";
@@ -51,6 +52,7 @@ const MODULE_IMPLEMENTATIONS = [
 	activityModule,
 	contextModule,
 	tokensModule,
+	speedModule,
 	cacheModule,
 	costModule,
 	timeModule,
@@ -103,6 +105,7 @@ const MODULE_DESCRIPTIONS = {
 	python: "Python version, virtual environment, and pyenv state.",
 	rust: "Rust toolchain detected in the current workspace.",
 	session_name: "Current session display name.",
+	speed: "Latest current-model response latency and end-to-end output throughput.",
 	terraform: "Active Terraform workspace and version.",
 	thinking: "Current Pi thinking level or streaming state.",
 	time: "Current local time.",

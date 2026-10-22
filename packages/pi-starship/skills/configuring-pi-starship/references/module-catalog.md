@@ -29,7 +29,7 @@ All enum values are case-sensitive.
 
 ## Catalog order
 
-`brand` → `provider` → `model` → `thinking` → `directory` → `session_name` → `git_worktree` → `git_branch` → `github_pr` → `git_commit` → `git_state` → `git_metrics` → `git_status` → `package` → `nodejs` → `python` → `rust` → `golang` → `bun` → `deno` → `mise` → `direnv` → `conda` → `pixi` → `nix_shell` → `guix_shell` → `docker_context` → `kubernetes` → `terraform` → `aws` → `gcloud` → `azure` → `openstack` → `os` → `container` → `hostname` → `username` → `activity` → `context` → `tokens` → `cache` → `cost` → `time` → `turn` → `fill` → `extension_status`
+`brand` → `provider` → `model` → `thinking` → `directory` → `session_name` → `git_worktree` → `git_branch` → `github_pr` → `git_commit` → `git_state` → `git_metrics` → `git_status` → `package` → `nodejs` → `python` → `rust` → `golang` → `bun` → `deno` → `mise` → `direnv` → `conda` → `pixi` → `nix_shell` → `guix_shell` → `docker_context` → `kubernetes` → `terraform` → `aws` → `gcloud` → `azure` → `openstack` → `os` → `container` → `hostname` → `username` → `activity` → `context` → `tokens` → `speed` → `cache` → `cost` → `time` → `turn` → `fill` → `extension_status`
 
 ## Module schemas
 
@@ -904,6 +904,22 @@ Accepted style fields:
 | Field | Default |
 | --- | --- |
 | `style` | `"bold cyan"` |
+
+### `speed`
+
+Latest current-model response latency and end-to-end output throughput.
+
+- Format variables: `$symbol`, `$ttft`, `$tok_per_sec`.
+- Style variables in `format`: `$style`.
+- Default `format`: `"[TTFT $ttft · $tok_per_sec tok/s ]($style)"`.
+- Default `symbol`: `""`.
+- Default `disabled`: `false`.
+
+Accepted style fields:
+
+| Field | Default |
+| --- | --- |
+| `style` | `"dimmed"` |
 
 ### `cache`
 

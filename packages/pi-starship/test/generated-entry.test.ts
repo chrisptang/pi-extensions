@@ -28,6 +28,10 @@ test("declared generated entry preserves registration and lifecycle behavior", a
 		assert.ok(mock.events.has("session_shutdown"));
 		assert.ok(mock.events.has("ui_prompt_start"));
 		assert.ok(mock.events.has("ui_prompt_end"));
+		assert.ok(mock.events.has("before_provider_request"));
+		assert.ok(mock.events.has("message_update"));
+		assert.ok(mock.events.has("message_end"));
+		assert.ok(mock.events.has("agent_settled"));
 
 		const context = createMockContext({ mode: "tui" });
 		await emit(mock.events, "session_start", {}, context.ctx);

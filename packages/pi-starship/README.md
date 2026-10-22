@@ -46,7 +46,7 @@ Do not enable this with `@narumitw/pi-statusline`: both own Pi's footer, and Pi 
 
 Start Pi with the extension to use the built-in two-line footer without creating a settings file.
 The first row shows directory, branch, nonempty textual Git status, and live activity on the left, with model and thinking level aligned right through fill.
-The second shows `ΣIn` inclusive session input, `ΣOut` cumulative output, `Ctx` tokens/window and percentage, and reported cost including tool usage, with the session title aligned right when named.
+The second shows `ΣIn` inclusive session input, `ΣOut` cumulative output, current-model `TTFT` in seconds and output `tok/s`, `Ctx` tokens/window and percentage, and reported cost including tool usage, with the session title aligned right when named.
 The title shortens to the space left by usage and hides when no space remains.
 Normal text uses terminal colors and Pi's muted theme role, without bold, rainbow segments, brand, or cache rate; context warnings, Git conflicts, and UI waits use Pi's warning/error theme roles.
 Idle and completed activity stays hidden.
@@ -106,6 +106,9 @@ style = "bold blue"
 
 `ΣIn` uses `$total_input` (`input + cacheRead + cacheWrite`); legacy `$input` and `$total` retain their existing meanings.
 Missing usage shows `—`, not a measured zero.
+`$speed` reports the latest current-model response, not a session average: TTFT measures provider-request start to first nonempty text, thinking, or tool-call content, and tok/s divides final output tokens by the whole request duration, including TTFT.
+Unknown values show `—`; new requests, model/session changes, reload, and cancellation reset measurements rather than restoring historical timing.
+Custom layouts and presets can opt in by adding `$speed` to their root format; see [usage semantics](./skills/configuring-pi-starship/references/modules.md#usage-semantics) for precision and timing details.
 Cache metrics remain available through `$cache`, including the token-weighted `$session_rate` and latest assistant-request `$rate`, but are absent from the quiet default.
 Reported cost retains three decimal places below $1 and two from $1; subscription-backed sessions append `estimate`, not a billing statement.
 The cost includes usage that tools report in their results, such as subagent runs, and shows that share as `(tools $x)` when it is positive.
