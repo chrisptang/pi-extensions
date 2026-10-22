@@ -61,8 +61,13 @@ interface RuntimeState {
 	isStreaming: boolean;
 	uiPrompt?: NonNullable<StarshipRuntimeSnapshot["uiPrompt"]>;
 	thinkingLevel: string;
-	responseSpeed?: StarshipRuntimeSnapshot["responseSpeed"];
-	responseRequest?: { provider: string; model: string; startedAt: number };
+	responseRequest?: { provider: string; model: string; startedAt: number; ttftCounted?: boolean };
+	responseTotals: {
+		requests: number;
+		ttftSeconds: number;
+		outputTokens: number;
+		durationSeconds: number;
+	};
 	lastCompletedTool?: string;
 	git?: GitSnapshot;
 	githubPr?: GithubPrSnapshot;
@@ -96,6 +101,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 		activeTools: new Map(),
 		isStreaming: false,
 		thinkingLevel: "off",
+		responseTotals: { requests: 0, ttftSeconds: 0, outputTokens: 0, durationSeconds: 0 },
 	};
 	let sessionGeneration = 0;
 	let menuController = new AbortController();
@@ -108,9 +114,9 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 
 	const refresh = () => runtime.requestRender?.();
 	const ownsRuntime = (ctx: ExtensionContext) => sessionOwner === ctx.sessionManager;
-	const clearResponseSpeed = () => {
+	const resetResponseStats = () => {
 		runtime.responseRequest = undefined;
-		runtime.responseSpeed = undefined;
+		runtime.responseTotals = { requests: 0, ttftSeconds: 0, outputTokens: 0, durationSeconds: 0 };
 	};
 	const currentResponse = (ctx: ExtensionContext, message: MessageEndEvent["message"]) => {
 		const request = runtime.responseRequest;
@@ -271,7 +277,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 	}
 
 	const installFooter = (ctx: ExtensionContext) => {
-		clearResponseSpeed();
+		resetResponseStats();
 		const generation = ++sessionGeneration;
 		sessionOwner = ctx.sessionManager;
 		previewLoaded = undefined;
@@ -336,7 +342,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 					unsubscribe();
 					clearInterval(timer);
 					if (isActiveTarget(target)) {
-						clearResponseSpeed();
+						resetResponseStats();
 						activeTarget = undefined;
 						clearDebounce();
 						gitController.stop();
@@ -445,7 +451,7 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 	pi.on("session_shutdown", (_event, ctx) => {
 		if (sessionOwner !== ctx.sessionManager) return;
 		sessionOwner = undefined;
-		clearResponseSpeed();
+		resetResponseStats();
 		previewLoaded = undefined;
 		sessionGeneration += 1;
 		menuController.abort(new DOMException("Starship session shut down", "AbortError"));
@@ -470,12 +476,11 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 
 	pi.on("model_select", (_event, ctx) => {
 		if (!ownsRuntime(ctx)) return;
-		clearResponseSpeed();
+		resetResponseStats();
 		refresh();
 	});
 	pi.on("before_provider_request", (_event, ctx) => {
 		if (!ownsRuntime(ctx) || !ctx.model) return;
-		clearResponseSpeed();
 		runtime.responseRequest = {
 			provider: ctx.model.provider,
 			model: ctx.model.id,
@@ -485,11 +490,11 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 	});
 	pi.on("message_update", (event, ctx) => {
 		const request = currentResponse(ctx, event.message);
-		if (!request || runtime.responseSpeed?.ttftSeconds !== undefined) return;
+		if (!request || request.ttftCounted) return;
 		if (!hasResponseContent(event.assistantMessageEvent)) return;
-		runtime.responseSpeed = {
-			ttftSeconds: Math.max(0, performance.now() - request.startedAt) / 1000,
-		};
+		request.ttftCounted = true;
+		runtime.responseTotals.requests += 1;
+		runtime.responseTotals.ttftSeconds += Math.max(0, performance.now() - request.startedAt) / 1000;
 		refresh();
 	});
 	pi.on("message_end", (event, ctx) => {
@@ -500,14 +505,15 @@ export default function piStarship(pi: ExtensionAPI, options: PiStarshipOptions 
 			const seconds = (performance.now() - request.startedAt) / 1000;
 			const output = event.message.usage?.output;
 			if (seconds > 0 && Number.isFinite(output) && output >= 0) {
-				runtime.responseSpeed = { ...runtime.responseSpeed, tokensPerSecond: output / seconds };
+				runtime.responseTotals.outputTokens += output;
+				runtime.responseTotals.durationSeconds += seconds;
 			}
-		} else runtime.responseSpeed = undefined;
+		}
 		refresh();
 	});
 	pi.on("agent_settled", (_event, ctx) => {
 		if (!ownsRuntime(ctx) || !runtime.responseRequest) return;
-		clearResponseSpeed();
+		runtime.responseRequest = undefined;
 		refresh();
 	});
 	pi.on("session_info_changed", () => refresh());
@@ -657,7 +663,16 @@ function runtimeSnapshot(
 		lastCompletedTool: runtime.lastCompletedTool,
 		contextUsage: ctx.getContextUsage() ?? undefined,
 		tokenTotals: summarizeFooterUsage(ctx.sessionManager.getEntries()),
-		responseSpeed: runtime.responseSpeed,
+		responseSpeed: {
+			ttftSeconds:
+				runtime.responseTotals.requests > 0
+					? runtime.responseTotals.ttftSeconds / runtime.responseTotals.requests
+					: undefined,
+			tokensPerSecond:
+				runtime.responseTotals.durationSeconds > 0
+					? runtime.responseTotals.outputTokens / runtime.responseTotals.durationSeconds
+					: undefined,
+		},
 		usingSubscription: isSubscriptionBacked(ctx),
 		gitBranch: runtime.git?.branch?.name ?? footerData.getGitBranch(),
 		gitBranchDetails: runtime.git?.branch,

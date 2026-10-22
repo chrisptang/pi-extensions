@@ -105,7 +105,7 @@ const MODULE_DESCRIPTIONS = {
 	python: "Python version, virtual environment, and pyenv state.",
 	rust: "Rust toolchain detected in the current workspace.",
 	session_name: "Current session display name.",
-	speed: "Latest current-model response latency and end-to-end output throughput.",
+	speed: "Session response latency and end-to-end output throughput for the current model.",
 	terraform: "Active Terraform workspace and version.",
 	thinking: "Current Pi thinking level or streaming state.",
 	time: "Current local time.",

@@ -907,7 +907,7 @@ Accepted style fields:
 
 ### `speed`
 
-Latest current-model response latency and end-to-end output throughput.
+Session response latency and end-to-end output throughput for the current model.
 
 - Format variables: `$symbol`, `$ttft`, `$tok_per_sec`.
 - Style variables in `format`: `$style`.

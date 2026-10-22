@@ -139,17 +139,19 @@ test("speed footer updates on first content and final usage, resetting for each 
 	assert.equal(text(footer), "TTFT 1.25s · 50.0 tok/s");
 	runtime.setTime(100_000);
 	await runtime.emit("before_provider_request");
-	assert.equal(text(footer), "TTFT — · — tok/s");
+	assert.equal(text(footer), "TTFT 1.25s · 50.0 tok/s");
 	runtime.setTime(100_500);
 	await runtime.content();
+	assert.equal(text(footer), "TTFT 0.88s · 50.0 tok/s");
 	runtime.setTime(102_000);
 	await runtime.emit("message_end", { message: { ...assistant, stopReason: "toolUse" } });
-	assert.equal(text(footer), "TTFT 0.50s · 100.0 tok/s");
+	assert.equal(text(footer), "TTFT 0.88s · 66.7 tok/s");
 });
 
 test("TTFT accepts nonempty content across every normalized content event", async (t) => {
 	const runtime = await setup(t);
 	const footer = runtime.mount();
+	let measured = false;
 	for (const [type, content, delta, expected] of [
 		["text_start", [{ type: "text", text: "hello" }], "", true],
 		["text_delta", [], " ", true],
@@ -186,7 +188,9 @@ test("TTFT accepts nonempty content across every normalized content event", asyn
 			message: partial,
 			assistantMessageEvent: { type, contentIndex: 0, partial, delta },
 		});
-		assert.equal(text(footer), expected ? "TTFT 0.50s · — tok/s" : "TTFT — · — tok/s", type);
+		measured ||= expected;
+		// Each counted request adds 0.5s, so the session mean stays 0.50s once any request measured.
+		assert.equal(text(footer), measured ? "TTFT 0.50s · — tok/s" : "TTFT — · — tok/s", type);
 	}
 });
 
@@ -194,15 +198,16 @@ test("completion status and usage determine whether throughput is available", as
 	const runtime = await setup(t);
 	const footer = runtime.mount();
 	for (const [stopReason, output, duration, expected] of [
+		// Measured TTFT stays in the session mean even when the request later fails.
 		...["error", "aborted", "pending", "deferred"].map(
-			(reason) => [reason, 200, 1000, "TTFT — · — tok/s"] as const,
+			(reason) => [reason, 200, 1000, "TTFT 0.00s · — tok/s"] as const,
 		),
 		...[undefined, -1, Number.NaN, Number.POSITIVE_INFINITY].map(
 			(output) => ["stop", output, 1000, "TTFT 0.00s · — tok/s"] as const,
 		),
 		["stop", 200, 0, "TTFT 0.00s · — tok/s"],
 		["stop", 0, 1000, "TTFT 0.00s · 0.0 tok/s"],
-		["length", 200, 1000, "TTFT 0.00s · 200.0 tok/s"],
+		["length", 200, 1000, "TTFT 0.00s · 100.0 tok/s"],
 	] as const) {
 		runtime.setTime(0);
 		await runtime.emit("before_provider_request");
@@ -216,7 +221,7 @@ test("completion status and usage determine whether throughput is available", as
 	await runtime.emit("before_provider_request");
 	runtime.setTime(1000);
 	await runtime.emit("message_end", { message: assistant });
-	assert.equal(text(footer), "TTFT — · 200.0 tok/s");
+	assert.equal(text(footer), "TTFT 0.00s · 133.3 tok/s");
 });
 
 test("model changes, cancellation, tree navigation and footer disposal clear speed", async (t) => {
@@ -231,8 +236,9 @@ test("model changes, cancellation, tree navigation and footer disposal clear spe
 	await runtime.emit("before_provider_request");
 	runtime.setTime(1000);
 	await runtime.content();
+	// An unfinished request keeps its measured TTFT in the session mean; only the pending tracker clears.
 	await runtime.emit("agent_settled");
-	assert.equal(text(footer), "TTFT — · — tok/s");
+	assert.equal(text(footer), "TTFT 0.50s · — tok/s");
 	await runtime.emit("before_provider_request");
 	runtime.setTime(1500);
 	await runtime.content();

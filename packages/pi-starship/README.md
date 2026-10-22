@@ -106,8 +106,8 @@ style = "bold blue"
 
 `ΣIn` uses `$total_input` (`input + cacheRead + cacheWrite`); legacy `$input` and `$total` retain their existing meanings.
 Missing usage shows `—`, not a measured zero.
-`$speed` reports the latest current-model response, not a session average: TTFT measures provider-request start to first nonempty text, thinking, or tool-call content, and tok/s divides final output tokens by the whole request duration, including TTFT.
-Unknown values show `—`; new requests, model/session changes, reload, and cancellation reset measurements rather than restoring historical timing.
+`$speed` aggregates the current model's responses in this session: TTFT is the mean time from each provider request to its first nonempty text, thinking, or tool-call content, and tok/s divides total output tokens by total request duration, including TTFT.
+Unknown values show `—`; model/session changes, reload, and tree navigation reset the session statistics rather than restoring historical timing.
 Custom layouts and presets can opt in by adding `$speed` to their root format; see [usage semantics](./skills/configuring-pi-starship/references/modules.md#usage-semantics) for precision and timing details.
 Cache metrics remain available through `$cache`, including the token-weighted `$session_rate` and latest assistant-request `$rate`, but are absent from the quiet default.
 Reported cost retains three decimal places below $1 and two from $1; subscription-backed sessions append `estimate`, not a billing statement.
