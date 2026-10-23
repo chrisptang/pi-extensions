@@ -23,6 +23,7 @@
 			"./packages/pi-fleet/src/index.ts",
 			"./packages/pi-github-pr/src/index.ts",
 			"./packages/pi-goal/src/index.ts",
+			"./packages/pi-handoff/src/index.ts",
 			"./packages/pi-herdr/src/index.ts",
 			"./packages/pi-history/src/index.ts",
 			"./packages/pi-langfuse/src/index.ts",
