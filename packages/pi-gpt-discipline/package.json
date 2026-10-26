@@ -1,0 +1,46 @@
+{
+	"name": "@chrisptang/pi-gpt-discipline",
+	"version": "0.1.0",
+	"description": "Pi extension that targets GPT-series models with strict behavioral discipline while keeping AGENTS.md clean.",
+	"type": "module",
+	"license": "MIT",
+	"private": false,
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"pi",
+		"gpt",
+		"discipline",
+		"prompt"
+	],
+	"files": [
+		"src",
+		"system-prompts",
+		"README.md",
+		"LICENSE"
+	],
+	"pi": {
+		"extensions": [
+			"./src/index.ts"
+		]
+	},
+	"scripts": {
+		"check": "biome check . && npm run typecheck",
+		"format": "biome check --write .",
+		"typecheck": "tsc --noEmit"
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-coding-agent": "*"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.11",
+		"@earendil-works/pi-coding-agent": "1.1.0",
+		"@types/node": "26.4.1",
+		"typescript": "7.0.2"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/chrisptang/pi-extensions",
+		"directory": "packages/pi-gpt-discipline"
+	}
+}
