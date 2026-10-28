@@ -92,6 +92,8 @@ export interface ChildUsage {
 }
 
 export interface ChildRequest {
+	/** Pi core codemode is enabled unless explicitly disabled. */
+	codemode?: boolean;
 	task: string;
 	tools: string[];
 	model: string;

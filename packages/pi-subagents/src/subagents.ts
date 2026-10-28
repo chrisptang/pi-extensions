@@ -33,7 +33,12 @@ export default function subagents(
 	registerCompletionRenderer(pi);
 	// Loaded once and shared, so `/agents` reports exactly the text the tools got.
 	const instructions = dependencies.instructions ?? loadInstructionOverrides();
-	const tools = registerSubagentTools(pi, { ...dependencies, agents, instructions });
+	const tools = registerSubagentTools(pi, {
+		...dependencies,
+		agents,
+		instructions,
+		isCodemodeEnabled: () => mainAgent.codemodeEnabled(),
+	});
 	dependencies.onRuntime?.(tools.runtime);
 	registerSkillsCommand(pi, tools.skills);
 	registerSkillFork(pi, tools.skills, tools.startSkillJob, tools.validateSkillArgs);

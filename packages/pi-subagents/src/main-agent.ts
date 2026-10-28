@@ -1,7 +1,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { type AgentDefinition, piAgentDirectory } from "./agent-definitions.js";
+import {
+	type ExtensionAPI,
+	type ExtensionContext,
+	getAgentDir,
+} from "@earendil-works/pi-coding-agent";
+import type { AgentDefinition } from "./agent-definitions.js";
 import {
 	type ModelCandidateLookup,
 	parseModelReference,
@@ -26,15 +30,17 @@ const MAX_SETTINGS_BYTES = 64 * 1024;
 
 export interface MainAgentSettings {
 	mainAgent?: string;
+	/** Enable Pi core codemode in every child; omitted means enabled. */
+	codemode?: boolean;
 	source: string;
 	diagnostics: string[];
 }
 
 export function settingsFilePath(): string {
-	return path.join(piAgentDirectory(), "subagents.json");
+	return path.join(getAgentDir(), "subagents.json");
 }
 
-/** Read `mainAgent` from the settings file; a missing file is the normal case. */
+/** Read main-agent and child settings; a missing file means no overrides. */
 export function loadMainAgentSettings(file: string = settingsFilePath()): MainAgentSettings {
 	let raw: string;
 	try {
@@ -65,15 +71,25 @@ export function loadMainAgentSettings(file: string = settingsFilePath()): MainAg
 	if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
 		return { source: file, diagnostics: [`Settings file ${file} must contain a JSON object.`] };
 	}
-	const value = (parsed as { mainAgent?: unknown }).mainAgent;
-	if (value === undefined || value === null) return { source: file, diagnostics: [] };
-	if (typeof value !== "string" || !value.trim()) {
-		return {
-			source: file,
-			diagnostics: [`Settings file ${file} has an invalid mainAgent; expected an agent name.`],
-		};
+	const values = parsed as { mainAgent?: unknown; codemode?: unknown };
+	const settings: MainAgentSettings = { source: file, diagnostics: [] };
+	if (values.mainAgent !== undefined && values.mainAgent !== null) {
+		if (typeof values.mainAgent === "string" && values.mainAgent.trim()) {
+			settings.mainAgent = values.mainAgent.trim();
+		} else {
+			settings.diagnostics.push(
+				`Settings file ${file} has an invalid mainAgent; expected an agent name.`,
+			);
+		}
 	}
-	return { mainAgent: value.trim(), source: file, diagnostics: [] };
+	if (values.codemode !== undefined) {
+		if (typeof values.codemode === "boolean") settings.codemode = values.codemode;
+		else
+			settings.diagnostics.push(
+				`Settings file ${file} has an invalid codemode; expected a boolean.`,
+			);
+	}
+	return settings;
 }
 
 export interface MainAgentDependencies {
@@ -84,6 +100,7 @@ export interface MainAgentDependencies {
 }
 
 export interface MainAgentController {
+	codemodeEnabled(): boolean;
 	/** The definition this session runs as, once a session has started. */
 	current(): AgentDefinition | undefined;
 	/** Human-readable status for `/agents`. */
@@ -97,7 +114,7 @@ export function registerMainAgent(
 	agents: AgentRegistry,
 	dependencies: MainAgentDependencies = {},
 ): MainAgentController {
-	const settings = dependencies.settings ?? loadMainAgentSettings();
+	let settings = dependencies.settings ?? loadMainAgentSettings();
 	const lookup = dependencies.modelLookup ?? registryLookup;
 	let current: AgentDefinition | undefined;
 	// Resolved on each session start, after the registry has rescanned the disk, so
@@ -142,6 +159,7 @@ export function registerMainAgent(
 	};
 
 	pi.on("session_start", async (event, ctx) => {
+		settings = dependencies.settings ?? loadMainAgentSettings();
 		const definition = resolve();
 		// A session start is rare enough that every problem is worth a warning.
 		for (const line of diagnostics) ctx.ui.notify(line, "warning");
@@ -162,9 +180,10 @@ export function registerMainAgent(
 	});
 
 	return {
+		codemodeEnabled: () => settings.codemode !== false,
 		current: () => current,
 		statusLines: () => {
-			const lines: string[] = [];
+			const lines = [`Subagent codemode: ${settings.codemode !== false ? "on" : "off"}.`];
 			if (!resolved) {
 				lines.push("Main agent: not resolved until the session starts.");
 			} else if (current) {

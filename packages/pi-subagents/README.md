@@ -31,13 +31,14 @@ This shapes the design rather than just the documentation. Jobs are one-way so t
 - Routes a user's `/skill:<name>` into a subagent when the skill declares Claude Code's `content: fork`, so the skill's steps never enter the main session.
 - Advertises only that directory's definitions, and resolves any other name on demand from `~/.claude/agents/` and `~/.agents/agents/`.
 - Runs a job without blocking, where its completion interrupts the main agent with the result.
+- Enables Pi core `codemode` for every child, including `explorer` and skill jobs, while preserving the selected work-tool capabilities.
 - Defaults work tools to `read`, `grep`, `find`, and `ls`.
 - Inherits the main session's effective model and thinking level, so a job needs neither argument unless you deliberately want a different one.
 - Publishes one asynchronous terminal completion and shows active-job progress above the editor.
 - Opens `/subagents` so you can watch a job's tool activity and visible output live, and terminate one after confirming.
 - Redacts credential-shaped text and reports file writes by size, so an inspected job never puts a secret on screen.
 - Lets `~/.pi/agent/system-prompts/subagent_instruction.md` replace the tool instructions the main session reads, for a model that ignores the built-in wording.
-- Gives a child no tool to reach the parent at all: it loads no extensions and holds only its selected work tools, so it cannot spawn a grandchild or message anyone.
+- Gives a child no tool to reach the parent: only core codemode and its selected work tools are available, so it cannot spawn a grandchild or message anyone.
 - Starts independent jobs concurrently, up to eight active children.
 - Exposes privacy-filtered metadata without task text, output, prompts, or selected tools.
 - Cancels session-owned work during replacement, reload, or shutdown.
@@ -116,7 +117,7 @@ The main Pi session exposes six fixed tools and the `/agents`, `/skills`, and `/
 | `subagent_wait` | `jobId` | Wait for one job to reach a terminal state. |
 | `subagent_tail` | `jobId`, optional `lines` | Return one job's newest activity lines, like `tail` on a log. |
 
-A child receives **only** its selected work tools. No `subagent_*` tool is added to a child, so it cannot spawn, cancel, inspect, wait on, or message anything: its final message is its only output.
+A child receives its selected work tools plus Pi core `codemode` by default. Scripts can call only those selected work tools. No `subagent_*` tool is added to a child, so it cannot spawn, cancel, inspect, wait on, or message anything: its final message is its only output.
 
 A job has no execution timeout: a slow model is not a failed job, so the child runs until it exits, is cancelled, the session shuts down, or the Pi process exits.
 `subagent_wait` has no timeout either: it returns only when the job ends or the caller cancels the wait, and cancelling the wait does not cancel its job. The turn and context budgets below are what bound a job, and a wait that returned early would only cost the main agent another turn to wait again.
@@ -133,6 +134,22 @@ The terminal states are `completed`, `partial`, `failed`, `budget_exhausted`, an
 `subagent_tail` returns the newest activity lines of one job — the same redacted, 512-byte-bounded lines the `/subagents` panel shows — so the main agent can confirm a running job is alive without waiting for it. It defaults to 10 lines and accepts up to 50.
 
 See [`docs/tools.md`](./docs/tools.md) for the concise schema reference.
+
+## ⚙️ Settings
+
+Edit `~/.pi/agent/subagents.json` to disable codemode for all children without changing the main session:
+
+```json
+{
+  "codemode": false
+}
+```
+
+`codemode` accepts `true` or `false` and defaults to `true`. It applies to ordinary jobs, named agents such as `explorer` and `builder`, `skill_run`, and `/skill:<name>` forks. When disabled, children use their predefined work-tool lists directly. Explicit job `tools` still override agent or skill defaults; disabling codemode does not change those lists.
+
+Settings are read again on session start, including `/new` and `/reload`. No file is created on read. Invalid values are ignored with a warning and diagnostics in `/agents`; valid fields such as `mainAgent` remain independent. Only user settings are supported, using Pi's agent directory when relocated. Keep other existing fields when editing this file.
+
+Enabled codemode uses Pi's native `codemode.mode` setting: `on` keeps direct tools available alongside scripts, and `only` routes work tools through scripts. It does not load MCP or unrelated extensions. The established `subagents.json` filename and manual-edit workflow are retained for compatibility.
 
 ## ⚙️ Job configuration
 
@@ -163,7 +180,7 @@ The optional `tools` list limits what the child can do:
 - Unavailable or extension-only tool names are rejected before a job is queued.
 - Omitting `tools` selects `read`, `grep`, `find`, and `ls`.
 - Passing an empty list gives the child no work tools.
-- Duplicate names are removed. Nothing else is added: a child gets exactly the work tools you select.
+- Duplicate names are removed. Codemode is added separately unless disabled in [Settings](#-settings); it does not grant additional work tools.
 
 Adding `edit` or `write` lets the child modify files.
 Adding `bash` or `powershell` grants unrestricted command execution and can also modify the workspace.
@@ -566,11 +583,11 @@ Credentials must be available independently to the child through Pi's stored cre
 
 Only the main session can create jobs, and a child cannot reach the parent. Both follow from the same fact, enforced structurally rather than by instruction.
 
-Children are launched with `--no-extensions`, and no extension is injected in its place, so the extension defining `subagent_spawn`, `skill_run`, `subagent_cancel`, `subagent_inspect`, `subagent_wait`, and `subagent_tail` is never loaded in a child process.
+Children are launched with `--no-extensions`. When codemode is enabled, only `-e builtin:codemode` is added explicitly. The extension defining `subagent_spawn`, `skill_run`, `subagent_cancel`, `subagent_inspect`, `subagent_wait`, and `subagent_tail` is never loaded in a child process.
 
 The `tools` list is an allowlist of the eight core work tools — `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, and `ls`.
 No `subagent_*` name is among them, so none can be requested for a child, and an agent definition that names one has it dropped with a diagnostic rather than honoured.
-Nothing is added on the child's behalf: an empty `tools` list really does produce a child with no tools.
+An empty `tools` list grants no work tools: codemode can still run scripts, but they cannot call file or shell tools. With codemode disabled, the child has no tools at all.
 
 A child therefore cannot spawn a grandchild, cancel or inspect a sibling, or send anything anywhere. Its final message is its only output.
 

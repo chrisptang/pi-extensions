@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, test } from "vitest";
@@ -50,6 +50,23 @@ test("settings: a missing file is silent, a valid one names the agent, a broken 
 
 	writeFileSync(file, "{}");
 	assert.deepEqual(loadMainAgentSettings(file), { source: file, diagnostics: [] });
+});
+
+test("settings validate codemode independently of mainAgent without modifying the file", () => {
+	const file = path.join(root, "subagents.json");
+	for (const codemode of [true, false, undefined, null, "false", 0, {}]) {
+		writeFileSync(file, JSON.stringify({ mainAgent: "architect", codemode }));
+		const loaded = loadMainAgentSettings(file);
+		assert.equal(readFileSync(file, "utf8"), JSON.stringify({ mainAgent: "architect", codemode }));
+		assert.equal(loaded.mainAgent, "architect");
+		assert.equal(loaded.codemode, typeof codemode === "boolean" ? codemode : undefined);
+		assert.equal(
+			loaded.diagnostics.length,
+			codemode === undefined || typeof codemode === "boolean" ? 0 : 1,
+		);
+	}
+	writeFileSync(file, JSON.stringify({ mainAgent: 7, codemode: false }));
+	assert.equal(loadMainAgentSettings(file).codemode, false);
 });
 
 test("mainAgent joins the system prompt every turn and is reported by /agents", async () => {

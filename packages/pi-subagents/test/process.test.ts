@@ -52,12 +52,11 @@ test("buildPiArgs isolates the RPC child and grants only its selected work tools
 		"--no-skills",
 		"--no-prompt-templates",
 	]);
-	// No extension is injected into a child at all, so there is no `-e` argument.
-	assert.equal(args.includes("-e"), false);
+	assert.equal(args[args.indexOf("-e") + 1], "builtin:codemode");
 	assert.equal(args[args.indexOf("--model") + 1], "test-provider/test-model");
 	assert.equal(args[args.indexOf("--thinking") + 1], "medium");
 	assert.ok(args.includes("--no-approve"));
-	assert.equal(args[args.indexOf("--tools") + 1], "read,grep,find,ls");
+	assert.equal(args[args.indexOf("--tools") + 1], "read,grep,find,ls,codemode");
 	assert.doesNotMatch(args.join(" "), /\bbash\b|\bwrite\b|append-system-prompt/u);
 	assert.equal(args.includes("Task: task"), false);
 
@@ -70,11 +69,19 @@ test("buildPiArgs isolates the RPC child and grants only its selected work tools
 	);
 	assert.ok(writable.includes("--approve"));
 	assert.equal(writable[writable.indexOf("--thinking") + 1], "xhigh");
-	assert.equal(writable[writable.indexOf("--tools") + 1], "read,bash,write");
+	assert.equal(writable[writable.indexOf("--tools") + 1], "read,bash,write,codemode");
 
-	// An empty selection stays empty: nothing is added on the child's behalf.
+	// Codemode adds no work-tool capability to an empty selection.
 	const noWorkTools = buildPiArgs(childRequest({ tools: [] }));
-	assert.equal(noWorkTools[noWorkTools.indexOf("--tools") + 1], "");
+	assert.equal(noWorkTools[noWorkTools.indexOf("--tools") + 1], "codemode");
+});
+
+test("disabling codemode preserves the selected tools, including an empty selection", () => {
+	for (const tools of [["read", "grep"], ["read", "bash", "edit", "read"], []]) {
+		const args = buildPiArgs(childRequest({ tools, codemode: false }));
+		assert.equal(args.includes("-e"), false);
+		assert.equal(args[args.indexOf("--tools") + 1], [...new Set(tools)].join(","));
+	}
 });
 
 test("buildPiArgs tells the child its turn budget through the system prompt", () => {
@@ -93,10 +100,12 @@ test("a child is launched without any way to spawn a grandchild", () => {
 	// Nesting is blocked by what the child process holds, not only by the depth
 	// guard in the spawn tool, which a child with `bash` could unset.
 	const args = buildPiArgs(childRequest());
-	// The extension defining subagent_spawn and skill_run is never loaded, and no
-	// extension is injected in its place.
+	// Only the core codemode extension is loaded, never the subagent runtime.
 	assert.ok(args.includes("--no-extensions"));
-	assert.equal(args.includes("-e"), false);
+	assert.deepEqual(
+		args.filter((_, index) => args[index - 1] === "-e"),
+		["builtin:codemode"],
+	);
 
 	// A child holds no subagent tool whatsoever: there is no channel back to the
 	// parent, so it cannot spawn, cancel, wait on, or message anything.

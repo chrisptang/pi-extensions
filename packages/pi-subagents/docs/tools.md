@@ -27,7 +27,7 @@ The call does not wait for its child, and each job owns its own child process, s
 
 The active-jobs widget labels the job with its `agent` name, or its job ID when no agent was selected, followed by `description`. That is the only place the job announces what it is doing while it runs, so the description should name the work rather than restate the agent. A description longer than 60 characters is truncated for display rather than rejected, so an over-long label never costs the caller a turn.
 
-The runtime adds nothing to the selected tools. A child receives exactly what `tools` names, and no `subagent_*` tool ever reaches a child.
+The runtime enables Pi core `codemode` in addition to the selected work tools. Scripts can call only those work tools; no `subagent_*` tool ever reaches a child. Set `codemode: false` in `~/.pi/agent/subagents.json` to use the selected lists directly instead; see [Settings](../README.md#-settings). This also applies to `skill_run` and `/skill:<name>` forks.
 
 Pi handles recognized transient provider failures first. If a premature stream disconnect escapes Pi's classifier, the runtime waits for `agent_settled` and then prompts the same RPC child to continue the original task. Pi-native and extension continuations share a maximum of three retries with 2s, 4s, and 8s backoff. Cancellation interrupts the wait. Authentication, quota, configuration, tool, model-limit, and other deterministic failures are not retried.
 
@@ -155,7 +155,7 @@ The panel is a human surface. Nothing it displays enters the main agent's contex
 
 Only the main session can create jobs. A child cannot spawn a grandchild.
 
-Children are launched with `--no-extensions`, and no extension is injected in its place, so the extension defining every `subagent_*` tool is not loaded in a child process.
+Children are launched with `--no-extensions` and, by default, `-e builtin:codemode`. Only Pi core codemode is loaded explicitly; the extension defining every `subagent_*` tool is never loaded in a child process.
 
 The `tools` allowlist holds the eight core work tools — `read`, `bash`, `powershell`, `edit`, `write`, `grep`, `find`, `ls` — so `subagent_spawn` cannot be requested for a child, and an agent definition naming it has it dropped with a diagnostic.
 

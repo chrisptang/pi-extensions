@@ -125,6 +125,7 @@ export interface ActiveJobDisplay {
 }
 
 export interface StartJobInput {
+	codemode?: boolean;
 	task: string;
 	tools: string[];
 	model: string;
@@ -292,6 +293,7 @@ export class SubagentRuntime {
 			let child: ChildResult;
 			try {
 				child = await this.runChild({
+					codemode: input.codemode,
 					task: input.task,
 					tools: [...input.tools],
 					model: input.model,

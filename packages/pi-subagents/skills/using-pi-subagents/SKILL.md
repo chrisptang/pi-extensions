@@ -18,7 +18,7 @@ Keep planning, critical-path work, integration, deterministic checks, authorizat
 
 Do the work directly when it is simple, latency-sensitive, tightly coupled to the current context, likely to need user clarification, or faster than preparing and verifying a delegation.
 
-Nested subagents are unsupported, and a child cannot create one: it loads no extensions and holds no spawn tool, so a task that depends on the child delegating further will not run that part at all.
+Nested subagents are unsupported, and a child cannot create one: it loads no unrelated extensions and holds no spawn tool, so a task that depends on the child delegating further will not run that part at all.
 
 ## Spawn one least-privilege job
 
@@ -42,7 +42,7 @@ Treat `bash` and `powershell` as unrestricted command execution that can also mo
 
 Treat `edit` and `write` as explicit workspace mutation capabilities.
 
-The runtime adds nothing: a child receives exactly the work tools you name, and no `subagent_*` tool. A child cannot spawn, cancel, inspect, or message anything.
+The runtime adds Pi core `codemode` by default; scripts can call only the selected work tools. Set `codemode: false` in `~/.pi/agent/subagents.json` to use those lists directly. No `subagent_*` tool reaches a child, so it cannot spawn, cancel, inspect, or message anything.
 
 The child inherits the main agent's effective provider and model at spawn time, unless a named agent definition resolves its own model.
 

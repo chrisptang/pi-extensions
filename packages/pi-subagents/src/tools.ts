@@ -121,7 +121,7 @@ function buildSpawnParameters(agents: AgentRegistry) {
 					}),
 					{
 						description:
-							"Child work tools. Defaults to read, grep, find, and ls. Communication tools are always added.",
+							"Child work tools. Defaults to read, grep, find, and ls. Core codemode is enabled unless disabled in subagent settings; scripts can call only these work tools.",
 						maxItems: MAX_TOOLS,
 					},
 				),
@@ -194,6 +194,7 @@ export interface SubagentToolsDependencies extends RuntimeDependencies {
 	skills?: SkillRegistry;
 	/** Injectable for tests; defaults to reading the user's instruction file. */
 	instructions?: InstructionOverrides;
+	isCodemodeEnabled?: () => boolean;
 }
 
 export interface StartSkillJobOptions {
@@ -278,6 +279,7 @@ export function registerSubagentTools(
 			const model = selected.model ?? inherited;
 			return billedResult(
 				runtime.start({
+					codemode: dependencies.isCodemodeEnabled?.() ?? true,
 					task,
 					tools,
 					model,
@@ -337,6 +339,7 @@ export function registerSubagentTools(
 		];
 		const model = selected.model ?? inherited;
 		return runtime.start({
+			codemode: dependencies.isCodemodeEnabled?.() ?? true,
 			task: buildSkillTask(skill, options.args),
 			tools,
 			model,

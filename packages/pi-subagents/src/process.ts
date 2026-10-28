@@ -138,10 +138,13 @@ export function buildPiArgs(request: ChildRequest): string[] {
 		request.thinkingLevel,
 		request.projectTrusted ? "--approve" : "--no-approve",
 	];
-	// A child holds only its selected work tools. Nothing is added: the child has
-	// no channel back to the parent, so there is no communication tool to grant,
-	// and no `subagent_*` tool reaches a child at all.
-	args.push("--tools", [...new Set(request.tools)].join(","));
+	// Load only core codemode; unrelated extensions and subagent tools stay unavailable.
+	const tools = [...new Set(request.tools)];
+	if (request.codemode !== false) {
+		args.push("-e", "builtin:codemode");
+		tools.push("codemode");
+	}
+	args.push("--tools", tools.join(","));
 	// The agent definition specializes the child through its system prompt rather
 	// than the task, so the task text stays free for the caller's own instructions.
 	// The budget goes there too: a child that knows it from the start can pace
