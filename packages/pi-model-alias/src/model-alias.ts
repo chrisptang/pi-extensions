@@ -1,5 +1,5 @@
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ProviderResponse } from "@earendil-works/pi-ai";
 import {
 	compact,
 	type ExtensionAPI,
@@ -183,10 +183,14 @@ export default function modelAlias(pi: ExtensionAPI): void {
 			const definitions = aliases();
 			const definition = definitions.aliases.get("compact");
 			if (!definition) return;
-			const resolved = resolveAlias(definition, registryLookup(ctx, "compact"));
-			if (!resolved) throw new Error("No usable compact candidate");
-			const provider = registry.getProvider(resolved.model.provider);
-			if (!provider) throw new Error("No compact provider");
+			const attempted = new Set<string>();
+			const lookup = {
+				find: (provider: string, modelId: string) =>
+					attempted.has(`${provider}/${modelId}`) ? undefined : registry.find(provider, modelId),
+				hasAuth: (model: Model<Api>) => registry.hasConfiguredAuth(model),
+				isCoolingDown: (model: Model<Api>) => cooldowns.isCoolingDown(model),
+				sticky: sticky.get("compact"),
+			};
 
 			// Native preparation already carries non-hook details, but skips hook entries.
 			const preparation = {
@@ -216,48 +220,96 @@ export default function modelAlias(pi: ExtensionAPI): void {
 				}
 			}
 			const customInstructions = event.customInstructions;
-			// This compatibility auth API cannot be cancelled; discard its result on abort.
-			const auth = await registry.getApiKeyAndHeaders(resolved.model);
-			if (signal.aborted) return { cancel: true };
-			if (!auth.ok) throw new Error("Compact authentication failed");
-			const requestModel = auth.baseUrl
-				? { ...resolved.model, baseUrl: auth.baseUrl }
-				: resolved.model;
-			// Pi 0.85's registry lacks streamSimple. Preserve null header deletions at
-			// the provider boundary; compact's header parameter only accepts strings.
-			const streamFn: StreamFn = async (model, context, options) => {
-				if (signal.aborted) throw new Error("Compaction cancelled");
-				const stream = provider.streamSimple(model, context, { ...options, headers: auth.headers });
-				const response = await stream.result();
-				if (signal.aborted) throw new Error("Compaction cancelled");
-				// Native validation handles error, length and tool calls, but not aborted
-				// or blank text. Reject before file lists or split separators mask it.
-				if (
-					response.stopReason === "aborted" ||
-					!response.content
-						.filter((block) => block.type === "text")
-						.map((block) => block.text)
-						.join("\n")
-						.trim()
-				) {
-					throw new Error("Invalid compact response");
+			for (;;) {
+				const resolved = resolveAlias(definition, lookup);
+				if (!resolved) throw new Error("No usable compact candidate");
+				attempted.add(describe(resolved.model));
+				const provider = registry.getProvider(resolved.model.provider);
+				if (!provider) throw new Error("No compact provider");
+				let lastResponse: ProviderResponse | undefined;
+				const observeResponse = (response?: ProviderResponse) => {
+					lastResponse = response;
+				};
+				try {
+					// This compatibility auth API cannot be cancelled; discard its result on abort.
+					const auth = await registry.getApiKeyAndHeaders(resolved.model);
+					if (signal.aborted) return { cancel: true };
+					if (!auth.ok) throw new Error("Compact authentication failed");
+					const requestModel = auth.baseUrl
+						? { ...resolved.model, baseUrl: auth.baseUrl }
+						: resolved.model;
+					// Preserve null header deletions at the provider boundary.
+					const streamFn: StreamFn = async (model, context, options) => {
+						if (signal.aborted) throw new Error("Compaction cancelled");
+						observeResponse();
+						const stream = provider.streamSimple(model, context, {
+							...options,
+							headers: auth.headers,
+							onResponse: observeResponse,
+							// These SDK adapters throw HTTP errors before invoking onResponse.
+							...([
+								"openai-completions",
+								"openai-responses",
+								"azure-openai-responses",
+								"anthropic-messages",
+							].includes(model.api)
+								? {
+										fetch: async (input, init) => {
+											const response = await (options?.fetch ?? globalThis.fetch)(input, init);
+											observeResponse({
+												status: response.status,
+												headers: Object.fromEntries(response.headers),
+											});
+											return response;
+										},
+									}
+								: {}),
+						});
+						const response = await stream.result();
+						if (signal.aborted) throw new Error("Compaction cancelled");
+						if (lastResponse && isRateLimited(lastResponse.status))
+							throw new Error("Compact model rate limited");
+						// Native validation handles error, length and tool calls, but not aborted
+						// or blank text. Reject before file lists or split separators mask it.
+						if (
+							response.stopReason === "aborted" ||
+							!response.content
+								.filter((block) => block.type === "text")
+								.map((block) => block.text)
+								.join("\n")
+								.trim()
+						) {
+							throw new Error("Invalid compact response");
+						}
+						return stream;
+					};
+					const result = await compact(
+						preparation,
+						requestModel,
+						auth.apiKey,
+						undefined,
+						customInstructions,
+						signal,
+						resolved.thinkingLevel ?? thinkingLevel,
+						streamFn,
+						auth.env,
+					);
+					if (signal.aborted) return { cancel: true };
+					if (loaded === definitions) sticky.set("compact", resolved.model);
+					return { compaction: result };
+				} catch (error) {
+					if (
+						signal.aborted ||
+						loaded !== definitions ||
+						!lastResponse ||
+						!isRateLimited(lastResponse.status)
+					)
+						throw error;
+					cooldowns.penalize(resolved.model, lastResponse.headers);
+					const held = sticky.get("compact");
+					if (held && describe(held) === describe(resolved.model)) sticky.delete("compact");
 				}
-				return stream;
-			};
-			const result = await compact(
-				preparation,
-				requestModel,
-				auth.apiKey,
-				undefined,
-				customInstructions,
-				signal,
-				resolved.thinkingLevel ?? thinkingLevel,
-				streamFn,
-				auth.env,
-			);
-			if (signal.aborted) return { cancel: true };
-			if (loaded === definitions) sticky.set("compact", resolved.model);
-			return { compaction: result };
+			}
 		} catch {
 			if (signal.aborted) return { cancel: true };
 			notify?.("Compact alias unavailable or failed; using the current model.", "warning");

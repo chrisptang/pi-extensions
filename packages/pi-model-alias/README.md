@@ -172,7 +172,9 @@ Set the exact alias name `compact` to choose a model for manual `/compact`, auto
 
 The existing string and candidate-pool forms also work. A successful pick is held using the same alias state as `/ma compact`. Its thinking level applies only to the summary; when omitted, the summary inherits the session's current level. The main session model and thinking level stay unchanged, and Pi still controls the trigger, retained history, and summary format.
 
-Without `compact`, Pi's default compaction runs unchanged. If the alias is unavailable or its request fails, the extension warns in TUI/RPC mode and hands compaction back to Pi's current-model path. Cancellation stops the operation without a fallback request. The alias attempt does not add session-level retries or try each candidate in turn; Pi's normal retry behavior remains on the fallback path.
+Without `compact`, Pi's default compaction runs unchanged. A failed compact request with HTTP `429` or `503` puts the model on the same shared cooldown as ordinary aliases, releases its held pick, and tries another candidate within the same compaction. Each model gets at most one compaction attempt per operation, even if every candidate is cooling down. A successful replacement becomes the held `compact` pick.
+
+If no candidates remain, authentication fails, or another error occurs, the extension warns in TUI/RPC mode and hands compaction back to Pi's current-model path. Rotation requires HTTP response metadata; adapters that expose neither response callbacks nor an observable fetch, including the current Google SDK adapters, keep the fallback behavior. Error-message text alone never triggers rotation. Cancellation stops the operation without another candidate or a fallback request. Pi's normal retry behavior remains on the fallback path.
 
 Choose a model with enough context capacity and reliable summarization. Configuring another provider sends the history being summarized to that provider. Edit the existing alias file and run `/model-alias-reload` to apply changes; no additional setting or command is required.
 
@@ -190,7 +192,7 @@ Choose a model with enough context capacity and reliable summarization. Configur
 
 - A per-skill model changes **which model** runs the skill, not **where** it runs. Pi skills are inline prompt expansion, so the skill still shares the main session's conversation and context; this is not isolated execution. Use `pi-subagents` when you need a separate context.
 - Switching models invalidates the provider's prompt cache, so a per-skill override or a rate-limit rotation trades cache hits for model choice. Holding a pick means a pool pays this only on the first switch.
-- Rotation lands on the **next turn**, not the failing request. `after_provider_response` observes the status but cannot alter the request in flight, so Pi's own retry handles the current one; the alias switch applies from the following turn.
+- Session-model rotation lands on the **next turn**, not the failing request. `after_provider_response` observes the status but cannot alter the request in flight, so Pi's own retry handles the current one; the alias switch applies from the following turn.
 - A rate limit is attributed to the model the alias last switched to. If the user or another extension changes the model afterwards, the limit is ignored rather than blamed on the alias.
 - A single-candidate alias has nowhere to rotate to; the limit is reported and the model stays put.
 - The previous model is restored at `agent_settled`, the idle boundary. A skill that leaves the agent busy holds the override until the run truly settles.

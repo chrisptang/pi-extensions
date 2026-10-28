@@ -300,6 +300,199 @@ test("successful compact pool is sticky, shares /ma picks, and reload clears it"
 	assert.equal(h.requests.at(-1)?.model.id, "b");
 });
 
+for (const status of [429, 503]) {
+	test(`compact ${status} rotates within the operation and shares cooldowns and sticky picks`, async () => {
+		const now = vi.spyOn(Date, "now").mockReturnValue(100_000);
+		const h = setup({
+			compact: ["summary/a", "summary/b"],
+			beforeExpiry: ["summary/a", "summary/b"],
+			afterExpiry: ["summary/a", "summary/b"],
+		});
+		vi.spyOn(Math, "random").mockReturnValue(0);
+		await h.commands.get("ma")?.handler("compact", h.ctx);
+		h.produce(async () => {
+			const request = h.requests.at(-1);
+			assert.ok(request);
+			await request.options?.onResponse?.(
+				{ status: request.model.id === "a" ? status : 200, headers: { "Retry-After": "30" } },
+				request.model,
+			);
+			return request.model.id === "a"
+				? response({ stopReason: "error", errorMessage: "secret" })
+				: response();
+		});
+		assert.ok((await h.run())?.compaction);
+		assert.deepEqual(
+			h.requests.map((request) => request.model.id),
+			["a", "b"],
+		);
+		assert.equal(h.setModels.length, 1, "compaction must not switch the session model");
+		assert.deepEqual(h.notifications.slice(1), []);
+		await h.commands.get("ma")?.handler("compact", h.ctx);
+		assert.equal((h.setModels.at(-1) as Model<Api>).id, "b");
+		await h.commands.get("ma")?.handler("beforeExpiry", h.ctx);
+		assert.equal((h.setModels.at(-1) as Model<Api>).id, "b");
+		now.mockReturnValue(130_000);
+		await h.commands.get("ma")?.handler("afterExpiry", h.ctx);
+		assert.equal((h.setModels.at(-1) as Model<Api>).id, "a");
+	});
+}
+
+test("every rate-limited compact model is attempted once even with duplicate references", async () => {
+	const h = setup({ compact: ["summary/a", "summary/b", "summary/a"] });
+	vi.spyOn(Math, "random").mockReturnValue(0);
+	h.produce(async () => {
+		const request = h.requests.at(-1);
+		assert.ok(request);
+		await request.options?.onResponse?.({ status: 429, headers: {} }, request.model);
+		return response({ stopReason: "error" });
+	});
+	assert.equal(await h.run(), undefined);
+	assert.deepEqual(
+		h.requests.map((request) => request.model.id),
+		["a", "b"],
+	);
+	assert.equal(h.notifications.length, 1);
+	assert.deepEqual(h.setModels, []);
+});
+
+for (const status of [200, 401, 402, 403, 404, 500, 502, 504, 529]) {
+	test(`compact ${status} failure falls back without rotating or cooling the model`, async () => {
+		const h = setup({ compact: ["summary/a", "summary/b"] });
+		vi.spyOn(Math, "random").mockReturnValue(0);
+		h.produce(async () => {
+			const request = h.requests.at(-1);
+			assert.ok(request);
+			await request.options?.onResponse?.({ status, headers: {} }, request.model);
+			return response({ stopReason: "error", errorMessage: "429 503 secret" });
+		});
+		assert.equal(await h.run(), undefined);
+		assert.deepEqual(
+			h.requests.map((request) => request.model.id),
+			["a"],
+		);
+		assert.equal(h.notifications.length, 1);
+		await h.commands.get("ma")?.handler("compact", h.ctx);
+		assert.equal((h.setModels.at(-1) as Model<Api>).id, "a");
+	});
+}
+
+test("a recovered provider response does not rotate or cool the compact model", async () => {
+	const h = setup({ compact: ["summary/a", "summary/b"], other: ["summary/a", "summary/b"] });
+	vi.spyOn(Math, "random").mockReturnValue(0);
+	h.produce(async () => {
+		const request = h.requests.at(-1);
+		assert.ok(request);
+		await request.options?.onResponse?.({ status: 429, headers: {} }, request.model);
+		await request.options?.onResponse?.({ status: 200, headers: {} }, request.model);
+		return response();
+	});
+	assert.ok((await h.run())?.compaction);
+	assert.equal(h.requests.length, 1);
+	await h.commands.get("ma")?.handler("other", h.ctx);
+	assert.equal((h.setModels.at(-1) as Model<Api>).id, "a");
+});
+
+for (const api of [
+	"openai-completions",
+	"openai-responses",
+	"azure-openai-responses",
+	"anthropic-messages",
+] as const) {
+	test(`${api} SDK HTTP errors rotate even when onResponse is not invoked`, async () => {
+		const h = setup({ compact: ["summary/a", "summary/b"] });
+		vi.spyOn(Math, "random").mockReturnValue(0);
+		const specifier = `@earendil-works/pi-ai/api/${api}`;
+		const adapter = (await import(specifier)) as {
+			streamSimple: ReturnType<typeof h.registry.getProvider>["streamSimple"];
+		};
+		const provider = h.registry.getProvider();
+		h.registry.find.mockImplementation((provider, id) =>
+			provider === "summary" ? { ...model(id), api } : undefined,
+		);
+		const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(JSON.stringify({ error: { type: "rate_limit_error", message: "busy" } }), {
+				status: 429,
+				headers: { "Content-Type": "application/json", "Retry-After": "30" },
+			}),
+		);
+		const streamSimple = vi.fn((...args: Parameters<typeof provider.streamSimple>) =>
+			args[0].id === "a" ? adapter.streamSimple(...args) : provider.streamSimple(...args),
+		);
+		h.registry.getProvider.mockReturnValue({ streamSimple });
+		assert.ok((await h.run())?.compaction);
+		assert.deepEqual(
+			streamSimple.mock.calls.map(([target]) => target.id),
+			["a", "b"],
+		);
+		assert.equal(fetch.mock.calls.length, 1);
+		assert.deepEqual(h.notifications, []);
+	});
+}
+
+for (const api of ["google-generative-ai", "google-vertex"] as const) {
+	test(`${api} without HTTP metadata falls back without injecting unsupported fetch`, async () => {
+		const h = setup({ compact: ["summary/a", "summary/b"] });
+		h.registry.find.mockImplementation((_provider, id) => ({ ...model(id), api }));
+		h.produce(async () => response({ stopReason: "error", errorMessage: "429 busy" }));
+		assert.equal(await h.run(), undefined);
+		assert.equal(h.requests.length, 1);
+		assert.equal(h.requests[0].options?.fetch, undefined);
+		assert.equal(h.notifications.length, 1);
+	});
+}
+
+test("rate-limited split prefix restarts both summaries with the next model", async () => {
+	const h = setup({ compact: ["summary/a", "summary/b"] });
+	vi.spyOn(Math, "random").mockReturnValue(0);
+	h.produce(async () => {
+		const request = h.requests.at(-1);
+		assert.ok(request);
+		const limited = h.requests.length === 2;
+		await request.options?.onResponse?.(
+			{ status: limited ? 503 : 200, headers: {} },
+			request.model,
+		);
+		return limited
+			? response({ stopReason: "error" })
+			: response({ content: [{ type: "text", text: `Summary ${request.model.id}` }] });
+	});
+	const prep = preparation({
+		isSplitTurn: true,
+		turnPrefixMessages: [{ role: "user", content: "Prefix", timestamp: 1 }],
+	});
+	const original = structuredClone(prep);
+	const result = await h.run({ preparation: prep });
+	assert.deepEqual(
+		h.requests.map((request) => request.model.id),
+		["a", "a", "b", "b"],
+	);
+	assert.doesNotMatch(result?.compaction?.summary ?? "", /Summary a/u);
+	assert.match(result?.compaction?.summary ?? "", /Summary b[\s\S]*Turn Context[\s\S]*Summary b/u);
+	assert.deepEqual(prep, original);
+});
+
+test("definitions reloaded during a rate-limited request stop obsolete rotation", async () => {
+	const h = setup({ compact: ["summary/a", "summary/b"], other: ["summary/a", "summary/b"] });
+	vi.spyOn(Math, "random").mockReturnValue(0);
+	const gate = deferred<AssistantMessage>();
+	h.produce(async () => {
+		const request = h.requests.at(-1);
+		assert.ok(request);
+		await request.options?.onResponse?.({ status: 429, headers: {} }, request.model);
+		return gate.promise;
+	});
+	const result = h.run();
+	await vi.waitFor(() => assert.equal(h.requests.length, 1));
+	configure({ compact: "summary/b", other: ["summary/a", "summary/b"] });
+	await h.commands.get("model-alias-reload")?.handler("", h.ctx);
+	gate.resolve(response({ stopReason: "error" }));
+	assert.equal(await result, undefined);
+	assert.equal(h.requests.length, 1);
+	await h.commands.get("ma")?.handler("other", h.ctx);
+	assert.equal((h.setModels.at(-1) as Model<Api>).id, "a");
+});
+
 test("definitions reloaded during request do not restore an obsolete sticky pick", async () => {
 	const h = setup({ compact: ["summary/a", "summary/b"] });
 	const random = vi.spyOn(Math, "random").mockReturnValue(0);
@@ -463,7 +656,7 @@ test("pre-aborted operation cancels before auth", async () => {
 	assert.deepEqual(h.notifications, []);
 });
 
-for (const stage of ["auth", "request"] as const) {
+for (const stage of ["auth", "request", "retry-auth", "retry-request"] as const) {
 	for (const cancel of ["signal", "shutdown", "reload", "session_start"] as const) {
 		test(`${cancel} during ${stage} cancels without fallback, warning or sticky pick`, async () => {
 			const h = setup({ compact: ["summary/a", "summary/b"] });
@@ -472,10 +665,26 @@ for (const stage of ["auth", "request"] as const) {
 			const authGate = deferred<typeof auth>();
 			const requestGate = deferred<AssistantMessage>();
 			if (stage === "auth") h.registry.getApiKeyAndHeaders.mockReturnValue(authGate.promise);
-			else h.produce(() => requestGate.promise);
+			if (stage === "retry-auth")
+				h.registry.getApiKeyAndHeaders
+					.mockResolvedValueOnce(auth)
+					.mockReturnValue(authGate.promise);
+			h.produce(async () => {
+				const request = h.requests.at(-1);
+				assert.ok(request);
+				if (stage.startsWith("retry-") && request.model.id === "a") {
+					await request.options?.onResponse?.({ status: 429, headers: {} }, request.model);
+					return response({ stopReason: "error" });
+				}
+				return requestGate.promise;
+			});
 			const controller = new AbortController();
 			const result = h.run({ signal: controller.signal });
-			if (stage === "request") await vi.waitFor(() => assert.equal(h.requests.length, 1));
+			const requestCount = stage === "retry-request" ? 2 : stage === "auth" ? 0 : 1;
+			if (stage === "retry-auth")
+				await vi.waitFor(() => assert.equal(h.registry.getApiKeyAndHeaders.mock.calls.length, 3));
+			else if (requestCount > 0)
+				await vi.waitFor(() => assert.equal(h.requests.length, requestCount));
 			if (cancel === "signal") controller.abort();
 			else if (cancel === "session_start")
 				await h.events.get("session_start")?.[0]?.({ reason: "resume" }, h.ctx);
@@ -484,11 +693,11 @@ for (const stage of ["auth", "request"] as const) {
 					{ reason: cancel === "reload" ? "reload" : "exit" },
 					h.ctx,
 				);
-			if (stage === "request") assert.equal(h.requests[0].options?.signal?.aborted, true);
+			if (requestCount > 0) assert.equal(h.requests.at(-1)?.options?.signal?.aborted, true);
 			authGate.resolve(auth);
 			requestGate.resolve(response());
 			assert.deepEqual(await result, { cancel: true });
-			assert.equal(h.requests.length, stage === "auth" ? 0 : 1);
+			assert.equal(h.requests.length, requestCount);
 			assert.deepEqual(h.notifications, []);
 			assert.deepEqual(h.setModels, []);
 			assert.deepEqual(h.thinkingLevels, []);
