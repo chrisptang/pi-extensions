@@ -83,9 +83,9 @@ describe("GPT discipline prompt files", () => {
 		});
 	}
 
-	it("falls back to the bundled eight rules without creating directories", () => {
+	it("falls back to the bundled ten rules without creating directories", () => {
 		assert.equal(resolvePrompt({ cwd, agentDir, projectTrusted: true }).text, GPT_DISCIPLINE_RULES);
-		assert.equal(GPT_DISCIPLINE_RULES.match(/^\d\. 【/gm)?.length, 8);
+		assert.equal(GPT_DISCIPLINE_RULES.match(/^\d+\. 【/gm)?.length, 10);
 		assert.deepEqual(fs.readdirSync(root), []);
 	});
 
